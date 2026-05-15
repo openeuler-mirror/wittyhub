@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=skillhub
+      - POSTGRES_PASSWORD=skillhub_secret
+      - POSTGRES_DB=skillhub
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - skillhub-network
+
+  search:
+    image: getmeili/meilisearch:v1.6
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_MASTER_KEY=skillhub_search_key
+    networks:
+      - skillhub-network
+
+volumes:
+  postgres-data:
+
+networks:
+  skillhub-network:
+    driver: bridge

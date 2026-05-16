@@ -116,7 +116,7 @@ const copyCliCommand = async () => {
     </div>
 
     <div v-else-if="skill" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <!-- Left Column - Main Info -->
+      <!-- Left Column - Main Info (2/3) -->
       <div class="lg:col-span-2 space-y-6">
         <!-- Header -->
         <div>
@@ -190,10 +190,24 @@ const copyCliCommand = async () => {
           <p class="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{{ skill.description || '暂无描述' }}</p>
         </div>
 
+        <!-- Content (skill.md) -->
+        <div v-if="skill.content" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">详情</h2>
+          <div class="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-sm">
+            {{ skill.content }}</div>
+        </div>
+        <div v-else class="bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6 text-center">
+          <p class="text-gray-500 dark:text-gray-400">暂无详情内容</p>
+          <p class="text-xs text-gray-400 mt-2">内容将在本地安装后显示</p>
+        </div>
+      </div>
+
+      <!-- Right Column - Sidebar (1/3) -->
+      <div class="lg:col-span-1 space-y-6">
         <!-- Meta -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">信息</h2>
-          <dl class="grid grid-cols-2 gap-4">
+          <dl class="space-y-3">
             <div>
               <dt class="text-sm text-gray-500 dark:text-gray-400">分类</dt>
               <dd class="font-medium text-gray-900 dark:text-white">{{ skill.category || '-' }}</dd>
@@ -274,19 +288,6 @@ const copyCliCommand = async () => {
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- Right Column - Skill Content (skill.md) -->
-      <div class="lg:col-span-1">
-        <div v-if="skill.content" class="sticky top-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">详情</h2>
-          <div class="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-sm overflow-auto max-h-[calc(100vh-200px)]">
-            {{ skill.content }}</div>
-        </div>
-        <div v-else class="sticky top-4 bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6 text-center">
-          <p class="text-gray-500 dark:text-gray-400">暂无详情内容</p>
-          <p class="text-xs text-gray-400 mt-2">内容将在本地安装后显示</p>
         </div>
       </div>
     </div>

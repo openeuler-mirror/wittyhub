@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
 import type { Skill, SecurityAudit } from '@/api/types'
 import SecurityBadge from '@/components/SecurityBadge.vue'
+import { marked } from 'marked'
 
 const route = useRoute()
 const skill = ref<Skill | null>(null)
@@ -20,6 +21,11 @@ const currentSkillId = computed(() => {
   const repo = route.params.repo as string
   const name = route.params.name as string
   return `${repo}/${name}:${selectedVersion.value}`
+})
+
+const renderedContent = computed(() => {
+  if (!skill.value?.content) return ''
+  return marked(skill.value.content)
 })
 
 const downloadUrl = computed(() => {
@@ -193,8 +199,7 @@ const copyCliCommand = async () => {
         <!-- Content (skill.md) -->
         <div v-if="skill.content" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
           <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">详情</h2>
-          <div class="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-300 whitespace-pre-wrap text-sm">
-            {{ skill.content }}</div>
+          <div class="prose dark:prose-invert max-w-none text-gray-600 dark:text-gray-300 text-sm" v-html="renderedContent"></div>
         </div>
         <div v-else class="bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6 text-center">
           <p class="text-gray-500 dark:text-gray-400">暂无详情内容</p>

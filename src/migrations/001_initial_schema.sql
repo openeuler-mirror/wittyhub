@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS security_audits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     resource_type VARCHAR(20) NOT NULL,
     resource_id UUID NOT NULL,
+    version VARCHAR(50),
+    commit_id VARCHAR(40),
     audit_type VARCHAR(50) NOT NULL,
     risk_level VARCHAR(20) NOT NULL,
     risk_signals JSONB DEFAULT '[]',
@@ -66,6 +68,7 @@ CREATE TABLE IF NOT EXISTS security_audits (
 CREATE INDEX idx_audits_resource ON security_audits(resource_type, resource_id);
 CREATE INDEX idx_audits_risk_level ON security_audits(risk_level);
 CREATE INDEX idx_audits_audited_at ON security_audits(audited_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audits_version ON security_audits(resource_id, version, commit_id);
 
 -- Download history table
 CREATE TABLE IF NOT EXISTS download_history (

@@ -58,30 +58,42 @@ const browseUrl = computed(() => {
 })
 
 onMounted(async () => {
-  const repo = route.params.repo as string
+  const repo = route.params.repo as string | undefined
   const name = route.params.name as string
   loading.value = true
   try {
-    const baseSkillId = `${repo}/${name}`
-    const versionsRes = await api.getSkillVersions(repo, name)
-    versions.value = versionsRes.versions
+    if (repo && name) {
+      const baseSkillId = `${repo}/${name}`
+      const versionsRes = await api.getSkillVersions(repo, name)
+      versions.value = versionsRes.versions
 
-    if (versionsRes.versions.length > 0) {
-      const latestVersion = versionsRes.versions[0]
-      selectedVersion.value = latestVersion.version || 'main'
-      selectedCommitId.value = latestVersion.commit_id
-      const versionedSkillId = `${repo}/${name}:${selectedVersion.value}`
-      skill.value = await api.getSkill(versionedSkillId)
-      const auditRes = await api.getSkillAudit(versionedSkillId)
-      if ('error' in auditRes) {
-        audit.value = null
+      if (versionsRes.versions.length > 0) {
+        const latestVersion = versionsRes.versions[0]
+        selectedVersion.value = latestVersion.version || 'main'
+        selectedCommitId.value = latestVersion.commit_id
+        const versionedSkillId = `${repo}/${name}:${selectedVersion.value}`
+        skill.value = await api.getSkill(versionedSkillId)
+        const auditRes = await api.getSkillAudit(versionedSkillId)
+        if ('error' in auditRes) {
+          audit.value = null
+        } else {
+          audit.value = auditRes
+        }
       } else {
-        audit.value = auditRes
+        skill.value = await api.getSkill(baseSkillId)
+        if (skill.value) {
+          const auditRes = await api.getSkillAudit(baseSkillId)
+          if ('error' in auditRes) {
+            audit.value = null
+          } else {
+            audit.value = auditRes
+          }
+        }
       }
     } else {
-      skill.value = await api.getSkill(baseSkillId)
+      skill.value = await api.getSkill(name)
       if (skill.value) {
-        const auditRes = await api.getSkillAudit(baseSkillId)
+        const auditRes = await api.getSkillAudit(name)
         if ('error' in auditRes) {
           audit.value = null
         } else {
@@ -97,12 +109,12 @@ onMounted(async () => {
 })
 
 const selectVersion = async (version: string) => {
-  const repo = route.params.repo as string
+  const repo = route.params.repo as string | undefined
   const name = route.params.name as string
   selectedVersion.value = version
   const versionObj = versions.value.find(v => v.version === version)
   selectedCommitId.value = versionObj?.commit_id || null
-  const versionedSkillId = `${repo}/${name}:${version}`
+  const versionedSkillId = repo ? `${repo}/${name}:${version}` : `${name}:${version}`
   try {
     skill.value = await api.getSkill(versionedSkillId)
     const auditRes = await api.getSkillAudit(versionedSkillId)

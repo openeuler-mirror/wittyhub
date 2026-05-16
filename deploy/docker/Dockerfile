@@ -2,15 +2,25 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|http://deb.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
-RUN pip install -e .
+COPY pyproject.toml README.md ./
 
-COPY . .
+RUN pip install --no-cache-dir -e .
+
+COPY api ./api
+COPY core ./core
+COPY cli ./cli
+COPY security ./security
+COPY indexer ./indexer
+COPY storage ./storage
+COPY utils ./utils
+COPY migrations ./migrations
+COPY alembic.ini ./
 
 RUN mkdir -p /data/skills
 
@@ -18,5 +28,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8080/api/v1/health').raise_for_status()"
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]

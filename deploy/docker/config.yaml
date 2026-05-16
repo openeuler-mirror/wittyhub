@@ -1,0 +1,30 @@
+database:
+  host: skillhub-db
+  port: 5432
+  user: skillhub
+  password: skillhub_secret
+  dbname: skillhub
+  sslmode: disable
+
+meilisearch:
+  host: http://skillhub-search:7700
+  api_key: skillhub_search_key
+
+storage:
+  type: local
+  local_path: /data/skills
+  github_token: ""
+
+security:
+  socket_api_key: ""
+  enable_audit: true
+
+app:
+  host: 0.0.0.0
+  port: 8080
+  cors_origins:
+    - "*"
+
+logging:
+  level: INFO
+  format: json

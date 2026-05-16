@@ -18,7 +18,6 @@ coverage.html
 *_test.go
 
 # Docs
-*.md
 docs/
 
 # Docker

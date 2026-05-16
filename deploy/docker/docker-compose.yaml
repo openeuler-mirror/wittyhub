@@ -11,6 +11,11 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - skillhub-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillhub -d skillhub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   search:
     image: getmeili/meilisearch:v1.6
@@ -20,9 +25,59 @@ services:
       - MEILI_MASTER_KEY=skillhub_search_key
     networks:
       - skillhub-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8081:8080"
+    environment:
+      - SKILLHUB_CONFIG=/app/config.yaml
+      - DATABASE__HOST=db
+      - DATABASE__PORT=5432
+      - DATABASE__USER=skillhub
+      - DATABASE__PASSWORD=skillhub_secret
+      - DATABASE__DBNAME=skillhub
+      - MEILISEARCH__HOST=http://search:7700
+      - MEILISEARCH__API_KEY=skillhub_search_key
+    volumes:
+      - ../../config.yaml:/app/config.yaml:ro
+      - skill-data:/data/skills
+    networks:
+      - skillhub-network
+    depends_on:
+      db:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/api/v1/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../../web/dist:/usr/share/nginx/html:ro
+    networks:
+      - skillhub-network
+    depends_on:
+      - api
 
 volumes:
   postgres-data:
+  skill-data:
 
 networks:
   skillhub-network:

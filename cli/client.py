@@ -1,7 +1,7 @@
 import httpx
 from typing import Any
 
-from core.config import get_settings
+from src.core.config import get_settings
 
 settings = get_settings()
 

@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from src.api.main import app
 
 
 @pytest.fixture
@@ -34,3 +34,19 @@ def test_search_endpoint(client):
     data = response.json()
     assert "results" in data
     assert "total" in data
+
+
+def test_categories_endpoint(client):
+    response = client.get("/api/v1/index/categories")
+    assert response.status_code == 200
+    data = response.json()
+    assert "categories" in data
+
+
+def test_stats_endpoint(client):
+    response = client.get("/api/v1/index/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_skills" in data
+    assert "total_categories" in data
+    assert "categories" in data

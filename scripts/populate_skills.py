@@ -12,7 +12,7 @@ settings = get_settings()
 
 
 def generate_skill_id(source_url: str, name: str, version: str = "main") -> str:
-    """Generate unique skill_id from source_url and name in repo/name:version format"""
+    """Generate unique skill_id from source_url and name in author/skill-name:version format"""
     match = re.search(r'https?://github\.com/([^/]+)/([^/]+)', source_url)
     if match:
         owner, repo = match.groups()

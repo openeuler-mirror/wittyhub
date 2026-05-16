@@ -168,6 +168,7 @@ def install(
 
         target = Path(target_dir) if target_dir else Path.home() / ".agents" / "skills"
         target_skill_dir = target / skill_name
+        preserve_structure = True
 
         console.print(f"[cyan]Installing {skill_name} to {target_skill_dir}...[/cyan]")
 
@@ -190,29 +191,32 @@ def install(
 
                 skills_prefix = f"{repo_root}/skills/" if repo_root else "skills/"
                 skill_prefix = None
-                skill_files = []
+                skill_relative_path = None
 
                 for name in zip_ref.namelist():
                     if not name.startswith(skills_prefix):
                         continue
                     relative = name[len(skills_prefix):]
                     parts = relative.split("/")
-                    if len(parts) >= 2 and parts[0] and parts[1]:
-                        skill_subfolder = parts[1]
+                    if len(parts) >= 1 and parts[0]:
+                        skill_subfolder = parts[0]
                         if skill_subfolder == skill_name or skill_subfolder == skill_name.replace("/", "-"):
-                            skill_prefix = f"{skills_prefix}{parts[0]}/{parts[1]}/"
+                            skill_prefix = f"{skills_prefix}{parts[0]}/"
+                            skill_relative_path = parts[0]
                             break
 
                 if not skill_prefix:
+                    skill_name_slug = skill_name.replace("-", "").replace("_", "").lower()
                     for name in zip_ref.namelist():
                         if not name.startswith(skills_prefix):
                             continue
                         relative = name[len(skills_prefix):]
                         parts = relative.split("/")
                         if len(parts) >= 2 and parts[0] and parts[1]:
-                            skill_subfolder = parts[1]
-                            if skill_subfolder.replace("-", "").replace("_", "").lower().startswith(skill_name.replace("-", "").replace("_", "").lower()[:10]):
+                            combined = f"{parts[0]}/{parts[1]}".replace("-", "").replace("_", "").lower()
+                            if skill_name_slug in combined or combined.startswith(skill_name_slug[:15]):
                                 skill_prefix = f"{skills_prefix}{parts[0]}/{parts[1]}/"
+                                skill_relative_path = f"{parts[0]}/{parts[1]}"
                                 break
 
                 if not skill_prefix:
@@ -222,32 +226,26 @@ def install(
                     for name in zip_ref.namelist():
                         if name.startswith(skills_prefix):
                             parts = name[len(skills_prefix):].split("/")
-                            if len(parts) > 1:
-                                seen_folders.add(f"{parts[0]}/{parts[1]}")
+                            if len(parts) >= 1 and parts[0]:
+                                seen_folders.add(parts[0])
                     for folder in sorted(seen_folders)[:20]:
                         console.print(f"  - {folder}")
                     return
 
+                target_skill_dir = target / skill_relative_path if preserve_structure else target / skill_name
+
                 for name in zip_ref.namelist():
                     if name.startswith(skill_prefix):
-                        skill_files.append(name)
-
-                if not skill_files:
-                    console.print(f"[yellow]No files found for skill prefix '{skill_prefix}'[/yellow]")
-                    return
-
-                target_skill_dir.mkdir(parents=True, exist_ok=True)
-                for name in skill_files:
-                    relative_path = name[len(skill_prefix):]
-                    if relative_path:
-                        target_path = target_skill_dir / relative_path
-                        if name.endswith("/"):
-                            target_path.mkdir(parents=True, exist_ok=True)
-                        else:
-                            target_path.parent.mkdir(parents=True, exist_ok=True)
-                            with zip_ref.open(name) as source:
-                                with open(target_path, 'wb') as target_file:
-                                    target_file.write(source.read())
+                        relative_path = name[len(skill_prefix):]
+                        if relative_path:
+                            target_path = target_skill_dir / relative_path
+                            if name.endswith("/"):
+                                target_path.mkdir(parents=True, exist_ok=True)
+                            else:
+                                target_path.parent.mkdir(parents=True, exist_ok=True)
+                                with zip_ref.open(name) as source:
+                                    with open(target_path, 'wb') as target_file:
+                                        target_file.write(source.read())
 
             if target_skill_dir.exists() and any(target_skill_dir.iterdir()):
                 console.print(f"[green]Successfully installed {skill_name}![/green]")

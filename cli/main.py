@@ -182,27 +182,78 @@ def install(
             zip_data = io.BytesIO(response.read())
 
             with zipfile.ZipFile(zip_data, 'r') as zip_ref:
-                zip_ref.extractall(target)
+                repo_root = None
+                for name in zip_ref.namelist():
+                    if "/" in name and not name.startswith("."):
+                        repo_root = name.split("/")[0]
+                        break
 
-            repo_folder = None
-            for name in zip_ref.namelist():
-                if name.startswith(('.', '__')):
-                    continue
-                parts = name.split('/')
-                if len(parts) > 1:
-                    repo_folder = parts[0]
-                    break
+                skills_prefix = f"{repo_root}/skills/" if repo_root else "skills/"
+                skill_prefix = None
+                skill_files = []
 
-            if repo_folder:
-                extracted_dir = target / repo_folder
-                if extracted_dir.exists() and extracted_dir != target_skill_dir:
-                    shutil.move(str(extracted_dir), str(target_skill_dir))
+                for name in zip_ref.namelist():
+                    if not name.startswith(skills_prefix):
+                        continue
+                    relative = name[len(skills_prefix):]
+                    parts = relative.split("/")
+                    if len(parts) >= 2 and parts[0] and parts[1]:
+                        skill_subfolder = parts[1]
+                        if skill_subfolder == skill_name or skill_subfolder == skill_name.replace("/", "-"):
+                            skill_prefix = f"{skills_prefix}{parts[0]}/{parts[1]}/"
+                            break
 
-            if target_skill_dir.exists():
+                if not skill_prefix:
+                    for name in zip_ref.namelist():
+                        if not name.startswith(skills_prefix):
+                            continue
+                        relative = name[len(skills_prefix):]
+                        parts = relative.split("/")
+                        if len(parts) >= 2 and parts[0] and parts[1]:
+                            skill_subfolder = parts[1]
+                            if skill_subfolder.replace("-", "").replace("_", "").lower().startswith(skill_name.replace("-", "").replace("_", "").lower()[:10]):
+                                skill_prefix = f"{skills_prefix}{parts[0]}/{parts[1]}/"
+                                break
+
+                if not skill_prefix:
+                    console.print(f"[yellow]No skill folder found for '{skill_name}' in archive[/yellow]")
+                    console.print(f"[dim]Available skills folders in archive:[/dim]")
+                    seen_folders = set()
+                    for name in zip_ref.namelist():
+                        if name.startswith(skills_prefix):
+                            parts = name[len(skills_prefix):].split("/")
+                            if len(parts) > 1:
+                                seen_folders.add(f"{parts[0]}/{parts[1]}")
+                    for folder in sorted(seen_folders)[:20]:
+                        console.print(f"  - {folder}")
+                    return
+
+                for name in zip_ref.namelist():
+                    if name.startswith(skill_prefix):
+                        skill_files.append(name)
+
+                if not skill_files:
+                    console.print(f"[yellow]No files found for skill prefix '{skill_prefix}'[/yellow]")
+                    return
+
+                target_skill_dir.mkdir(parents=True, exist_ok=True)
+                for name in skill_files:
+                    relative_path = name[len(skill_prefix):]
+                    if relative_path:
+                        target_path = target_skill_dir / relative_path
+                        if name.endswith("/"):
+                            target_path.mkdir(parents=True, exist_ok=True)
+                        else:
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            with zip_ref.open(name) as source:
+                                with open(target_path, 'wb') as target_file:
+                                    target_file.write(source.read())
+
+            if target_skill_dir.exists() and any(target_skill_dir.iterdir()):
                 console.print(f"[green]Successfully installed {skill_name}![/green]")
                 console.print(f"[dim]Location: {target_skill_dir}[/dim]")
             else:
-                console.print(f"[yellow]Warning: Could not find extracted skill folder[/yellow]")
+                console.print(f"[yellow]Warning: Skill folder is empty[/yellow]")
 
         except Exception as e:
             console.print(f"[red]Download failed: {e}[/red]")

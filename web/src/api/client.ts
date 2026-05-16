@@ -6,6 +6,12 @@ const client = axios.create({
   timeout: 30000
 })
 
+export interface Stats {
+  total_skills: number
+  total_categories: number
+  categories: { name: string; count: number }[]
+}
+
 export const api = {
   async listSkills(params: {
     skip?: number
@@ -47,6 +53,11 @@ export const api = {
 
   async reindex(): Promise<{ status: string; indexed_count: number; total_skills: number }> {
     const { data } = await client.post('/index/reindex')
+    return data
+  },
+
+  async getStats(): Promise<Stats> {
+    const { data } = await client.get('/index/stats')
     return data
   }
 }

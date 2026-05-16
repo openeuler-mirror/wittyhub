@@ -89,6 +89,26 @@ class SkillRepository:
         )
         await self.session.flush()
 
+    async def get_stats(self) -> dict[str, Any]:
+        total_result = await self.session.execute(
+            select(func.count()).select_from(Skill)
+        )
+        total_skills = total_result.scalar() or 0
+
+        category_result = await self.session.execute(
+            select(Skill.category, func.count())
+            .group_by(Skill.category)
+            .order_by(func.count().desc())
+        )
+        categories = [{"name": row[0] or "Other", "count": row[1]} for row in category_result.fetchall()]
+        total_categories = len(categories)
+
+        return {
+            "total_skills": total_skills,
+            "total_categories": total_categories,
+            "categories": categories,
+        }
+
 
 class AgentRepository:
     def __init__(self, session: AsyncSession):

@@ -105,3 +105,16 @@ async def reindex_skill(
     await repo.update_last_indexed(skill_id)
 
     return {"status": "completed", "skill_id": skill_id}
+
+
+@router.get("/stats")
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    repo = SkillRepository(db)
+    stats = await repo.get_stats()
+    return {
+        "total_skills": stats["total_skills"],
+        "total_categories": stats["total_categories"],
+        "categories": stats["categories"][:10],
+    }

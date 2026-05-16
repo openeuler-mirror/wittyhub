@@ -66,6 +66,67 @@ async def list_skills(
     )
 
 
+@router.get("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
+async def audit_skill(
+    skill_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    repo = SkillRepository(db)
+    skill = await repo.get_by_skill_id(skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    security_service = SecurityService(db)
+    audit_repo = security_service.audit_repo
+    latest_audit = await audit_repo.get_latest_by_resource("skill", skill.id)
+
+    if latest_audit:
+        return SecurityAuditResponse(
+            id=str(latest_audit.id),
+            resource_type=latest_audit.resource_type,
+            resource_id=str(latest_audit.resource_id),
+            audit_type=latest_audit.audit_type,
+            risk_level=latest_audit.risk_level,
+            risk_signals=latest_audit.risk_signals,
+            details=latest_audit.details,
+            audited_at=latest_audit.audited_at,
+        )
+
+    return {"error": "No audit found"}
+
+
+@router.get("/{skill_id:path}/download", response_model=DownloadResponse)
+async def download_skill(
+    skill_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    repo = SkillRepository(db)
+    skill = await repo.get_by_skill_id(skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    download_manager = DownloadManager()
+    download_url = await download_manager.get_download_url(skill.source, skill.source_url)
+
+    dl_history = DownloadHistoryRepository(db)
+    await dl_history.create({
+        "resource_type": "skill",
+        "resource_id": skill.id,
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+    })
+    await repo.increment_download(skill_id)
+
+    return DownloadResponse(
+        download_url=download_url,
+        file_path=None,
+        security_audit=None,
+    )
+
+
 @router.get("/{skill_id:path}", response_model=SkillResponse | ErrorResponse)
 async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
@@ -114,64 +175,3 @@ async def delete_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Skill not found")
 
     return {"message": "Skill deleted", "skill_id": skill_id}
-
-
-@router.get("/{skill_id:path}/download", response_model=DownloadResponse)
-async def download_skill(
-    skill_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    repo = SkillRepository(db)
-    skill = await repo.get_by_skill_id(skill_id)
-
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    download_manager = DownloadManager()
-    download_url = await download_manager.get_download_url(skill.source, skill.source_url)
-
-    dl_history = DownloadHistoryRepository(db)
-    await dl_history.create({
-        "resource_type": "skill",
-        "resource_id": skill.id,
-        "ip_address": request.client.host if request.client else None,
-        "user_agent": request.headers.get("user-agent"),
-    })
-    await repo.increment_download(skill_id)
-
-    return DownloadResponse(
-        download_url=download_url,
-        file_path=None,
-        security_audit=None,
-    )
-
-
-@router.get("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
-async def audit_skill(
-    skill_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    repo = SkillRepository(db)
-    skill = await repo.get_by_skill_id(skill_id)
-
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    security_service = SecurityService(db)
-    audit_repo = security_service.audit_repo
-    latest_audit = await audit_repo.get_latest_by_resource("skill", skill.id)
-
-    if latest_audit:
-        return SecurityAuditResponse(
-            id=str(latest_audit.id),
-            resource_type=latest_audit.resource_type,
-            resource_id=str(latest_audit.resource_id),
-            audit_type=latest_audit.audit_type,
-            risk_level=latest_audit.risk_level,
-            risk_signals=latest_audit.risk_signals,
-            details=latest_audit.details,
-            audited_at=latest_audit.audited_at,
-        )
-
-    return {"error": "No audit found"}

@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -129,12 +130,84 @@ def download(
     skill_id: str,
     base_url: str | None = None,
 ):
-    """Download a skill."""
+    """Download a skill (get download URL only)."""
     client = APIClient(base_url=base_url)
 
     try:
         result = client.download_skill(skill_id)
         console.print(f"[green]Download URL:[/green] {result['download_url']}")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    finally:
+        client.close()
+
+
+@app.command()
+def install(
+    skill_id: str,
+    base_url: str | None = None,
+    target_dir: str | None = None,
+):
+    """Install a skill to ~/.agents/skills/ directory."""
+    import urllib.request
+    import zipfile
+    import io
+    import os
+    import shutil
+
+    client = APIClient(base_url=base_url)
+
+    try:
+        result = client.download_skill(skill_id)
+        download_url = result["download_url"]
+
+        skill = client.get_skill(skill_id)
+        skill_name = skill_id.split(":")[0].split("/")[-1]
+        version = skill.get("version", "main")
+
+        target = Path(target_dir) if target_dir else Path.home() / ".agents" / "skills"
+        target_skill_dir = target / skill_name
+
+        console.print(f"[cyan]Installing {skill_name} to {target_skill_dir}...[/cyan]")
+
+        target.mkdir(parents=True, exist_ok=True)
+
+        if target_skill_dir.exists():
+            shutil.rmtree(target_skill_dir)
+
+        console.print(f"[dim]Downloading from {download_url}...[/dim]")
+        try:
+            response = urllib.request.urlopen(download_url, timeout=30)
+            zip_data = io.BytesIO(response.read())
+
+            with zipfile.ZipFile(zip_data, 'r') as zip_ref:
+                zip_ref.extractall(target)
+
+            repo_folder = None
+            for name in zip_ref.namelist():
+                if name.startswith(('.', '__')):
+                    continue
+                parts = name.split('/')
+                if len(parts) > 1:
+                    repo_folder = parts[0]
+                    break
+
+            if repo_folder:
+                extracted_dir = target / repo_folder
+                if extracted_dir.exists() and extracted_dir != target_skill_dir:
+                    shutil.move(str(extracted_dir), str(target_skill_dir))
+
+            if target_skill_dir.exists():
+                console.print(f"[green]Successfully installed {skill_name}![/green]")
+                console.print(f"[dim]Location: {target_skill_dir}[/dim]")
+            else:
+                console.print(f"[yellow]Warning: Could not find extracted skill folder[/yellow]")
+
+        except Exception as e:
+            console.print(f"[red]Download failed: {e}[/red]")
+            console.print(f"[yellow]Try downloading manually:[/yellow] {download_url}")
+
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)

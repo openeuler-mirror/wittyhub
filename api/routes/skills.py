@@ -134,7 +134,7 @@ async def download_skill(
 
     download_manager = DownloadManager()
     download_url = await download_manager.get_download_url(
-        skill.source, skill.source_url, skill.skill_id, skill.version
+        skill.source, skill.source_url, skill.skill_id, skill.version, skill.commit_id
     )
 
     dl_history = DownloadHistoryRepository(db)

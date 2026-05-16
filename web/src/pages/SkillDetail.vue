@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
 import type { Skill, SecurityAudit } from '@/api/types'
@@ -9,10 +9,39 @@ const route = useRoute()
 const skill = ref<Skill | null>(null)
 const versions = ref<Skill[]>([])
 const audit = ref<SecurityAudit | null>(null)
-const downloadUrl = ref('')
 const loading = ref(true)
 const error = ref('')
 const selectedVersion = ref<string>('main')
+const selectedCommitId = ref<string | null>(null)
+const cliCopied = ref(false)
+
+const currentSkillId = computed(() => {
+  if (!skill.value) return ''
+  const repo = route.params.repo as string
+  const name = route.params.name as string
+  return `${repo}/${name}:${selectedVersion.value}`
+})
+
+const downloadUrl = computed(() => {
+  if (!skill.value) return ''
+  const version = selectedVersion.value || 'main'
+  const owner = skill.value.source_url.match(/github\.com\/([^\/]+)/)?.[1] || ''
+  const repo = skill.value.source_url.match(/github\.com\/[^\/]+\/([^\/]+)/)?.[1] || ''
+  const commitId = selectedCommitId.value
+  if (commitId) {
+    return `https://github.com/${owner}/${repo}/archive/${commitId}.zip`
+  }
+  return `https://github.com/${owner}/${repo}/archive/refs/heads/${version}.zip`
+})
+
+const browseUrl = computed(() => {
+  if (!skill.value) return ''
+  const version = selectedVersion.value || 'main'
+  const owner = skill.value.source_url.match(/github\.com\/([^\/]+)/)?.[1] || ''
+  const repo = skill.value.source_url.match(/github\.com\/[^\/]+\/([^\/]+)/)?.[1] || ''
+  const skillName = skill.value.skill_id.split(':')[0].split('/').pop() || ''
+  return `https://github.com/${owner}/${repo}/tree/${version}/skills/${skillName}`
+})
 
 onMounted(async () => {
   const repo = route.params.repo as string
@@ -23,7 +52,9 @@ onMounted(async () => {
     versions.value = versionsRes.versions
 
     if (versionsRes.versions.length > 0) {
-      selectedVersion.value = versionsRes.versions[0].version || 'main'
+      const latestVersion = versionsRes.versions[0]
+      selectedVersion.value = latestVersion.version || 'main'
+      selectedCommitId.value = latestVersion.commit_id
       const versionedSkillId = `${repo}/${name}:${selectedVersion.value}`
       skill.value = await api.getSkill(versionedSkillId)
       const auditRes = await api.getSkillAudit(versionedSkillId)
@@ -32,8 +63,6 @@ onMounted(async () => {
       } else {
         audit.value = auditRes
       }
-      const dlRes = await api.getSkillDownload(versionedSkillId)
-      downloadUrl.value = dlRes.download_url
     }
   } catch (e: any) {
     error.value = e.message || 'Failed to load skill'
@@ -46,6 +75,8 @@ const selectVersion = async (version: string) => {
   const repo = route.params.repo as string
   const name = route.params.name as string
   selectedVersion.value = version
+  const versionObj = versions.value.find(v => v.version === version)
+  selectedCommitId.value = versionObj?.commit_id || null
   const versionedSkillId = `${repo}/${name}:${version}`
   try {
     skill.value = await api.getSkill(versionedSkillId)
@@ -55,10 +86,19 @@ const selectVersion = async (version: string) => {
     } else {
       audit.value = auditRes
     }
-    const dlRes = await api.getSkillDownload(versionedSkillId)
-    downloadUrl.value = dlRes.download_url
   } catch (e: any) {
     error.value = e.message || 'Failed to load skill'
+  }
+}
+
+const copyCliCommand = async () => {
+  const command = `npx skillhub install ${currentSkillId.value}`
+  try {
+    await navigator.clipboard.writeText(command)
+    cliCopied.value = true
+    setTimeout(() => { cliCopied.value = false }, 2000)
+  } catch (e) {
+    console.error('Failed to copy:', e)
   }
 }
 </script>
@@ -105,22 +145,41 @@ const selectVersion = async (version: string) => {
       </div>
 
       <!-- Actions -->
-      <div class="flex flex-wrap gap-3">
-        <a
-          :href="downloadUrl"
-          target="_blank"
-          class="btn-primary"
-        >
-          📥 访问仓库
-        </a>
-        <a
-          :href="skill.source_url"
-          target="_blank"
-          rel="noopener"
-          class="btn-secondary"
-        >
-          🔗 查看源地址
-        </a>
+      <div class="space-y-4">
+        <div class="flex flex-wrap gap-3">
+          <a
+            :href="downloadUrl"
+            target="_blank"
+            class="btn-primary"
+          >
+            📦 下载 ZIP {{ selectedCommitId ? `(commit: ${selectedCommitId.slice(0, 7)})` : '' }}
+          </a>
+          <a
+            :href="browseUrl"
+            target="_blank"
+            rel="noopener"
+            class="btn-secondary"
+          >
+            🌐 浏览仓库
+          </a>
+        </div>
+
+        <!-- CLI Install -->
+        <div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+          <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CLI 安装</h3>
+          <div class="flex items-center gap-2">
+            <code class="flex-1 bg-gray-200 dark:bg-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200 overflow-x-auto">
+              npx skillhub install {{ currentSkillId }}
+            </code>
+            <button
+              @click="copyCliCommand"
+              class="px-3 py-2 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded text-sm"
+            >
+              {{ cliCopied ? '✓ 已复制' : '复制' }}
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">安装到 ~/.agents/skills/ 目录</p>
+        </div>
       </div>
 
       <!-- Content (skill.md) -->

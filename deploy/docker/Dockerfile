@@ -12,14 +12,8 @@ COPY pyproject.toml README.md ./
 
 RUN pip install --no-cache-dir -e .
 
-COPY api ./api
-COPY core ./core
+COPY src ./src
 COPY cli ./cli
-COPY security ./security
-COPY indexer ./indexer
-COPY storage ./storage
-COPY utils ./utils
-COPY migrations ./migrations
 COPY alembic.ini ./
 
 RUN mkdir -p /data/skills
@@ -32,4 +26,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8080/api/v1/health').raise_for_status()"
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

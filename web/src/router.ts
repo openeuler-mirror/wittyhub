@@ -15,7 +15,7 @@ const router = createRouter({
       component: () => import('@/pages/Search.vue')
     },
     {
-      path: '/skills/:slug',
+      path: '/skills/:repo/:name',
       name: 'skill-detail',
       component: () => import('@/pages/SkillDetail.vue')
     },

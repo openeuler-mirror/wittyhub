@@ -26,6 +26,25 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_versions_by_base_skill(self, source_url: str | None, skill_name: str) -> list[Skill]:
+        query = select(Skill)
+        pattern = f"{skill_name}:%"
+        query = query.where(Skill.skill_id.like(pattern))
+        if source_url:
+            query = query.where(Skill.source_url == source_url)
+        query = query.order_by(Skill.created_at.desc())
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_by_repo_and_name(self, repo: str, skill_name: str) -> list[Skill]:
+        pattern = f"{repo}/{skill_name}:%"
+        result = await self.session.execute(
+            select(Skill)
+            .where(Skill.skill_id.like(pattern))
+            .order_by(Skill.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_id(self, id: uuid.UUID) -> Skill | None:
         result = await self.session.execute(
             select(Skill).where(Skill.id == id)

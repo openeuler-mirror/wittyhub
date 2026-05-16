@@ -9,12 +9,14 @@ class SkillBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     version: str | None = Field(None, max_length=50)
+    commit_id: str | None = Field(None, max_length=40)
     author: str | None = Field(None, max_length=255)
     source: str = Field(..., max_length=50)
     source_url: str = Field(..., min_length=1)
     category: str | None = Field(None, max_length=100)
     tags: list[str] | None = None
     platform: str | None = Field(None, max_length=100)
+    content: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("source")
@@ -41,6 +43,7 @@ class SkillUpdate(BaseModel):
 
 class SkillResponse(SkillBase):
     id: str
+    content: str | None = None
     security_score: int | None = None
     download_count: int = 0
     rating: float | None = None
@@ -76,6 +79,8 @@ class SecurityAuditResponse(BaseModel):
     id: str
     resource_type: str
     resource_id: str
+    version: str | None = None
+    commit_id: str | None = None
     audit_type: str
     risk_level: str
     risk_signals: list[RiskSignalSchema]
@@ -95,3 +100,9 @@ class DownloadResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
+
+
+class SkillVersionsResponse(BaseModel):
+    source_url: str
+    skill_name: str
+    versions: list[SkillResponse]

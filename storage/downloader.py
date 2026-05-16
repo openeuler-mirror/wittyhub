@@ -19,25 +19,54 @@ class DownloadManager:
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.github_token = settings.storage.github_token
 
-    async def get_download_url(self, source: str, source_url: str) -> str:
+    async def get_download_url(self, source: str, source_url: str, skill_id: str = None, version: str = None) -> str:
         if source == "github":
-            return self._format_github_download_url(source_url)
+            return self._format_github_download_url(source_url, skill_id, version)
         elif source == "gitcode":
-            return self._format_gitcode_download_url(source_url)
+            return self._format_gitcode_download_url(source_url, skill_id, version)
+        elif source == "gitee":
+            return self._format_gitee_download_url(source_url, skill_id, version)
         else:
             return source_url
 
-    def _format_github_download_url(self, source_url: str) -> str:
-        match = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?(?:/tree/[^/]+/([^)]+))?", source_url)
+    def _format_github_download_url(self, source_url: str, skill_id: str = None, version: str = None) -> str:
+        match = re.match(r"https?://github\.com/([^/]+)/([^/]+)(?:\.git)?$", source_url)
         if match:
-            owner, repo, path = match.groups()
-            if path:
-                return f"https://raw.githubusercontent.com/{owner}/{repo}/main/{path}"
-            return f"https://github.com/{owner}/{repo}/archive/refs/heads/main.zip"
+            owner, repo = match.groups()
+            version = version or "main"
+
+            if skill_id:
+                skill_name = skill_id.split(":")[0].split("/")[-1]
+                return f"https://github.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
+
+            return f"https://github.com/{owner}/{repo}/archive/refs/heads/{version}.zip"
         return source_url
 
-    def _format_gitcode_download_url(self, source_url: str) -> str:
-        return source_url.replace("gitcode.com", "gitcode.com")
+    def _format_gitcode_download_url(self, source_url: str, skill_id: str = None, version: str = None) -> str:
+        match = re.match(r"https?://gitcode\.com/([^/]+)/([^/]+)(?:\.git)?$", source_url)
+        if match:
+            owner, repo = match.groups()
+            version = version or "main"
+
+            if skill_id:
+                skill_name = skill_id.split(":")[0].split("/")[-1]
+                return f"https://gitcode.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
+
+            return f"https://gitcode.com/{owner}/{repo}/archive/{version}.zip"
+        return source_url
+
+    def _format_gitee_download_url(self, source_url: str, skill_id: str = None, version: str = None) -> str:
+        match = re.match(r"https?://gitee\.com/([^/]+)/([^/]+)(?:\.git)?$", source_url)
+        if match:
+            owner, repo = match.groups()
+            version = version or "main"
+
+            if skill_id:
+                skill_name = skill_id.split(":")[0].split("/")[-1]
+                return f"https://gitee.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
+
+            return f"https://gitee.com/{owner}/{repo}/archive/{version}.zip"
+        return source_url
 
     async def download_to_local(
         self, source: str, source_url: str, skill_id: str

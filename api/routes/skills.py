@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models.repository import SkillRepository, DownloadHistoryRepository
@@ -12,6 +13,7 @@ from api.schemas.skill import (
     DownloadResponse,
     SecurityAuditResponse,
     ErrorResponse,
+    SkillVersionsResponse,
 )
 from api.services.security import SecurityService
 from core.database import get_db
@@ -27,6 +29,7 @@ def skill_to_response(skill) -> SkillResponse:
         name=skill.name,
         description=skill.description,
         version=skill.version,
+        commit_id=skill.commit_id,
         author=skill.author,
         source=skill.source,
         source_url=skill.source_url,
@@ -34,6 +37,7 @@ def skill_to_response(skill) -> SkillResponse:
         tags=skill.tags,
         platform=skill.platform,
         metadata=skill.extra_metadata,
+        content=skill.content,
         security_score=skill.security_score,
         download_count=skill.download_count,
         rating=skill.rating,
@@ -96,6 +100,26 @@ async def audit_skill(
     return {"error": "No audit found"}
 
 
+@router.get("/{repo}/{skill_name}/versions", response_model=SkillVersionsResponse)
+async def get_skill_versions(
+    repo: str,
+    skill_name: str,
+    db: AsyncSession = Depends(get_db),
+):
+    skill_repo = SkillRepository(db)
+    skills = await skill_repo.get_by_repo_and_name(repo, skill_name)
+
+    if not skills:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    source_url = skills[0].source_url
+    return SkillVersionsResponse(
+        source_url=source_url,
+        skill_name=skill_name,
+        versions=[skill_to_response(s) for s in skills],
+    )
+
+
 @router.get("/{skill_id:path}/download", response_model=DownloadResponse)
 async def download_skill(
     skill_id: str,
@@ -109,7 +133,9 @@ async def download_skill(
         raise HTTPException(status_code=404, detail="Skill not found")
 
     download_manager = DownloadManager()
-    download_url = await download_manager.get_download_url(skill.source, skill.source_url)
+    download_url = await download_manager.get_download_url(
+        skill.source, skill.source_url, skill.skill_id, skill.version
+    )
 
     dl_history = DownloadHistoryRepository(db)
     await dl_history.create({

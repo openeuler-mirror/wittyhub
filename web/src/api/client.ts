@@ -1,6 +1,12 @@
 import axios from 'axios'
 import type { Skill, SkillListResponse, SearchResponse, SecurityAudit, DownloadResponse } from './types'
 
+export interface SkillVersionsResponse {
+  source_url: string
+  skill_name: string
+  versions: Skill[]
+}
+
 const client = axios.create({
   baseURL: '/api/v1',
   timeout: 30000
@@ -26,6 +32,11 @@ export const api = {
 
   async getSkill(skillId: string): Promise<Skill> {
     const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}`)
+    return data
+  },
+
+  async getSkillVersions(repo: string, skillName: string): Promise<SkillVersionsResponse> {
+    const { data } = await client.get(`/skills/${repo}/${skillName}/versions`)
     return data
   },
 

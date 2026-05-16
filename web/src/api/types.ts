@@ -4,12 +4,14 @@ export interface Skill {
   name: string
   description: string | null
   version: string | null
+  commit_id: string | null
   author: string | null
   source: string
   source_url: string
   category: string | null
   tags: string[] | null
   platform: string | null
+  content: string | null
   metadata: Record<string, any>
   security_score: number | null
   download_count: number

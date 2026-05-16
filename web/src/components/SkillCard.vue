@@ -11,11 +11,26 @@ function truncate(text: string | null, length: number = 120): string {
   if (!text) return ''
   return text.length > length ? text.slice(0, length) + '...' : text
 }
+
+function getSkillRoutePath(skillId: string): string {
+  const lastColonIndex = skillId.lastIndexOf(':')
+  if (lastColonIndex > 0) {
+    const base = skillId.substring(0, lastColonIndex)
+    const firstSlashIndex = base.indexOf('/')
+    if (firstSlashIndex > 0) {
+      const owner = base.substring(0, firstSlashIndex)
+      const name = base.substring(firstSlashIndex + 1)
+      return `/skills/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+    }
+    return `/skills/${encodeURIComponent(base)}`
+  }
+  return `/skills/${encodeURIComponent(skillId)}`
+}
 </script>
 
 <template>
   <RouterLink
-    :to="`/skills/${encodeURIComponent(skill.skill_id)}`"
+    :to="getSkillRoutePath(skill.skill_id)"
     class="card block hover:border-primary-200 dark:hover:border-primary-400"
   >
     <div class="flex items-start justify-between gap-4">

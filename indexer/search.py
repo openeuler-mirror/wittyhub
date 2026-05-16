@@ -18,12 +18,18 @@ class SearchClient:
         try:
             self.client.create_index("skills", {"primaryKey": "id"})
         except meilisearch.errors.MeilisearchApiError:
-            pass
+            try:
+                self.client.update_index("skills", {"primaryKey": "id"})
+            except Exception:
+                pass
 
         try:
             self.client.create_index("agents", {"primaryKey": "id"})
         except meilisearch.errors.MeilisearchApiError:
-            pass
+            try:
+                self.client.update_index("agents", {"primaryKey": "id"})
+            except Exception:
+                pass
 
         skill_index = self.client.index("skills")
         skill_index.update_searchable_attributes([
@@ -48,11 +54,11 @@ class SearchClient:
 
     def index_skill(self, skill_data: dict[str, Any]) -> dict[str, Any]:
         index = self.client.index("skills")
-        return index.add_documents([skill_data])
+        return index.add_documents([skill_data], primaryKey="id")
 
     def index_skills(self, skills_data: list[dict[str, Any]]) -> dict[str, Any]:
         index = self.client.index("skills")
-        return index.add_documents(skills_data)
+        return index.add_documents(skills_data, primaryKey="id")
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
         index = self.client.index("skills")

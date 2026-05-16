@@ -7,30 +7,60 @@ import SecurityBadge from '@/components/SecurityBadge.vue'
 
 const route = useRoute()
 const skill = ref<Skill | null>(null)
+const versions = ref<Skill[]>([])
 const audit = ref<SecurityAudit | null>(null)
 const downloadUrl = ref('')
 const loading = ref(true)
 const error = ref('')
+const selectedVersion = ref<string>('main')
 
 onMounted(async () => {
-  const slug = decodeURIComponent(route.params.slug as string)
+  const repo = route.params.repo as string
+  const name = route.params.name as string
   loading.value = true
   try {
-    skill.value = await api.getSkill(slug)
-    const auditRes = await api.getSkillAudit(slug)
-    if ('error' in auditRes) {
-      audit.value = null
-    } else {
-      audit.value = auditRes
+    const versionsRes = await api.getSkillVersions(repo, name)
+    versions.value = versionsRes.versions
+
+    if (versionsRes.versions.length > 0) {
+      selectedVersion.value = versionsRes.versions[0].version || 'main'
+      const versionedSkillId = `${repo}/${name}:${selectedVersion.value}`
+      skill.value = await api.getSkill(versionedSkillId)
+      const auditRes = await api.getSkillAudit(versionedSkillId)
+      if ('error' in auditRes) {
+        audit.value = null
+      } else {
+        audit.value = auditRes
+      }
+      const dlRes = await api.getSkillDownload(versionedSkillId)
+      downloadUrl.value = dlRes.download_url
     }
-    const dlRes = await api.getSkillDownload(slug)
-    downloadUrl.value = dlRes.download_url
   } catch (e: any) {
     error.value = e.message || 'Failed to load skill'
   } finally {
     loading.value = false
   }
 })
+
+const selectVersion = async (version: string) => {
+  const repo = route.params.repo as string
+  const name = route.params.name as string
+  selectedVersion.value = version
+  const versionedSkillId = `${repo}/${name}:${version}`
+  try {
+    skill.value = await api.getSkill(versionedSkillId)
+    const auditRes = await api.getSkillAudit(versionedSkillId)
+    if ('error' in auditRes) {
+      audit.value = null
+    } else {
+      audit.value = auditRes
+    }
+    const dlRes = await api.getSkillDownload(versionedSkillId)
+    downloadUrl.value = dlRes.download_url
+  } catch (e: any) {
+    error.value = e.message || 'Failed to load skill'
+  }
+}
 </script>
 
 <template>
@@ -55,6 +85,25 @@ onMounted(async () => {
         <p class="text-gray-500 dark:text-gray-400">{{ skill.skill_id }}</p>
       </div>
 
+      <!-- Version Selector -->
+      <div v-if="versions.length > 1" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">版本选择</h3>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="v in versions"
+            :key="v.version || 'main'"
+            @click="selectVersion(v.version || 'main')"
+            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            :class="{
+              'bg-blue-500 text-white': selectedVersion === v.version,
+              'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600': selectedVersion !== v.version
+            }"
+          >
+            {{ v.version }}{{ v.commit_id ? ` (${v.commit_id.slice(0, 7)})` : '' }}
+          </button>
+        </div>
+      </div>
+
       <!-- Actions -->
       <div class="flex flex-wrap gap-3">
         <a
@@ -72,6 +121,12 @@ onMounted(async () => {
         >
           🔗 查看源地址
         </a>
+      </div>
+
+      <!-- Content (skill.md) -->
+      <div v-if="skill.content" class="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">详情</h2>
+        <div class="prose dark:prose-invert max-w-none whitespace-pre-wrap text-gray-600 dark:text-gray-300">{{ skill.content }}</div>
       </div>
 
       <!-- Description -->
@@ -99,6 +154,14 @@ onMounted(async () => {
           <div>
             <dt class="text-sm text-gray-500 dark:text-gray-400">下载量</dt>
             <dd class="font-medium text-gray-900 dark:text-white">{{ skill.download_count.toLocaleString() }}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-gray-500 dark:text-gray-400">版本</dt>
+            <dd class="font-medium text-gray-900 dark:text-white">{{ skill.version || '-' }}</dd>
+          </div>
+          <div v-if="skill.commit_id">
+            <dt class="text-sm text-gray-500 dark:text-gray-400">Commit</dt>
+            <dd class="font-medium text-gray-900 dark:text-white font-mono text-xs">{{ skill.commit_id }}</dd>
           </div>
         </dl>
       </div>

@@ -17,6 +17,21 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+function getSkillRoutePath(skillId: string): string {
+  const lastColonIndex = skillId.lastIndexOf(':')
+  if (lastColonIndex > 0) {
+    const base = skillId.substring(0, lastColonIndex)
+    const firstSlashIndex = base.indexOf('/')
+    if (firstSlashIndex > 0) {
+      const owner = base.substring(0, firstSlashIndex)
+      const name = base.substring(firstSlashIndex + 1)
+      return `/skills/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+    }
+    return `/skills/${encodeURIComponent(base)}`
+  }
+  return `/skills/${encodeURIComponent(skillId)}`
+}
 </script>
 
 <template>
@@ -48,7 +63,7 @@ onMounted(async () => {
         </div>
         <div class="flex-1 min-w-0">
           <RouterLink
-            :to="`/skills/${encodeURIComponent(skill.skill_id)}`"
+            :to="getSkillRoutePath(skill.skill_id)"
             class="font-medium text-gray-900 hover:text-primary-500 dark:text-white dark:hover:text-primary-400"
           >
             {{ skill.name }}

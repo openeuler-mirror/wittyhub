@@ -1,9 +1,47 @@
 import random
 import uuid
+import re
+import httpx
 from datetime import datetime, timedelta
 
 from core.database import get_sync_db, sync_engine
+from core.config import get_settings
 from api.models.models import Base, Skill, Agent
+
+settings = get_settings()
+
+
+def generate_skill_id(source_url: str, name: str, version: str = "main") -> str:
+    """Generate unique skill_id from source_url and name in repo/name:version format"""
+    match = re.search(r'https?://github\.com/([^/]+)/([^/]+)', source_url)
+    if match:
+        owner, repo = match.groups()
+        skill_slug = name.lower().replace(' ', '-')
+        return f"{owner}/{skill_slug}:{version}"
+    return f"{name.lower().replace(' ', '-')}:{version}"
+
+
+def fetch_skill_content(source_url: str, skill_name: str, version: str = "main") -> str | None:
+    """Fetch skill.md content from GitHub"""
+    match = re.search(r'https?://github\.com/([^/]+)/([^/]+)', source_url)
+    if not match:
+        return None
+
+    owner, repo = match.groups()
+    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/skills/{skill_name}/skill.md"
+
+    headers = {}
+    if settings.storage.github_token:
+        headers["Authorization"] = f"token {settings.storage.github_token}"
+
+    try:
+        response = httpx.get(raw_url, headers=headers, timeout=10.0)
+        if response.status_code == 200:
+            return response.text
+    except Exception:
+        pass
+
+    return None
 
 
 SKILLS_DATA = [
@@ -184,12 +222,17 @@ def populate_skills():
         return
 
     for i, data in enumerate(SKILLS_DATA):
+        version = data.get("version", "main")
+        skill_id = generate_skill_id(data["source_url"], data["name"], version)
+        skill_name_slug = data["name"].lower().replace(' ', '-')
+        content = fetch_skill_content(data["source_url"], skill_name_slug, version)
         skill = Skill(
             id=uuid.uuid4(),
-            skill_id=data["skill_id"],
+            skill_id=skill_id,
             name=data["name"],
             description=data["description"],
-            version="1.0.0",
+            version=version,
+            commit_id=data.get("commit_id"),
             author=data["author"],
             source=data["source"],
             source_url=data["source_url"],
@@ -197,6 +240,7 @@ def populate_skills():
             tags=data["tags"],
             platform=data.get("platform", "claude"),
             extra_metadata={},
+            content=content,
             security_score=random.randint(70, 100),
             download_count=data.get("download_count", random.randint(1000, 100000)),
             rating=data.get("rating", f"{random.uniform(4.0, 5.0):.1f}"),

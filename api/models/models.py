@@ -15,10 +15,11 @@ class Skill(Base):
     __tablename__ = "skills"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    skill_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    skill_id: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -26,6 +27,7 @@ class Skill(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     platform: Mapped[str | None] = mapped_column(String(100), nullable=True)
     extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
     security_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
     rating: Mapped[float | None] = mapped_column(String(10), nullable=True)
@@ -43,6 +45,7 @@ class Skill(Base):
         Index("idx_skills_source", "source"),
         Index("idx_skills_created_at", desc("created_at")),
         Index("idx_skills_tags", "tags", postgresql_using="gin"),
+        Index("idx_skills_unique", "source", "source_url", "version", "commit_id", unique=True),
     )
 
 
@@ -81,6 +84,8 @@ class SecurityAudit(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     resource_type: Mapped[str] = mapped_column(String(20), nullable=False)
     resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     audit_type: Mapped[str] = mapped_column(String(50), nullable=False)
     risk_level: Mapped[str] = mapped_column(String(20), nullable=False)
     risk_signals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
@@ -93,6 +98,7 @@ class SecurityAudit(Base):
         Index("idx_audits_resource", "resource_type", "resource_id"),
         Index("idx_audits_risk_level", "risk_level"),
         Index("idx_audits_audited_at", desc("audited_at")),
+        Index("idx_audits_version", "resource_id", "version", "commit_id"),
     )
 
 

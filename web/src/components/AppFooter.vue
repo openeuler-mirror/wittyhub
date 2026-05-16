@@ -12,7 +12,6 @@
         <div class="text-sm text-gray-400 dark:text-gray-500">
           <p>Copyright © 2026 SkillHub. 精选 AI Skills 推荐平台</p>
           <p class="mt-1">技能数据来源于 GitHub、Gitee、GitCode 及用户自主上传</p>
-          <p class="mt-1">京ICP备11018762号-10</p>
         </div>
       </div>
     </div>

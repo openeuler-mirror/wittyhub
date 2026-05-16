@@ -5,7 +5,14 @@ import { api } from '@/api/client'
 import type { Skill, SecurityAudit } from '@/api/types'
 import SecurityBadge from '@/components/SecurityBadge.vue'
 import { marked } from 'marked'
-import matter from 'gray-matter'
+
+function stripFrontmatter(content: string): string {
+  const match = content.match(/^---\n[\s\S]*?\n---\n?/)
+  if (match) {
+    return content.slice(match[0].length).trim()
+  }
+  return content
+}
 
 const route = useRoute()
 const skill = ref<Skill | null>(null)
@@ -26,8 +33,7 @@ const currentSkillId = computed(() => {
 
 const renderedContent = computed(() => {
   if (!skill.value?.content) return ''
-  const { content } = matter(skill.value.content)
-  return marked(content)
+  return marked(stripFrontmatter(skill.value.content))
 })
 
 const downloadUrl = computed(() => {

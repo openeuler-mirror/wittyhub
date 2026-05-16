@@ -21,7 +21,7 @@ const hasMore = ref(true)
 let observer: IntersectionObserver | null = null
 const loadMoreTrigger = ref<HTMLElement | null>(null)
 
-const categories = ['Development', 'Marketing', 'AI', 'Cloud', 'Design', 'Security']
+const categories = ref<{ name: string; count: number }[]>([])
 const securityLevels = [
   { label: '高安全 (90+)', value: 'high', min: 90 },
   { label: '中安全 (80-89)', value: 'medium', min: 80 },
@@ -141,8 +141,14 @@ watch(loadMoreTrigger, () => {
   setupObserver()
 })
 
-onMounted(() => {
+onMounted(async () => {
   setupObserver()
+  try {
+    const res = await api.getCategories()
+    categories.value = res.categories
+  } catch (e) {
+    console.error('Failed to load categories:', e)
+  }
 })
 
 onUnmounted(() => {
@@ -170,14 +176,14 @@ onUnmounted(() => {
       <div class="flex flex-wrap gap-2">
         <button
           v-for="cat in categories"
-          :key="cat"
-          @click="selectCategory(cat)"
+          :key="cat.name"
+          @click="selectCategory(cat.name)"
           class="px-3 py-1.5 text-sm rounded-full transition-colors"
-          :class="selectedCategory === cat
+          :class="selectedCategory === cat.name
             ? 'bg-primary-500 text-white'
             : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'"
         >
-          {{ cat }}
+          {{ cat.name }} ({{ cat.count }})
         </button>
       </div>
     </div>

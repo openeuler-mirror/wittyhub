@@ -19,9 +19,8 @@ function handleSearch() {
         v-model="query"
         type="text"
         placeholder="搜索 Skill..."
-        class="input pl-10 pr-20 py-3 text-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white"
+        class="input pl-4 pr-24 py-3 text-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white"
       />
-      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
       <button
         type="submit"
         class="absolute right-2 top-1/2 -translate-y-1/2 btn-primary py-1.5 px-4 text-sm"

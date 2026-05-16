@@ -62,6 +62,7 @@ onMounted(async () => {
   const name = route.params.name as string
   loading.value = true
   try {
+    const baseSkillId = `${repo}/${name}`
     const versionsRes = await api.getSkillVersions(repo, name)
     versions.value = versionsRes.versions
 
@@ -76,6 +77,16 @@ onMounted(async () => {
         audit.value = null
       } else {
         audit.value = auditRes
+      }
+    } else {
+      skill.value = await api.getSkill(baseSkillId)
+      if (skill.value) {
+        const auditRes = await api.getSkillAudit(baseSkillId)
+        if ('error' in auditRes) {
+          audit.value = null
+        } else {
+          audit.value = auditRes
+        }
       }
     }
   } catch (e: any) {

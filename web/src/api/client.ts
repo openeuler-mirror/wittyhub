@@ -70,5 +70,10 @@ export const api = {
   async getStats(): Promise<Stats> {
     const { data } = await client.get('/index/stats')
     return data
+  },
+
+  async getCategories(): Promise<{ categories: { name: string; count: number }[] }> {
+    const { data } = await client.get('/index/categories')
+    return data
   }
 }

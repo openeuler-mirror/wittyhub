@@ -64,51 +64,14 @@ class TestSkillRepositoryUnit:
         assert response.name == "test-skill"
 
 
-class TestSearchClient:
-    async def test_search_client_initialization(self):
-        from src.indexer.search import SearchClient
+class TestSearchService:
+    async def test_search_service_initialization(self):
+        from src.indexer.search import SearchService
 
-        with patch("src.indexer.search.meilisearch.Client") as mock_client:
-            mock_client.return_value.index.return_value.search.return_value = {
-                "hits": [],
-                "estimatedTotalHits": 0,
-            }
-            client = SearchClient()
-            assert client is not None
-
-    async def test_search_skills_returns_results(self):
-        from src.indexer.search import SearchClient
-
-        with patch("src.indexer.search.meilisearch.Client") as mock_client:
-            mock_index = MagicMock()
-            mock_index.search.return_value = {
-                "hits": [
-                    {"name": "test-skill", "skill_id": "test/skill:v1.0.0"}
-                ],
-                "estimatedTotalHits": 1,
-            }
-            mock_client.return_value.index.return_value = mock_index
-
-            client = SearchClient()
-            results = client.search_skills(query="test", limit=10)
-            assert len(results["hits"]) == 1
-            assert results["hits"][0]["name"] == "test-skill"
-
-    async def test_index_skills_adds_documents(self):
-        from src.indexer.search import SearchClient
-
-        with patch("src.indexer.search.meilisearch.Client") as mock_client:
-            mock_index = MagicMock()
-            mock_index.add_documents.return_value = {"taskUid": 1}
-            mock_client.return_value.index.return_value = mock_index
-
-            client = SearchClient()
-            skills_data = [
-                {"id": "1", "name": "skill1", "skill_id": "test/skill1:v1.0.0"}
-            ]
-            result = client.index_skills(skills_data)
-            assert result is not None
-            mock_index.add_documents.assert_called_once()
+        mock_session = MagicMock()
+        service = SearchService(mock_session)
+        assert service is not None
+        assert service.session == mock_session
 
 
 class TestConfig:
@@ -119,8 +82,6 @@ class TestConfig:
             "os.environ",
             {
                 "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/skillhub",
-                "MEILISEARCH_HOST": "http://localhost:7700",
-                "MEILISEARCH_API_KEY": "test_key",
             },
         ):
             settings = get_settings()

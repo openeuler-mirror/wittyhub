@@ -6,10 +6,6 @@ database:
   dbname: skillhub
   sslmode: disable
 
-meilisearch:
-  host: http://skillhub-search:7700
-  api_key: skillhub_search_key
-
 storage:
   type: local
   local_path: /data/skills
@@ -18,6 +14,12 @@ storage:
 security:
   socket_api_key: ""
   enable_audit: true
+
+ai:
+  embedding_model: "bge-base-zh-v1.5"
+  embedding_host: "http://localhost:8081"
+  embedding_dimension: 768
+  enable_semantic_search: true
 
 app:
   host: 0.0.0.0

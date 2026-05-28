@@ -4,33 +4,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.models.repository import SkillRepository
-from src.api.schemas.skill import SkillResponse
 from src.core.database import get_db
-from src.indexer.search import get_search_client, SearchClient
+from src.indexer.search import SearchService
+from src.ai.embedding import generate_embeddings, prepare_skill_text
+
 
 router = APIRouter()
-
-
-def skill_to_dict(skill) -> dict[str, Any]:
-    return {
-        "id": str(skill.id),
-        "skill_id": skill.skill_id,
-        "name": skill.name,
-        "description": skill.description,
-        "version": skill.version,
-        "author": skill.author,
-        "source": skill.source,
-        "source_url": skill.source_url,
-        "category": skill.category,
-        "tags": skill.tags or [],
-        "platform": skill.platform,
-        "metadata": skill.extra_metadata,
-        "security_score": skill.security_score,
-        "download_count": skill.download_count,
-        "rating": skill.rating,
-        "created_at": skill.created_at.isoformat() if skill.created_at else None,
-        "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
-    }
 
 
 @router.get("/search")
@@ -41,49 +20,57 @@ async def search(
     category: str | None = None,
     platform: str | None = None,
     tags: str | None = None,
-    search_client: SearchClient = Depends(get_search_client),
+    mode: str = Query("hybrid", regex="^(text|semantic|hybrid)$"),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    filters = {}
-    if category:
-        filters["category"] = category
-    if platform:
-        filters["platform"] = platform
-    if tags:
-        filters["tags"] = tags.split(",")
+    tag_list = tags.split(",") if tags else None
+    embedding = None
 
-    results = search_client.search_skills(
+    if mode in ("semantic", "hybrid"):
+        try:
+            embeddings = await generate_embeddings([q])
+            embedding = embeddings[0] if embeddings else None
+        except Exception:
+            embedding = None
+            mode = "text"
+
+    search_service = SearchService(db)
+    results = await search_service.search_skills(
         query=q,
         limit=limit,
         offset=skip,
-        filters=filters if filters else None,
+        category=category,
+        platform=platform,
+        tags=tag_list,
+        embedding=embedding,
+        mode=mode,
     )
 
-    return {
-        "results": results.get("hits", []),
-        "total": results.get("estimatedTotalHits", 0),
-        "query": q,
-        "skip": skip,
-        "limit": limit,
-        "processing_time_ms": results.get("processingTimeMs", 0),
-    }
+    return results
 
 
 @router.post("/reindex")
 async def reindex(
     db: AsyncSession = Depends(get_db),
-    search_client: SearchClient = Depends(get_search_client),
 ) -> dict[str, Any]:
     repo = SkillRepository(db)
     skills, total = await repo.list(skip=0, limit=1000)
 
-    skills_data = [skill_to_dict(s) for s in skills]
-
-    if skills_data:
-        search_client.index_skills(skills_data)
+    indexed_count = 0
+    for skill in skills:
+        try:
+            text = prepare_skill_text(skill)
+            if text.strip():
+                embeddings = await generate_embeddings([text])
+                if embeddings and embeddings[0]:
+                    await repo.update_embedding(skill.skill_id, embeddings[0])
+                    indexed_count += 1
+        except Exception:
+            continue
 
     return {
         "status": "completed",
-        "indexed_count": len(skills_data),
+        "indexed_count": indexed_count,
         "total_skills": total,
     }
 
@@ -92,7 +79,6 @@ async def reindex(
 async def reindex_skill(
     skill_id: str,
     db: AsyncSession = Depends(get_db),
-    search_client: SearchClient = Depends(get_search_client),
 ) -> dict[str, Any]:
     repo = SkillRepository(db)
     skill = await repo.get_by_skill_id(skill_id)
@@ -100,10 +86,17 @@ async def reindex_skill(
     if not skill:
         return {"status": "error", "message": "Skill not found"}
 
-    skill_dict = skill_to_dict(skill)
-    search_client.index_skill(skill_dict)
-    await repo.update_last_indexed(skill_id)
+    try:
+        text = prepare_skill_text(skill)
+        if text.strip():
+            embeddings = await generate_embeddings([text])
+            if embeddings and embeddings[0]:
+                await repo.update_embedding(skill_id, embeddings[0])
+                return {"status": "completed", "skill_id": skill_id, "embedding_generated": True}
+    except Exception as e:
+        return {"status": "completed", "skill_id": skill_id, "embedding_generated": False, "error": str(e)}
 
+    await repo.update_last_indexed(skill_id)
     return {"status": "completed", "skill_id": skill_id}
 
 

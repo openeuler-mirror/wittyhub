@@ -112,6 +112,14 @@ class SkillRepository:
         )
         await self.session.flush()
 
+    async def update_embedding(self, skill_id: str, embedding: list[float]) -> None:
+        await self.session.execute(
+            update(Skill)
+            .where(Skill.skill_id == skill_id)
+            .values(embedding=embedding, last_indexed_at=datetime.utcnow())
+        )
+        await self.session.flush()
+
     async def get_stats(self) -> dict[str, Any]:
         total_result = await self.session.execute(
             select(func.count()).select_from(Skill)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, String, Text, func, desc
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, Float, String, Text, func, desc
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -36,6 +36,7 @@ class Skill(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
 
     audits: Mapped[list["SecurityAudit"]] = relationship(back_populates="skill", cascade="all, delete-orphan")
 

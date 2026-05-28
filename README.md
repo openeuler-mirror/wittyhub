@@ -12,7 +12,7 @@ AI Agent Skills 检索与分发平台。发现、评估和获取可复用的 AI 
 
 ### 技术优势
 - **高性能** - 基于 FastAPI + Uvicorn，提供异步 API
-- **快速搜索** - Meilisearch 全文搜索引擎，毫秒级响应
+- **PostgreSQL 全文搜索** - 内置 tsvector，无需额外部署搜索引擎
 - **安全可靠** - 代码安全扫描、依赖检查、风险信号识别
 - **易于部署** - Docker Compose 一键部署
 - **现代化前端** - Vue 3 + TypeScript，支持暗色模式
@@ -20,17 +20,22 @@ AI Agent Skills 检索与分发平台。发现、评估和获取可复用的 AI 
 ## 架构
 
 ```
+PostgreSQL 单数据库:
+├── tsvector     ──► 全文搜索
+├── JSONB        ──► 灵活元数据
+└── ARRAY        ──► 标签数组
+
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   前端 Vue   │────▶│  Nginx 代理 │────▶│   FastAPI   │
 │   (Port 80) │     │             │     │  (Port 8080)│
 └─────────────┘     └─────────────┘     └─────────────┘
-                                               │
-                    ┌─────────────┬────────────┤
-                    │             │            │
-               ┌────▼────┐  ┌────▼────┐ ┌────▼────┐
-               │PostgreSQL│  │Meilisearch│ │ LocalFS │
-               │ (5432)   │  │  (7700)  │ │ /data   │
-               └──────────┘  └──────────┘ └─────────┘
+                                                │
+                     ┌─────────────┬────────────┤
+                     │             │            │
+                ┌────▼────┐  ┌────▼────┐ ┌────▼────┐
+                │PostgreSQL│  │ LocalFS │
+                │(5432)   │  │ /data   │
+                └─────────┘  └─────────┘
 ```
 
 ## 快速开始
@@ -55,9 +60,8 @@ docker-compose up -d
 
 3. 初始化数据库
 ```bash
-docker exec skillhub-api python -m src.migrations.env  # 运行迁移
-# 或使用脚本
-./scripts/init_db.sh
+docker exec skillhub-db psql -U skillhub -d skillhub -f /docker-entrypoint-initdb.d/init.sql
+docker exec skillhub-api alembic upgrade head
 ```
 
 4. 生成测试数据
@@ -67,7 +71,7 @@ docker exec skillhub-api python scripts/generate_test_data.py \
 ```
 
 5. 访问服务
-- 前端: http://localhost:8090
+- 前端: http://localhost:8080
 - API: http://localhost:8081
 - API 文档: http://localhost:8081/docs
 
@@ -159,9 +163,8 @@ skillhub/
 │   │   ├── models/       # 数据模型
 │   │   ├── schemas/      # Pydantic schemas
 │   │   └── services/     # 业务逻辑
-│   ├── cli/              # CLI 工具
 │   ├── core/             # 核心配置
-│   ├── indexer/          # 搜索引擎索引
+│   ├── indexer/          # 搜索引擎 (PostgreSQL tsvector)
 │   ├── security/         # 安全扫描
 │   ├── storage/          # 文件存储
 │   ├── migrations/       # 数据库迁移
@@ -186,15 +189,11 @@ skillhub/
 
 ```yaml
 database:
-  host: skillhub-db
+  host: localhost
   port: 5432
   user: skillhub
   password: your_password
   dbname: skillhub
-
-meilisearch:
-  host: http://skillhub-search:7700
-  api_key: your_api_key
 
 storage:
   type: local

@@ -49,13 +49,13 @@
 | R-03 | 分类标签系统 | P1 | 已实现 | 顶层大类 + 标签筛选 |
 | R-04 | Web浏览功能 | P1 | 已实现 | 首页、搜索结果、详情、分类浏览、排行榜 |
 | R-05 | 数据库索引存储 | P0 | 已实现 | PostgreSQL存储索引，不存储Skill内容 |
-| R-06 | 全文搜索引擎 | P0 | 已实现 | Meilisearch全文检索 |
+| R-06 | 全文搜索引擎 | P0 | 已实现 | PostgreSQL tsvector 全文检索 |
 | R-07 | CLI工具 | P0 | 已实现 | search, list, get, install, download, audit命令 |
 | R-08 | Web前端 | P1 | 已实现 | Vue.js + TypeScript + Tailwind CSS |
 | R-09 | Docker部署 | P0 | 已实现 | Docker Compose一键部署 |
 | R-10 | 多版本支持 | P1 | 已实现 | Skill版本管理，历史版本查询 |
 | R-11 | 爬虫自动发现 | P1 | 待开发 | 主动扫描+配置仓库触发+用户提交 |
-| R-12 | AI语义搜索 | P2 | 待开发 | 本地Embedding模型支持语义搜索 |
+| R-12 | AI语义搜索 | P2 | 已实现 | pgvector向量检索 + 混合搜索 |
 | R-13 | 排行榜功能 | P2 | 已实现 | 下载量排行榜 |
 | R-14 | 开发者页 | P2 | 待开发 | 开发者信息页 |
 | R-15 | 标签页浏览 | P2 | 待开发 | 同标签Skill列表页 |
@@ -116,12 +116,16 @@
 │  └─────────────────────────────────────────────────────────────────────────────────┘   │
 │                                          │                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
-│  │                           Data Layer (PostgreSQL + Meilisearch)                  │   │
+│  │                           Data Layer (PostgreSQL 单数据库)                       │   │
 │  │                                                                                 │   │
 │  │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │   │
-│  │   │   Skills   │  │   Agents    │  │    Index    │  │    Audit    │           │   │
-│  │   │   Table    │  │   Table     │  │  (Meilisearch)│ │   Records   │           │   │
+│  │   │   Skills   │  │   Agents    │  │  tsvector   │  │    Audit    │           │   │
+│  │   │   Table    │  │   Table     │  │ 全文搜索    │  │   Records   │           │   │
 │  │   └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘           │   │
+│  │   ┌─────────────┐  ┌─────────────┐                                                       │   │
+│  │   │  pgvector  │  │   JSONB     │                                                       │   │
+│  │   │ 向量检索   │  │  灵活元数据  │                                                       │   │
+│  │   └─────────────┘  └─────────────┘                                                       │   │
 │  └─────────────────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
                                                │
@@ -132,15 +136,9 @@
 │       Users             │     │   External Services     │     │     Data Storage        │
 │                         │     │                         │     │                         │
 │  ┌───────────────────┐ │     │  ┌─────────────────┐  │     │  ┌─────────────────┐  │
-│  │   Web Users       │ │     │  │  GitHub API     │  │     │  │  PostgreSQL     │  │
-│  │   - 搜索浏览       │ │     │  │  - 下载仓库     │  │     │  │  - 索引存储     │  │
-│  │   - 查看安全报告   │ │     │  │  - 获取内容     │  │     │  └─────────────────┘  │
-│  └───────────────────┘ │     │  └─────────────────┘  │     │                        │
-│                         │     │                        │     │  ┌─────────────────┐  │
-│  ┌───────────────────┐ │     │  ┌─────────────────┐  │     │  │  Meilisearch   │  │
-│  │   CLI Users       │ │     │  │  GitCode API   │  │     │  │  - 全文检索    │  │
-│  │   - skill search  │ │     │  │  - 下载仓库     │  │     │  └─────────────────┘  │
-│  │   - skill install │ │     │  └─────────────────┘  │     │                        │
+│  │   CLI Users       │ │     │  │  GitCode API   │  │     │  │  PostgreSQL     │  │
+│  │   - skill search  │ │     │  │  - 下载仓库     │  │     │  │  - tsvector    │  │
+│  │   - skill install │ │     │  └─────────────────┘  │     │  └─────────────────┘  │
 │  │   - skill audit   │ │     │                        │     │                        │
 │  └───────────────────┘ │     │  ┌─────────────────┐  │     │                        │
 │                         │     │  │  Gitee API     │  │     │                        │
@@ -168,7 +166,7 @@
 | Skills Module | `src/api/` | Skills 数据模型、业务逻辑 |
 | Agents Module | `src/api/` | Agents 数据模型、业务逻辑 |
 | Core Services | `src/` | 配置、数据库、搜索、安全、存储等通用能力 |
-| Data Storage | PostgreSQL + Meilisearch | 关系数据 + 全文搜索引擎 |
+| Data Storage | PostgreSQL 单数据库 | 关系数据 + 全文搜索 + JSONB |
 
 **关键设计：**
 - Security 检测归属 Core 层 (`src/security/`)
@@ -183,10 +181,15 @@
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                         │
 │  1. 搜索发现流程 (Search & Discovery)                                                   │
-│     ┌──────────┐      ┌─────────────┐      ┌──────────┐      ┌───────────────┐         │
-│     │   User   │ ───► │   Search    │ ───► │ Meilisearch│ ───► │   Results      │        │
-│     │   Query  │      │   Handler   │      │  + Filter │      │               │         │
-│     └──────────┘      └─────────────┘      └──────────┘      └───────────────┘         │
+│     ┌──────────┐      ┌─────────────┐      ┌──────────────┐      ┌───────────────┐    │
+│     │   User   │ ───► │   Search    │ ───► │   Embedding   │ ───► │  混合排序     │    │
+│     │   Query  │      │   Handler   │      │   Service     │      │   (RRF)      │    │
+│     └──────────┘      └─────────────┘      └──────────────┘      └───────────────┘    │
+│                                    │                  │                                   │
+│                          ┌─────────┴─────────┐      │                                   │
+│                          │ PostgreSQL        │      │                                   │
+│                          │ tsvector + pgvector│ ◄────┘                                   │
+│                          └───────────────────┘                                           │
 │                                                                                         │
 │  2. Skill详情获取流程 (Detail Retrieval)                                                │
 │     ┌──────────┐      ┌─────────────┐      ┌──────────────┐      ┌───────────────┐     │
@@ -206,10 +209,10 @@
 │     │   Web    │      │   Manager   │      │   Formatter  │      │   GitCode     │     │
 │     └──────────┘      └─────────────┘      └──────────────┘      └───────────────┘     │
 │                                                                                         │
-│  5. 索引同步流程 (Index Sync)                                                           │
+│  5. 全文索引流程 (Full-text Index)                                                     │
 │     ┌──────────┐      ┌─────────────┐      ┌──────────────┐      ┌───────────────┐     │
-│     │ Database │ ───► │  Indexer    │ ───► │ Meilisearch  │ ───► │ Search Index  │     │
-│     │          │      │             │      │              │      │               │     │
+│     │ Database │ ───► │  tsvector   │ ───► │ PostgreSQL   │ ───► │ Search Index  │     │
+│     │          │      │             │      │  索引        │      │               │     │
 │     └──────────┘      └─────────────┘      └──────────────┘      └───────────────┘     │
 │                                                                                         │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
@@ -223,7 +226,6 @@
 | GitCode API | REST API | 下载仓库存档（国内镜像） | JSON |
 | Gitee API | REST API | 下载仓库存档（国内平台） | JSON |
 | Socket.dev API | REST API | npm包安全检测、风险评分 | JSON |
-| Meilisearch | REST API | 全文检索、过滤、排序 | JSON |
 | Local Storage | 文件系统 | CLI安装的Skill本地存储 | 目录/文件 |
 
 ---
@@ -267,8 +269,10 @@
 | 层级 | 技术选型 | 选型理由 |
 |------|----------|----------|
 | 后端框架 | Python FastAPI | 高性能、自动化API文档、类型安全 |
-| 数据库 | PostgreSQL | 成熟稳定、JSONB支持、异步支持 |
-| 缓存/搜索引擎 | Meilisearch | 轻量高性能、中文分词支持、模糊搜索 |
+| 数据库 | PostgreSQL | 成熟稳定、JSONB支持、tsvector全文搜索、pgvector向量搜索 |
+| 全文搜索 | PostgreSQL tsvector | 内置全文搜索、中文分词支持 |
+| 向量搜索 | PostgreSQL pgvector | 内置向量存储和相似度搜索 |
+| Embedding | bge-base-zh-v1.5 | 中文效果好、开源可自部署 |
 | 前端框架 | Vue.js 3 + TypeScript | 响应式开发、类型安全、IDE支持 |
 | 样式 | Tailwind CSS | 原子化CSS，蓝色主调 |
 | CLI框架 | Typer | Python类型安全的CLI框架 |
@@ -302,7 +306,7 @@ skillhub/
 │   │   ├── config.py          # YAML 配置加载
 │   │   └── database.py        # 数据库连接
 │   ├── indexer/               # 搜索引擎
-│   │   └── search.py          # Meilisearch 封装
+│   │   └── search.py          # PostgreSQL tsvector 搜索
 │   ├── security/              # 安全检测
 │   │   └── detector.py        # Socket.dev + 静态分析
 │   ├── storage/               # 文件存储
@@ -370,7 +374,8 @@ skillhub/
 | `src/api/routes/index.py` | 搜索, 索引, 统计 | `GET /index/search`, `POST /index/reindex`, `GET /index/stats`, `GET /index/categories` |
 | `src/api/models/models.py` | SQLAlchemy 模型 | `Skill`, `Agent`, `SecurityAudit`, `DownloadHistory` |
 | `src/api/models/repository.py` | 数据库操作 | `SkillRepository`, `AgentRepository`, `SecurityAuditRepository` |
-| `src/indexer/search.py` | Meilisearch 封装 | `SearchClient.index_skill()`, `search_skills()` |
+| `src/indexer/search.py` | PostgreSQL tsvector + pgvector 混合搜索 | `SearchService.search_skills()` |
+| `src/ai/embedding.py` | Embedding 服务 | `generate_embeddings()` |
 | `src/security/detector.py` | 安全检测 | `SecurityDetector`, `StaticSecurityAnalyzer` |
 | `src/storage/downloader.py` | 下载管理 | `DownloadManager.get_download_url()` |
 | `src/core/config.py` | 配置管理 | `Settings` (从 YAML 加载) |
@@ -717,11 +722,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      meilisearch:
-        condition: service_started
     environment:
       - DATABASE_URL=postgresql://skillhub:skillhub@postgres:5432/skillhub
-      - MEILISEARCH_HOST=http://meilisearch:7700
 
   web:
     build: ./web
@@ -732,13 +734,7 @@ services:
     image: postgres:15-alpine
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  meilisearch:
-    image: getmeili/meilisearch:latest
-    volumes:
-      - meilisearch_data:/meili_data
-    environment:
-      - MEILI_MASTER_KEY=skillhub_master_key
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   nginx:
     image: nginx:alpine
@@ -756,11 +752,11 @@ services:
 ```yaml
 # config.yaml
 database:
-  url: postgresql://skillhub:skillhub@localhost:5432/skillhub
-
-meilisearch:
-  host: http://localhost:7700
-  api_key: ""
+  host: "localhost"
+  port: 5432
+  user: "skillhub"
+  password: "skillhub_secret"
+  dbname: "skillhub"
 
 storage:
   local_path: ~/.agents/skills
@@ -768,13 +764,13 @@ storage:
 
 security:
   socket_api_key: ""
-  audit_enabled: true
+  enable_audit: true
 
 app:
   host: 0.0.0.0
   port: 8000
   cors_origins:
-    - http://localhost:3000
+    - "*"
 ```
 
 ---
@@ -805,8 +801,10 @@ app:
 
 ### A. 参考资料
 
-- [Meilisearch](https://www.meilisearch.com/)
 - [FastAPI](https://fastapi.tiangolo.com/)
+- [PostgreSQL](https://www.postgresql.org/)
+- [pgvector](https://github.com/pgvector/pgvector)
+- [BGE Embedding](https://github.com/FlagOpen/FlagEmbedding)
 - [Vue.js](https://vuejs.org/)
 - [Tailwind CSS](https://tailwindcss.com/)
 - [Typer](https://typer.tiangolo.com/)
@@ -819,7 +817,10 @@ app:
 | Skill | 可复用的AI Agent能力模块 |
 | Agent | AI代理/智能体 |
 | skill_id | Skill的唯一标识符，格式为 `owner/repo/skill-name` |
-| Meilisearch | 轻量级全文搜索引擎 |
+| tsvector | PostgreSQL 内置全文搜索向量类型 |
+| pgvector | PostgreSQL 向量搜索扩展 |
+| Embedding | 文本向量表示，用于语义相似度计算 |
+| RRF | Reciprocal Rank Fusion，混合搜索排序融合算法 |
 | Socket.dev | npm包安全检测服务 |
 
 ---

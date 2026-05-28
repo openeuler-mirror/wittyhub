@@ -25,11 +25,6 @@ class DatabaseConfig(BaseSettings):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
 
 
-class MeilisearchConfig(BaseSettings):
-    host: str = "http://localhost:7700"
-    api_key: str = ""
-
-
 class StorageConfig(BaseSettings):
     type: str = "local"
     local_path: str = "./data/skills"
@@ -52,13 +47,20 @@ class LoggingConfig(BaseSettings):
     format: str = "json"
 
 
+class AIConfig(BaseSettings):
+    embedding_model: str = "bge-base-zh-v1.5"
+    embedding_host: str = "http://localhost:8081"
+    embedding_dimension: int = 768
+    enable_semantic_search: bool = True
+
+
 class Settings(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    meilisearch: MeilisearchConfig = Field(default_factory=MeilisearchConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     app: AppConfig = Field(default_factory=AppConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    ai: AIConfig = Field(default_factory=AIConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Settings":
@@ -71,11 +73,11 @@ class Settings(BaseSettings):
 
         return cls(
             database=DatabaseConfig(**data.get("database", {})),
-            meilisearch=MeilisearchConfig(**data.get("meilisearch", {})),
             storage=StorageConfig(**data.get("storage", {})),
             security=SecurityConfig(**data.get("security", {})),
             app=AppConfig(**data.get("app", {})),
             logging=LoggingConfig(**data.get("logging", {})),
+            ai=AIConfig(**data.get("ai", {})),
         )
 
 

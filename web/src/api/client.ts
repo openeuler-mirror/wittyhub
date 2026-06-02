@@ -36,7 +36,7 @@ export const api = {
   },
 
   async getSkillVersions(repo: string, skillName: string): Promise<SkillVersionsResponse> {
-    const { data } = await client.get(`/skills/${repo}/${skillName}/versions`)
+    const { data } = await client.get(`/skills/versions/${repo}/${skillName}`)
     return data
   },
 

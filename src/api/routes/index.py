@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.models.repository import SkillRepository
 from src.core.database import get_db
 from src.indexer.search import SearchService
-from src.ai.embedding import generate_embeddings, prepare_skill_text
+from src.ai.embedding import generate_embeddings, prepare_skill_text, load_settings
 
 
 router = APIRouter()
@@ -26,13 +26,19 @@ async def search(
     tag_list = tags.split(",") if tags else None
     embedding = None
 
-    if mode in ("semantic", "hybrid"):
+    settings = load_settings()
+    semantic_enabled = settings.ai.enable_semantic_search
+
+    if mode in ("semantic", "hybrid") and semantic_enabled:
         try:
             embeddings = await generate_embeddings([q])
             embedding = embeddings[0] if embeddings else None
         except Exception:
             embedding = None
             mode = "text"
+
+    if embedding is None:
+        mode = "text"
 
     search_service = SearchService(db)
     results = await search_service.search_skills(

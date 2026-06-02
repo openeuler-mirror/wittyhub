@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, List
 
 from sqlalchemy import func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,8 +37,8 @@ class SkillRepository:
         return list(result.scalars().all())
 
     async def get_by_repo_and_name(self, repo: str, skill_name: str) -> list[Skill]:
-        pattern_with_version = f"{repo}/{skill_name}:%"
-        pattern_without_version = f"{repo}/{skill_name}"
+        pattern_with_version = f"{repo}:{skill_name}:%"
+        pattern_without_version = f"{repo}:{skill_name}"
         result = await self.session.execute(
             select(Skill)
             .where(
@@ -62,6 +62,7 @@ class SkillRepository:
         category: str | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
+        source: str | None = None,
     ) -> tuple[list[Skill], int]:
         query = select(Skill)
 
@@ -71,6 +72,8 @@ class SkillRepository:
             query = query.where(Skill.platform == platform)
         if tags:
             query = query.where(Skill.tags.contains(tags))
+        if source:
+            query = query.where(Skill.source == source)
 
         count_query = select(func.count()).select_from(query.subquery())
         total = await self.session.scalar(count_query)
@@ -112,13 +115,14 @@ class SkillRepository:
         )
         await self.session.flush()
 
-    async def update_embedding(self, skill_id: str, embedding: list[float]) -> None:
+    async def update_embedding(self, skill_id: str, embedding: List[float]) -> None:
         await self.session.execute(
             update(Skill)
             .where(Skill.skill_id == skill_id)
             .values(embedding=embedding, last_indexed_at=datetime.utcnow())
         )
         await self.session.flush()
+        await self.session.commit()
 
     async def get_stats(self) -> dict[str, Any]:
         total_result = await self.session.execute(

@@ -1,0 +1,32 @@
+database:
+  host: "db"
+  port: 5432
+  user: "skillhub"
+  password: "skillhub_secret"
+  dbname: "skillhub"
+  sslmode: "disable"
+
+storage:
+  type: "local"
+  local_path: "/data/skills"
+  github_token: ""
+
+security:
+  socket_api_key: ""
+  enable_audit: false
+
+ai:
+  embedding_model: "BAAI/bge-base-zh-v1.5"
+  embedding_host: "http://embedding:8081"
+  embedding_dimension: 768
+  enable_semantic_search: true
+
+app:
+  host: "0.0.0.0"
+  port: 8080
+  cors_origins:
+    - "*"
+
+logging:
+  level: "INFO"
+  format: "json"

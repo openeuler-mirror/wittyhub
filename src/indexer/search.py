@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, String, cast, column
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
@@ -100,23 +100,28 @@ class SearchService:
         platform: str | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
+        def concat_fields(*args):
+            return func.concat(*args)
+
+        search_text = concat_fields(
+            Skill.name, " ",
+            func.coalesce(Skill.description, ""), " ",
+            func.coalesce(Skill.content, "")
+        )
+
         base_query = select(
             Skill,
             func.ts_rank(
-                func.to_tsvector(
-                    "zhcfg",
-                    Skill.name || " " || func.coalesce(Skill.description, "") || " " || func.coalesce(Skill.content, "")
-                ),
+                func.to_tsvector("zhcfg", search_text),
                 func.plainto_tsquery("zhcfg", query)
             ).label("rank")
         )
 
         ts_query = func.plainto_tsquery("zhcfg", query)
         base_query = base_query.where(
-            func.to_tsvector(
-                "zhcfg",
-                Skill.name || " " || func.coalesce(Skill.description, "") || " " || func.coalesce(Skill.content, "")
-            ).op("@@")(ts_query)
+            (func.to_tsvector("zhcfg", search_text).op("@@")(ts_query)) |
+            (Skill.name.ilike(f"%{query}%")) |
+            (Skill.description.ilike(f"%{query}%"))
         )
 
         if category:
@@ -170,48 +175,63 @@ class SearchService:
         category: str | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
+        min_similarity: float = 0.47,
     ) -> dict[str, Any]:
-        base_query = select(
-            Skill,
-            (func.vec_l2_distance(Skill.embedding, embedding)).label("distance")
-        )
+        embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
-        base_query = base_query.where(Skill.embedding.isnot(None))
+        where_clauses = ["embedding IS NOT NULL"]
+        params = {"limit": limit, "offset": offset}
 
         if category:
-            base_query = base_query.where(Skill.category == category)
+            where_clauses.append("category = :category")
+            params["category"] = category
         if platform:
-            base_query = base_query.where(Skill.platform == platform)
+            where_clauses.append("platform = :platform")
+            params["platform"] = platform
         if tags:
-            base_query = base_query.where(Skill.tags.contains(tags))
+            where_clauses.append("tags @> :tags")
+            params["tags"] = tags
 
-        base_query = base_query.order_by(text("distance asc"))
-        base_query = base_query.offset(offset).limit(limit)
+        where_sql = " AND ".join(where_clauses)
 
-        result = await self.session.execute(base_query)
-        rows = result.all()
+        sql = text(f"""
+            SELECT id, skill_id, name, description, version, commit_id, author, source,
+                   source_url, category, tags, platform, extra_metadata, content,
+                   security_score, download_count, rating, created_at, updated_at,
+                   l2_distance(embedding::vector, '{embedding_str}'::vector) AS distance
+            FROM skills
+            WHERE {where_sql}
+            ORDER BY distance ASC
+            LIMIT :limit OFFSET :offset
+        """)
+
+        result = await self.session.execute(sql, params)
+        rows = result.fetchall()
 
         results = []
-        for skill, distance in rows:
+        for row in rows:
+            similarity = 1 / (1 + float(row.distance)) if row.distance else None
+            if similarity and similarity < min_similarity:
+                continue
             results.append({
-                "id": str(skill.id),
-                "skill_id": skill.skill_id,
-                "name": skill.name,
-                "description": skill.description,
-                "version": skill.version,
-                "author": skill.author,
-                "source": skill.source,
-                "source_url": skill.source_url,
-                "category": skill.category,
-                "tags": skill.tags or [],
-                "platform": skill.platform,
-                "security_score": skill.security_score,
-                "download_count": skill.download_count,
-                "rating": skill.rating,
-                "created_at": skill.created_at.isoformat() if skill.created_at else None,
-                "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
-                "distance": float(distance) if distance else None,
-                "similarity": 1 / (1 + float(distance)) if distance else None,
+                "id": str(row.id),
+                "skill_id": row.skill_id,
+                "name": row.name,
+                "description": row.description,
+                "version": row.version,
+                "author": row.author,
+                "source": row.source,
+                "source_url": row.source_url,
+                "category": row.category,
+                "tags": row.tags or [],
+                "platform": row.platform,
+                "security_score": row.security_score,
+                "download_count": row.download_count,
+                "rating": row.rating,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "distance": float(row.distance) if row.distance else None,
+                "similarity": similarity,
             })
 
         return {"results": results, "total": len(results), "mode": "semantic"}
@@ -225,17 +245,22 @@ class SearchService:
     ) -> dict[str, Any]:
         from src.api.models.models import Agent
 
+        agent_search_text = func.concat(
+            Agent.name, " ",
+            func.coalesce(Agent.description, "")
+        )
+
         search_query = select(
             Agent,
             func.ts_rank(
-                func.to_tsvector("zhcfg", Agent.name || " " || func.coalesce(Agent.description, "")),
+                func.to_tsvector("zhcfg", agent_search_text),
                 func.plainto_tsquery("zhcfg", query)
             ).label("rank")
         )
 
         ts_query = func.plainto_tsquery("zhcfg", query)
         search_query = search_query.where(
-            func.to_tsvector("zhcfg", Agent.name || " " || func.coalesce(Agent.description, "")).op("@@")(ts_query)
+            func.to_tsvector("zhcfg", agent_search_text).op("@@")(ts_query)
         )
 
         if category:

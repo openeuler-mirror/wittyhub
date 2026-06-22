@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Build outputs
+bin/
+*.exe
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test
+*_test.go
+
+# Docs
+docs/
+
+# Docker
+deploy/docker/docker-compose.yaml
+
+# Local data
+data/
+*.local
+
+# Environment
+.env
+.env.*
+
+# Misc
+.DS_Store
+Thumbs.db

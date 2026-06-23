@@ -477,7 +477,7 @@ def insert_skills(conn, skills):
         audits.append((
             str(uuid.uuid4()), "skill", skill_id, None, None,
             "automated_scan", risk_level, psycopg2.extras.Json(signals),
-            psycopg2.extras.Json({"scanner": "SkillHub Security Scanner v1.0"}),
+            psycopg2.extras.Json({"scanner": "WittyHub Security Scanner v1.0"}),
             datetime.now() - timedelta(days=random.randint(0, 30))
         ))
 
@@ -495,13 +495,13 @@ def insert_skills(conn, skills):
     return len(skills)
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate test data for SkillHub")
+    parser = argparse.ArgumentParser(description="Generate test data for WittyHub")
     parser.add_argument("--count", type=int, default=200, help="Number of skills to generate")
     parser.add_argument("--host", default="localhost", help="Database host")
     parser.add_argument("--port", type=int, default=5432, help="Database port")
-    parser.add_argument("--user", default="skillhub", help="Database user")
-    parser.add_argument("--dbname", default="skillhub", help="Database name")
-    parser.add_argument("--password", default="skillhub123", help="Database password")
+    parser.add_argument("--user", default="wittyhub", help="Database user")
+    parser.add_argument("--dbname", default="wittyhub", help="Database name")
+    parser.add_argument("--password", default="wittyhub123", help="Database password")
     args = parser.parse_args()
 
     print(f"=== Generating {args.count} test skills ===")

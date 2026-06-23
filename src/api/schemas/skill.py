@@ -20,7 +20,7 @@ class SkillBase(BaseModel):
     extra_metadata: dict[str, Any] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("extra_metadata", "metadata"),
-        serialization_alias="extra_metadata",
+        serialization_alias="metadata",
     )
 
     @field_validator("source")

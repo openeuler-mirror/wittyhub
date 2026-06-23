@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Integer, Float, String, Text, func, desc
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -11,10 +12,43 @@ class Base(DeclarativeBase):
     pass
 
 
+class SkillSourceRepositoryModel(Base):
+    __tablename__ = "skill_source_repositories"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repo_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skill_discover_status: Mapped[str] = mapped_column(String(50), nullable=False, default="init")
+    skill_num: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    skills: Mapped[list["Skill"]] = relationship(
+        back_populates="source_repository",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("idx_skill_source_repositories_source", "source"),
+        Index("idx_skill_source_repositories_status", "skill_discover_status"),
+        Index("idx_skill_source_repositories_created_at", desc("created_at")),
+    )
+
+
 class Skill(Base):
     __tablename__ = "skills"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    skill_source_repository_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skill_source_repositories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     skill_id: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -30,17 +64,19 @@ class Skill(Base):
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     security_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
-    rating: Mapped[float | None] = mapped_column(String(10), nullable=True)
+    rating: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
+    source_repository: Mapped["SkillSourceRepositoryModel"] = relationship(back_populates="skills")
     audits: Mapped[list["SecurityAudit"]] = relationship(back_populates="skill", cascade="all, delete-orphan")
 
     __table_args__ = (
+        Index("idx_skills_source_repository_id", "skill_source_repository_id"),
         Index("idx_skills_category", "category"),
         Index("idx_skills_platform", "platform"),
         Index("idx_skills_source", "source"),
@@ -66,7 +102,7 @@ class Agent(Base):
     extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     security_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
-    rating: Mapped[float | None] = mapped_column(String(10), nullable=True)
+    rating: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -84,7 +120,11 @@ class SecurityAudit(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     resource_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skills.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     audit_type: Mapped[str] = mapped_column(String(50), nullable=False)

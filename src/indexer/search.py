@@ -4,7 +4,7 @@ from sqlalchemy import func, select, text, String, cast, column
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
-from src.api.models.models import Skill
+from src.models.orm import Skill
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
@@ -243,7 +243,7 @@ class SearchService:
         offset: int = 0,
         category: str | None = None,
     ) -> dict[str, Any]:
-        from src.api.models.models import Agent
+        from src.models.orm import Agent
 
         agent_search_text = func.concat(
             Agent.name, " ",

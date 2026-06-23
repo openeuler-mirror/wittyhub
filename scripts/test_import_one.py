@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, '/home/ubuntu/wittyhub')
 
 from core.database import SyncSessionLocal
-from api.models.models import Skill
+from src.models.orm import Skill
 
 def parse_clawhub_url(url: str):
     """Parse clawskills.sh URL to get author and skill_name

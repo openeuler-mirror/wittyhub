@@ -1,16 +1,18 @@
-# SkillHub
+# Wittyhub
 
 AI Agent Skills 检索与分发平台。发现、评估和获取可复用的 AI Agent Skills，支持关键词搜索、分类浏览、安全检测。
 
 ## 特性
 
 ### 核心功能
+
 - **Skill 发现与搜索** - 支持全文搜索、分类筛选、标签过滤
 - **多版本管理** - 支持 Skill 的多个版本，查看版本历史
 - **安全检测** - 自动进行安全扫描，生成风险评估报告
 - **CLI 工具** - 一键安装 Skills 到本地 `~/.agents/skills/` 目录
 
 ### 技术优势
+
 - **高性能** - 基于 FastAPI + Uvicorn，提供异步 API
 - **PostgreSQL 全文搜索** - 内置 tsvector，无需额外部署搜索引擎
 - **安全可靠** - 代码安全扫描、依赖检查、风险信号识别
@@ -41,6 +43,7 @@ PostgreSQL 单数据库:
 ## 快速开始
 
 ### 环境要求
+
 - Docker & Docker Compose
 - Python 3.10+ (本地开发)
 
@@ -107,31 +110,31 @@ uvicorn src.api.main:app --reload --port 8080
 ### Web 界面
 
 1. **浏览 Skills**
-   - 首页展示热门 Skills 和分类导航
-   - 点击分类查看该分类下的所有 Skills
+- 首页展示热门 Skills 和分类导航
+- 点击分类查看该分类下的所有 Skills
 
 2. **搜索 Skills**
-   - 使用搜索框输入关键词
-   - 支持按分类、平台、标签筛选
+- 使用搜索框输入关键词
+- 支持按分类、平台、标签筛选
 
 3. **查看详情**
-   - 点击 Skill 卡片进入详情页
-   - 查看版本历史、安全报告、安装命令
+- 点击 Skill 卡片进入详情页
+- 查看版本历史、安全报告、安装命令
 
 ### CLI 工具
 
 ```bash
 # 搜索 Skills
-skillhub search "api framework"
+wittyhub search "api framework"
 
 # 查看 Skill 详情
-skillhub show python-api-framework
+wittyhub show python-api-framework
 
 # 安装 Skill
-skillhub install python-api-framework
+wittyhub install python-api-framework
 
 # 查看已安装的 Skills
-skillhub list
+wittyhub list
 ```
 
 ### API 调用
@@ -156,7 +159,7 @@ curl http://localhost:8081/api/v1/skills/python/api-framework/versions
 ## 项目结构
 
 ```
-skillhub/
+wittyhub/
 ├── src/
 │   ├── api/              # FastAPI 应用
 │   │   ├── routes/      # API 路由
@@ -191,9 +194,9 @@ skillhub/
 database:
   host: localhost
   port: 5432
-  user: skillhub
+  user: wittyhub
   password: your_password
-  dbname: skillhub
+  dbname: wittyhub
 
 storage:
   type: local
@@ -213,17 +216,20 @@ app:
 ## 开发指南
 
 ### 运行测试
+
 ```bash
 pytest tests/ -v
 ```
 
 ### 代码检查
+
 ```bash
 ruff check .
 mypy src/
 ```
 
 ### 构建前端
+
 ```bash
 cd web
 npm install

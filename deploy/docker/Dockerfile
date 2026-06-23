@@ -9,10 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml README.md ./
 
-RUN pip install --no-cache-dir --default-timeout=300 -e .
+RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
 
 COPY src ./src
 COPY cli ./cli
+COPY migrations ./migrations
+COPY scripts ./scripts
 COPY alembic.ini ./
 
 RUN mkdir -p /data/skills

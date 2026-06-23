@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --default-timeout=300 \
+    -i https://mirrors.aliyun.com/pypi/simple \
     fastapi \
     uvicorn \
     sentence-transformers \
@@ -15,7 +16,7 @@ RUN pip install --no-cache-dir --default-timeout=300 \
     numpy \
     huggingface_hub
 
-COPY embedding_service.py /app/embedding_service.py
+COPY deploy/docker/embedding_service.py /app/embedding_service.py
 
 ENV PYTHONUNBUFFERED=1
 ENV MODEL_NAME=BAAI/bge-base-zh-v1.5

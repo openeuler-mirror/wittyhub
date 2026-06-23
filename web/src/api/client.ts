@@ -3,7 +3,7 @@ import type { Skill, SkillListResponse, SearchResponse, SecurityAudit, DownloadR
 
 export interface SkillVersionsResponse {
   source_url: string
-  skill_name: string
+  skill_id: string
   versions: Skill[]
 }
 
@@ -35,8 +35,8 @@ export const api = {
     return data
   },
 
-  async getSkillVersions(repo: string, skillName: string): Promise<SkillVersionsResponse> {
-    const { data } = await client.get(`/skills/versions/${repo}/${skillName}`)
+  async getSkillVersions(skillId: string): Promise<SkillVersionsResponse> {
+    const { data } = await client.get(`/skills/versions/${encodeURIComponent(skillId)}`)
     return data
   },
 
@@ -47,6 +47,7 @@ export const api = {
     category?: string
     platform?: string
     tags?: string
+    mode?: 'text' | 'semantic' | 'hybrid'
   } = {}): Promise<SearchResponse> {
     const { data } = await client.get('/index/search', { params })
     return data

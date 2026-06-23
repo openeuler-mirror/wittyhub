@@ -20,21 +20,53 @@ const versions = ref<Skill[]>([])
 const audit = ref<SecurityAudit | null>(null)
 const loading = ref(true)
 const error = ref('')
-const selectedVersion = ref<string>('main')
+const selectedVersion = ref<string>('latest')
 const selectedCommitId = ref<string | null>(null)
 const cliCopied = ref(false)
 
-const currentSkillId = computed(() => {
+const routeSkillId = computed(() => {
+  const raw = route.params.skillId
+  if (Array.isArray(raw)) return raw.join('/')
+  return (raw as string) || ''
+})
+
+function getRepoUrlFromSourceUrl(sourceUrl: string): string {
+  return sourceUrl.replace(/\/blob\/[^/]+\/.*$/, '')
+}
+
+function getSkillSlug(skillId: string): string {
+  const parts = skillId.split('/')
+  return parts[parts.length - 1] || skillId
+}
+
+const installSourceArg = computed(() => {
   if (!skill.value) return ''
-  const repo = route.params.repo as string
-  const name = route.params.name as string
-  return `${repo}/${name}:${selectedVersion.value}`
+  const repoUrl = getRepoUrlFromSourceUrl(skill.value.source_url || '')
+  const skillSlug = getSkillSlug(skill.value.skill_id || routeSkillId.value)
+  if (!repoUrl || !skillSlug) return ''
+  return `${repoUrl} --skill ${skillSlug}`
 })
 
 const renderedContent = computed(() => {
   if (!skill.value?.content) return ''
   return marked(stripFrontmatter(skill.value.content))
 })
+
+const orderedVersions = computed(() => {
+  return [...versions.value].sort((a, b) => {
+    const aLatest = (a.version || '').toLowerCase() === 'latest' ? 1 : 0
+    const bLatest = (b.version || '').toLowerCase() === 'latest' ? 1 : 0
+    if (aLatest !== bLatest) return bLatest - aLatest
+    return 0
+  })
+})
+
+function formatVersionLabel(version: string | null | undefined): string {
+  if ((version || '').toLowerCase() === 'latest') {
+    return 'latest (最新分支)'
+  }
+  return version || 'main'
+}
 
 const downloadUrl = computed(() => {
   if (!skill.value) return ''
@@ -50,50 +82,42 @@ const downloadUrl = computed(() => {
 
 const browseUrl = computed(() => {
   if (!skill.value) return ''
-  const version = selectedVersion.value || 'main'
-  const owner = skill.value.source_url.match(/github\.com\/([^\/]+)/)?.[1] || ''
-  const repo = skill.value.source_url.match(/github\.com\/[^\/]+\/([^\/]+)/)?.[1] || ''
-  const skillName = skill.value.skill_id.split(':')[0].split('/').pop() || ''
-  return `https://github.com/${owner}/${repo}/tree/${version}/skills/${skillName}`
+  return skill.value.source_url || ''
+})
+
+const selectedVersionSourceLabel = computed(() => {
+  const version = (skill.value?.version || '').toLowerCase()
+  if (version === 'latest') return '最新分支'
+  if (skill.value?.version) return '发布版本'
+  return '-'
 })
 
 onMounted(async () => {
-  const repo = route.params.repo as string | undefined
-  const name = route.params.name as string
+  const skillId = routeSkillId.value
   loading.value = true
   try {
-    if (repo && name) {
-      const baseSkillId = `${repo}/${name}`
-      const versionsRes = await api.getSkillVersions(repo, name)
-      versions.value = versionsRes.versions
+    if (!skillId) {
+      throw new Error('Missing skill id')
+    }
 
-      if (versionsRes.versions.length > 0) {
-        const latestVersion = versionsRes.versions[0]
-        selectedVersion.value = latestVersion.version || 'main'
-        selectedCommitId.value = latestVersion.commit_id
-        const versionedSkillId = `${repo}/${name}:${selectedVersion.value}`
-        skill.value = await api.getSkill(versionedSkillId)
-        const auditRes = await api.getSkillAudit(versionedSkillId)
-        if ('error' in auditRes) {
-          audit.value = null
-        } else {
-          audit.value = auditRes
-        }
+    const versionsRes = await api.getSkillVersions(skillId)
+    versions.value = versionsRes.versions
+
+    if (versionsRes.versions.length > 0) {
+      const latestVersion = versionsRes.versions[0]
+      selectedVersion.value = latestVersion.version || 'main'
+      selectedCommitId.value = latestVersion.commit_id
+      skill.value = latestVersion
+      const auditRes = await api.getSkillAudit(skillId)
+      if ('error' in auditRes) {
+        audit.value = null
       } else {
-        skill.value = await api.getSkill(baseSkillId)
-        if (skill.value) {
-          const auditRes = await api.getSkillAudit(baseSkillId)
-          if ('error' in auditRes) {
-            audit.value = null
-          } else {
-            audit.value = auditRes
-          }
-        }
+        audit.value = auditRes
       }
     } else {
-      skill.value = await api.getSkill(name)
+      skill.value = await api.getSkill(skillId)
       if (skill.value) {
-        const auditRes = await api.getSkillAudit(name)
+        const auditRes = await api.getSkillAudit(skillId)
         if ('error' in auditRes) {
           audit.value = null
         } else {
@@ -109,15 +133,14 @@ onMounted(async () => {
 })
 
 const selectVersion = async (version: string) => {
-  const repo = route.params.repo as string | undefined
-  const name = route.params.name as string
   selectedVersion.value = version
   const versionObj = versions.value.find(v => v.version === version)
   selectedCommitId.value = versionObj?.commit_id || null
-  const versionedSkillId = repo ? `${repo}/${name}:${version}` : `${name}:${version}`
   try {
-    skill.value = await api.getSkill(versionedSkillId)
-    const auditRes = await api.getSkillAudit(versionedSkillId)
+    if (versionObj) {
+      skill.value = versionObj
+    }
+    const auditRes = await api.getSkillAudit(routeSkillId.value)
     if ('error' in auditRes) {
       audit.value = null
     } else {
@@ -129,7 +152,7 @@ const selectVersion = async (version: string) => {
 }
 
 const copyCliCommand = async () => {
-  const command = `npx skillhub install ${currentSkillId.value}`
+  const command = `npx wittyhub install ${installSourceArg.value}`
   try {
     await navigator.clipboard.writeText(command)
     cliCopied.value = true
@@ -169,7 +192,7 @@ const copyCliCommand = async () => {
           <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">版本选择</h3>
           <div class="flex flex-wrap gap-2">
             <button
-              v-for="v in versions"
+              v-for="v in orderedVersions"
               :key="v.version || 'main'"
               @click="selectVersion(v.version || 'main')"
               class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -178,7 +201,7 @@ const copyCliCommand = async () => {
                 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600': selectedVersion !== v.version
               }"
             >
-              {{ v.version }}{{ v.commit_id ? ` (${v.commit_id.slice(0, 7)})` : '' }}
+              {{ formatVersionLabel(v.version) }}{{ v.commit_id ? ` (${v.commit_id.slice(0, 7)})` : '' }}
             </button>
           </div>
         </div>
@@ -186,13 +209,13 @@ const copyCliCommand = async () => {
         <!-- Actions -->
         <div class="space-y-4">
           <div class="flex flex-wrap gap-3">
-            <a
+            <!-- <a
               :href="downloadUrl"
               target="_blank"
               class="btn-primary"
             >
               📦 下载 ZIP {{ selectedCommitId ? `(commit: ${selectedCommitId.slice(0, 7)})` : '' }}
-            </a>
+            </a> -->
             <a
               :href="browseUrl"
               target="_blank"
@@ -208,7 +231,7 @@ const copyCliCommand = async () => {
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CLI 安装</h3>
             <div class="flex items-center gap-2">
               <code class="flex-1 bg-gray-200 dark:bg-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200 overflow-x-auto">
-                npx skillhub install {{ currentSkillId }}
+                npx wittyhub install {{ installSourceArg }}
               </code>
               <button
                 @click="copyCliCommand"
@@ -263,6 +286,10 @@ const copyCliCommand = async () => {
             <div>
               <dt class="text-sm text-gray-500 dark:text-gray-400">版本</dt>
               <dd class="font-medium text-gray-900 dark:text-white">{{ skill.version || '-' }}</dd>
+            </div>
+            <div>
+              <dt class="text-sm text-gray-500 dark:text-gray-400">版本来源</dt>
+              <dd class="font-medium text-gray-900 dark:text-white">{{ selectedVersionSourceLabel }}</dd>
             </div>
             <div v-if="skill.commit_id">
               <dt class="text-sm text-gray-500 dark:text-gray-400">Commit</dt>

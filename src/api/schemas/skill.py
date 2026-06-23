@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class SkillBase(BaseModel):
@@ -17,12 +17,16 @@ class SkillBase(BaseModel):
     tags: list[str] | None = None
     platform: str | None = Field(None, max_length=100)
     content: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    extra_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("extra_metadata", "metadata"),
+        serialization_alias="extra_metadata",
+    )
 
     @field_validator("source")
     @classmethod
     def validate_source(cls, v: str) -> str:
-        allowed = {"github", "gitcode", "gitlab", "local", "clawhub"}
+        allowed = {"github", "gitcode", "gitlab", "gitee", "clawhub", "local"}
         if v not in allowed:
             raise ValueError(f"source must be one of {allowed}")
         return v
@@ -38,10 +42,16 @@ class SkillUpdate(BaseModel):
     version: str | None = Field(None, max_length=50)
     category: str | None = Field(None, max_length=100)
     tags: list[str] | None = None
-    metadata: dict[str, Any] | None = None
+    extra_metadata: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("extra_metadata", "metadata"),
+        serialization_alias="extra_metadata",
+    )
 
 
 class SkillResponse(SkillBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: str
     content: str | None = None
     security_score: int | None = None
@@ -50,9 +60,6 @@ class SkillResponse(SkillBase):
     created_at: datetime
     updated_at: datetime
     last_indexed_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
 
 
 class SkillListResponse(BaseModel):
@@ -87,9 +94,6 @@ class SecurityAuditResponse(BaseModel):
     details: dict[str, Any]
     audited_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class DownloadResponse(BaseModel):
     download_url: str
@@ -104,7 +108,7 @@ class ErrorResponse(BaseModel):
 
 class SkillVersionsResponse(BaseModel):
     source_url: str
-    skill_name: str
+    skill_id: str
     versions: list[SkillResponse]
 
 

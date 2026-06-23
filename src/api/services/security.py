@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.models.repository import SecurityAuditRepository, SkillRepository
+from src.models.repository import SecurityAuditRepository, SkillRepository
 from src.security.detector import SecurityDetector, StaticSecurityAnalyzer, RiskSignal
 
 

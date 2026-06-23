@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.models.repository import AgentRepository
+from src.models.repository import AgentRepository
 from src.core.database import get_db
 
 router = APIRouter()
@@ -32,8 +32,7 @@ async def list_agents(
                 "source_url": a.source_url,
                 "category": a.category,
                 "tags": a.tags,
-                "platform": a.platform,
-                "metadata": a.extra_metadata,
+                "extra_metadata": a.extra_metadata,
                 "security_score": a.security_score,
                 "download_count": a.download_count,
                 "rating": a.rating,
@@ -67,8 +66,7 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)) -> dict[s
         "source_url": agent.source_url,
         "category": agent.category,
         "tags": agent.tags,
-        "platform": agent.platform,
-        "metadata": agent.extra_metadata,
+        "extra_metadata": agent.extra_metadata,
         "security_score": agent.security_score,
         "download_count": agent.download_count,
         "rating": agent.rating,

@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.models.repository import SkillRepository
+from src.models.repository import SkillRepository
 from src.core.database import get_db
 from src.indexer.search import SearchService
 from src.ai.embedding import generate_embeddings, prepare_skill_text, load_settings
@@ -20,7 +20,7 @@ async def search(
     category: str | None = None,
     platform: str | None = None,
     tags: str | None = None,
-    mode: str = Query("hybrid", regex="^(text|semantic|hybrid)$"),
+    mode: str = Query("hybrid", pattern="^(text|semantic|hybrid)$"),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     tag_list = tags.split(",") if tags else None

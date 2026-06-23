@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.models.repository import SkillRepository, DownloadHistoryRepository
+from src.models.repository import SkillRepository, DownloadHistoryRepository
 from src.api.schemas.skill import (
     SkillCreate,
     SkillListResponse,

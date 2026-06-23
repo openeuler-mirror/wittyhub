@@ -49,31 +49,37 @@ PostgreSQL 单数据库:
 
 ### Docker 部署
 
-1. 克隆项目
+1. 前端构建
+
 ```bash
-git clone https://gitcode.com/your-username/skillhub.git
-cd skillhub
+git clone https://gitcode.com/openeuler/wittyhub.git
+cd wittyhub/web
+npm install
+npm run build
 ```
 
 2. 启动服务
+
 ```bash
-cd deploy/docker
-docker-compose up -d
+cd ../
+docker compose -f deploy/docker/docker-compose.yaml up -d
 ```
 
 3. 初始化数据库
+
 ```bash
-docker exec skillhub-db psql -U skillhub -d skillhub -f /docker-entrypoint-initdb.d/init.sql
-docker exec skillhub-api alembic upgrade head
+docker compose -f deploy/docker/docker-compose.yaml exec api alembic upgrade head
 ```
 
 4. 生成测试数据
+
 ```bash
-docker exec skillhub-api python scripts/generate_test_data.py \
-  --host skillhub-db --password skillhub_secret
+docker compose -f deploy/docker/docker-compose.yaml exec api \
+  python scripts/generate_test_data.py --host db --password wittyhub_secret
 ```
 
 5. 访问服务
+
 - 前端: http://localhost:8080
 - API: http://localhost:8081
 - API 文档: http://localhost:8081/docs
@@ -81,28 +87,30 @@ docker exec skillhub-api python scripts/generate_test_data.py \
 ### 本地开发
 
 1. 安装依赖
+
 ```bash
-pip install -e ".[dev]"
+uv venv --python 3.11
+source .venv/bin/activate
+uv pip install -e ".[dev]"
 ```
 
 2. 配置数据库
-```bash
-cp config.yaml.example config.yaml
-# 编辑 config.yaml 配置数据库连接
-```
+编辑 config.yaml 配置数据库连接
 
 3. 运行迁移
+这里需要数据库提前运行
 ```bash
 alembic upgrade head
 ```
 
 4. 启动服务
+
 ```bash
 # 前端
 cd web && npm install && npm run dev
 
 # 后端
-uvicorn src.api.main:app --reload --port 8080
+uvicorn src.api.main:app --reload --port 8081
 ```
 
 ## 使用指南

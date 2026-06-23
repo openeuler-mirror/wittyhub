@@ -56,7 +56,7 @@ class SkillResponse(SkillBase):
     content: str | None = None
     security_score: int | None = None
     download_count: int = 0
-    rating: float | None = None
+    rating: str | None = None
     created_at: datetime
     updated_at: datetime
     last_indexed_at: datetime | None = None

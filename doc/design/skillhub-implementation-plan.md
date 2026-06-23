@@ -458,7 +458,7 @@ graph TB
 
     subgraph Docker Compose : wittyhub-network
         NG[web<br/>nginx:alpine<br/>:8080→80]
-        API[api<br/>FastAPI uvicorn<br/>:8081→8080]
+        API[api<br/>FastAPI uvicorn<br/>:8081→8081]
         EMB[embedding<br/>BGE 模型服务<br/>:8082→8081]
         DB[(db<br/>pgvector/pg16<br/>:5432)]
     end
@@ -486,7 +486,7 @@ graph TB
 |------|-----------|------|------|------|
 | db | pgvector/pgvector:pg16 | 5432 | — | 初始化 Alembic 迁移（扩展 + 表结构） |
 | embedding | embedding.Dockerfile | 8082→8081 | — | BGE 模型，内存限制 4G，启动 ~120s |
-| api | deploy/docker/Dockerfile | 8081→8080 | db ✓, embedding ✓ | FastAPI，挂载 config.docker.yaml |
+| api | deploy/docker/Dockerfile | 8081→8081 | db ✓ | FastAPI，挂载 config.docker.yaml |
 | web | nginx:alpine | 8080→80 | api | 静态 SPA + `/api/` 反向代理 |
 
 #### 4.3.4 Nginx 路由规则
@@ -494,14 +494,14 @@ graph TB
 | 路径 | 目标 | 说明 |
 |------|------|------|
 | `/` | `web/dist/index.html` | SPA fallback (`try_files`) |
-| `/api/` | `http://api:8080/api/` | 反向代理到 FastAPI |
+| `/api/` | `http://api:8081/api/` | 反向代理到 FastAPI |
 | `/assets/` | 静态文件 | 1 年缓存 |
 
 #### 4.3.5 健康检查与启动顺序
 
 ```yaml
 # 启动依赖链
-db (pg_isready) ──► embedding (HTTP /health) ──► api (HTTP /api/v1/health) ──► web
+db (pg_isready) ──► api (HTTP /api/v1/health) ──► web
 ```
 
 | 服务 | 检查方式 | 间隔 | 启动宽限期 |
@@ -775,7 +775,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  │  Docker Network: wittyhub-network                                  │  │
 │  │                                                                    │  │
 │  │  ┌─────────────┐   proxy /api/   ┌─────────────┐                  │  │
-│  │  │  web:80     │──────────────►│  api:8080   │                  │  │
+│  │  │  web:80     │──────────────►│  api:8081   │                  │  │
 │  │  │  (nginx)    │               │  (FastAPI)  │                  │  │
 │  │  │  :8080      │               │  :8081      │                  │  │
 │  │  └─────────────┘               └──────┬──────┘                  │  │

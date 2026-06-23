@@ -35,7 +35,7 @@ migrate-create:
 	alembic revision --autogenerate -m "$(MESSAGE)"
 
 docker-build:
-	docker build -t skillhub/api -f deploy/docker/Dockerfile .
+	docker build -t wittyhub/api -f deploy/docker/Dockerfile .
 
 docker-up:
 	docker-compose -f deploy/docker/docker-compose.yaml up -d

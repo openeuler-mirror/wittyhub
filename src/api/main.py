@@ -27,16 +27,16 @@ def configure_logging() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    structlog.get_logger().info("skillhub starting up")
+    structlog.get_logger().info("wittyhub starting up")
     yield
-    structlog.get_logger().info("skillhub shutting down")
+    structlog.get_logger().info("wittyhub shutting down")
 
 
 def create_app() -> FastAPI:
     configure_logging()
 
     app = FastAPI(
-        title="SkillHub API",
+        title="WittyHub API",
         description="Agent and Skill Discovery Platform",
         version="0.1.0",
         lifespan=lifespan,

@@ -2,7 +2,7 @@
 import re
 import subprocess
 import sys
-sys.path.insert(0, '/home/ubuntu/skillhub')
+sys.path.insert(0, '/home/ubuntu/wittyhub')
 
 from core.database import SyncSessionLocal
 from api.models.models import Skill

@@ -19,7 +19,7 @@ class Settings(BaseModel):
 
 
 def load_settings() -> Settings:
-    config_path = os.environ.get("SKILLHUB_CONFIG", "config.yaml")
+    config_path = os.environ.get("WITTYHUB_CONFIG", "config.yaml")
     try:
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}

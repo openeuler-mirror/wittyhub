@@ -153,14 +153,14 @@ graph TB
 | EmbeddingService | `src/ai/embedding.py` | 调用 BGE 模型生成查询/文档向量 |
 | DownloadManager | `src/storage/downloader.py` | 多平台下载 URL 格式化与本地存储 |
 | SecurityDetector | `src/security/detector.py` | 供应链安全检测与风险评分 |
-| Repository | `src/api/models/repository.py` | 数据库 CRUD 与统计查询 |
-| CLI | `cli/` | 命令行封装，install 含 ZIP 解压逻辑 |
+| Repository | `src/models/repository.py` | 数据库 CRUD 与统计查询 |
+| SkillClawer | `skillclawer/` | 技能仓库爬取、发现、分类 |
 
 ### 3.3 包依赖关系
 
 ```
 web/ ──HTTP──► src/api/routes/*
-cli/ ──HTTP──► src/api/routes/*
+skillclawer/ ──► src/models/repository.py
 src/api/routes/index.py ──► src/indexer/search.py
                           ──► src/ai/embedding.py
 src/api/routes/skills.py ──► src/storage/downloader.py
@@ -174,12 +174,25 @@ src/storage/downloader.py ──► GitHub/GitCode/Gitee (HTTP)
 
 ```mermaid
 erDiagram
+    SKILL_SOURCE_REPOSITORIES ||--o{ SKILLS : contains
     SKILLS ||--o{ SECURITY_AUDITS : has
     SKILLS ||--o{ DOWNLOAD_HISTORY : tracks
     AGENTS ||--o{ SECURITY_AUDITS : has
 
+    SKILL_SOURCE_REPOSITORIES {
+        uuid id PK
+        string repo_name UK
+        string source
+        string branch
+        text url
+        text local_path
+        string skill_discover_status
+        int skill_num
+    }
+
     SKILLS {
         uuid id PK
+        uuid skill_source_repository_id FK
         string skill_id UK
         string name
         text description
@@ -471,7 +484,7 @@ graph TB
 
 | 服务 | 镜像/构建 | 端口 | 依赖 | 说明 |
 |------|-----------|------|------|------|
-| db | pgvector/pgvector:pg16 | 5432 | — | 初始化 init.sql（扩展 + 表结构） |
+| db | pgvector/pgvector:pg16 | 5432 | — | 初始化 Alembic 迁移（扩展 + 表结构） |
 | embedding | embedding.Dockerfile | 8082→8081 | — | BGE 模型，内存限制 4G，启动 ~120s |
 | api | deploy/docker/Dockerfile | 8081→8080 | db ✓, embedding ✓ | FastAPI，挂载 config.docker.yaml |
 | web | nginx:alpine | 8080→80 | api | 静态 SPA + `/api/` 反向代理 |
@@ -833,6 +846,15 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | `audit` | 查看安全审计 |
 | `reindex` | 触发向量重索引 |
 
+### 8.3 SkillClawer 命令
+
+| 命令 | 说明 |
+|------|------|
+| `query` | 查询技能仓库 |
+| `create` | 创建技能仓库记录 |
+| `update` | 更新技能仓库 |
+| `delete` | 删除技能仓库 |
+
 ---
 
 ## 9. 待实现功能
@@ -867,8 +889,10 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | Embedding 编码 | `src/ai/embedding.py` |
 | 搜索 API + 重索引 | `src/api/routes/index.py` |
 | 下载 URL 格式化 | `src/storage/downloader.py` |
-| CLI 安装解压 | `cli/main.py` (install 命令) |
+| 数据访问层 | `src/models/repository.py` |
+| ORM 模型 | `src/models/orm.py` |
+| 技能爬取 | `skillclawer/main.py` |
 | Docker 编排 | `deploy/docker/docker-compose.yaml` |
 | Nginx 配置 | `deploy/docker/nginx.conf` |
-| DB 初始化 | `deploy/docker/init.sql` |
+| 数据库迁移 | `migrations/versions/` |
 

@@ -100,14 +100,13 @@ async def audit_skill(
     return {"error": "No audit found"}
 
 
-@router.get("/{repo}/{skill_name}/versions", response_model=SkillVersionsResponse)
+@router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
 async def get_skill_versions(
-    repo: str,
-    skill_name: str,
+    skill_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     skill_repo = SkillRepository(db)
-    skills = await skill_repo.get_by_repo_and_name(repo, skill_name)
+    skills = await skill_repo.get_versions_by_base_skill(None, skill_id)
 
     if not skills:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -115,7 +114,7 @@ async def get_skill_versions(
     source_url = skills[0].source_url
     return SkillVersionsResponse(
         source_url=source_url,
-        skill_name=skill_name,
+        skill_id=skill_id,
         versions=[skill_to_response(s) for s in skills],
     )
 

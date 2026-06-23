@@ -12,7 +12,6 @@ COPY pyproject.toml README.md ./
 RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
 
 COPY src ./src
-COPY cli ./cli
 COPY migrations ./migrations
 COPY scripts ./scripts
 COPY alembic.ini ./

@@ -8,9 +8,6 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
-
-
 class DatabaseConfig(BaseSettings):
     host: str = "localhost"
     port: int = 5432
@@ -86,5 +83,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    config_path = os.environ.get("WITTYHUB_CONFIG", str(DEFAULT_CONFIG_PATH))
+    default_config_path = Path(__file__).resolve().parents[2] / "config.yaml"
+    config_path = os.environ.get("WITTYHUB_CONFIG", str(default_config_path))
     return Settings.from_yaml(config_path)

@@ -1,6 +1,7 @@
 from collections import defaultdict
+import re
 
-from sqlalchemy import func, select, text, String, cast, column
+from sqlalchemy import func, select, text, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
@@ -30,6 +31,78 @@ def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]
 class SearchService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    def _apply_skill_filters(
+        self,
+        query,
+        *,
+        category: str | None = None,
+        platform: str | None = None,
+        tags: list[str] | None = None,
+    ):
+        if category:
+            query = query.where(Skill.category == category)
+        if platform:
+            query = query.where(Skill.platform == platform)
+        if tags:
+            query = query.where(Skill.tags.contains(tags))
+        return query
+
+    def _item_version_sort_key(self, item: dict[str, Any]) -> tuple[int, tuple[int, ...], int, str, str, str]:
+        version = str(item.get("version") or "").strip()
+        match = re.fullmatch(
+            r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?",
+            version,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            major = int(match.group(1) or 0)
+            minor = int(match.group(2) or 0)
+            patch = int(match.group(3) or 0)
+            prerelease = (match.group(4) or "").lower()
+            is_stable = 1 if not prerelease else 0
+            return (
+                1,
+                (major, minor, patch),
+                is_stable,
+                prerelease,
+                str(item.get("updated_at") or ""),
+                str(item.get("created_at") or ""),
+            )
+        return (
+            0,
+            tuple(),
+            0,
+            "",
+            str(item.get("updated_at") or ""),
+            str(item.get("created_at") or ""),
+        )
+
+    def _dedupe_skill_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+
+        for index, item in enumerate(results):
+            dedupe_key = (
+                str(item.get("name") or "").strip().lower()
+                or str(item.get("skill_id") or "").strip().lower()
+            )
+            if not dedupe_key:
+                continue
+
+            existing = grouped.get(dedupe_key)
+            if existing is None:
+                grouped[dedupe_key] = {
+                    "first_index": index,
+                    "representative": item,
+                }
+                continue
+
+            existing_item = existing["representative"]
+            if self._item_version_sort_key(item) > self._item_version_sort_key(existing_item):
+                existing["representative"] = item
+
+        ordered = sorted(grouped.values(), key=lambda entry: entry["first_index"])
+        return [entry["representative"] for entry in ordered]
 
     async def search_skills(
         self,

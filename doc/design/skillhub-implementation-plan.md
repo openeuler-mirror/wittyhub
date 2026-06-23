@@ -1,11 +1,11 @@
-# SkillHub 系统设计说明书
+# WittyHub 系统设计说明书
 
 ## 文档信息
 
 | 项目 | 内容 |
 |------|------|
-| 项目名称 | SkillHub - Agent/Skill 检索与下载平台 |
-| 文档版本 | v4.0 |
+| 项目名称 | WittyHub - Agent/Skill 检索与下载平台 |
+| 文档版本 | v5.0 |
 | 文档类型 | 系统设计说明书 |
 
 ---
@@ -14,7 +14,7 @@
 
 ### 1.1 系统定位
 
-SkillHub 是一个去中心化的 Agent/Skill 检索与下载平台。平台本地只存储索引元数据，Skill 内容托管在 GitHub / GitCode / Gitee 等外部仓库，通过 REST API、Web UI 和 CLI 三种方式对外提供服务。
+WittyHub 是一个去中心化的 Agent/Skill 检索与下载平台。平台本地只存储索引元数据，Skill 内容托管在 GitHub / GitCode / Gitee 等外部仓库，通过 REST API、Web UI 和 CLI 三种方式对外提供服务。
 
 ### 1.2 核心设计原则
 
@@ -50,8 +50,8 @@ graph LR
         SD[Skill Developer<br/>Skill 开发者]
     end
 
-    subgraph SkillHub 系统
-        SYS((SkillHub Platform))
+    subgraph WittyHub 系统
+        SYS((WittyHub Platform))
     end
 
     subgraph 外部系统
@@ -72,7 +72,7 @@ graph LR
 | 参与者 | 说明 | 典型操作 |
 |--------|------|----------|
 | Web User | 浏览器访问平台 | 搜索、浏览详情、查看安全报告、获取安装命令 |
-| CLI User | 使用 `skillhub` 命令行 | search / install / download / audit |
+| CLI User | 使用 `wittyhub` 命令行 | search / install / download / audit |
 | System Admin | 运维人员 | 触发重索引、查看统计、Docker 部署 |
 | Skill Developer | 本地管理 Skill | install 到 `~/.agents/skills/` |
 
@@ -302,7 +302,7 @@ RRF_score(d) = Σ  1 / (k + rank_i(d))     , k = 60
 |----------|------|------|
 | 全量重索引 | `POST /api/v1/index/reindex` | 遍历 skills，批量生成 embedding 并更新 |
 | 单条重索引 | `POST /api/v1/index/reindex/{skill_id}` | 针对单个 Skill 更新向量 |
-| CLI 触发 | `skillhub reindex` | 调用全量重索引 API |
+| CLI 触发 | `wittyhub reindex` | 调用全量重索引 API |
 
 #### 4.1.8 降级策略
 
@@ -354,7 +354,7 @@ graph LR
         CLI[CLI install]
     end
 
-    subgraph SkillHub API
+    subgraph WittyHub API
         DL[GET /skills/id/download]
         DM[DownloadManager]
     end
@@ -443,7 +443,7 @@ graph TB
         U[用户浏览器 / CLI]
     end
 
-    subgraph Docker Compose : skillhub-network
+    subgraph Docker Compose : wittyhub-network
         NG[web<br/>nginx:alpine<br/>:8080→80]
         API[api<br/>FastAPI uvicorn<br/>:8081→8080]
         EMB[embedding<br/>BGE 模型服务<br/>:8082→8081]
@@ -515,7 +515,7 @@ storage:
   local_path: "/data/skills"    # 挂载 skill-data 卷
 ```
 
-环境变量 `SKILLHUB_CONFIG` 指向配置文件路径；数据库连接亦可通过 `DATABASE__*` 环境变量覆盖。
+环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；数据库连接亦可通过 `DATABASE__*` 环境变量覆盖。
 
 #### 4.3.7 一键部署
 
@@ -581,7 +581,7 @@ sequenceDiagram
     participant PG as PostgreSQL
     participant GH as GitHub
 
-    User->>CLI: skillhub install owner/repo/skill-name
+    User->>CLI: wittyhub install owner/repo/skill-name
 
     CLI->>API: GET /skills/{skill_id}/download
     API->>PG: 查询 skill 记录
@@ -720,8 +720,8 @@ GET /api/v1/index/search?q={query}&mode=hybrid&category=&tags=&skip=0&limit=20
 **命令**：
 
 ```bash
-skillhub install vercel-labs/skills/find-skills
-skillhub install anthropics/skills/frontend-design --target ./my-skills
+wittyhub install vercel-labs/skills/find-skills
+wittyhub install anthropics/skills/frontend-design --target ./my-skills
 ```
 
 ---
@@ -743,7 +743,7 @@ skillhub install anthropics/skills/frontend-design --target ./my-skills
 **命令**：
 
 ```bash
-skillhub reindex
+wittyhub reindex
 # 或
 curl -X POST http://localhost:8081/api/v1/index/reindex
 ```
@@ -759,7 +759,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  Host Machine                                                            │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │  Docker Network: skillhub-network                                  │  │
+│  │  Docker Network: wittyhub-network                                  │  │
 │  │                                                                    │  │
 │  │  ┌─────────────┐   proxy /api/   ┌─────────────┐                  │  │
 │  │  │  web:80     │──────────────►│  api:8080   │                  │  │
@@ -807,7 +807,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 - [ ] `GET /api/v1/index/search?q=测试&mode=hybrid` 返回结果
 - [ ] Web 首页 `http://localhost:8080` 可访问
 - [ ] PostgreSQL 扩展：`vector`, `pg_trgm`, `unaccent`, `zhcfg`
-- [ ] `skillhub search "调试"` 与 `skillhub install <id>` 正常
+- [ ] `wittyhub search "调试"` 与 `wittyhub install <id>` 正常
 
 ---
 

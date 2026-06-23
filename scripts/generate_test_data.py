@@ -10,6 +10,7 @@ Usage:
 import argparse
 import random
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -343,6 +344,7 @@ def generate_skills(count: int) -> list:
     """Generate skill data"""
     skills = []
     used_skill_ids = set()
+    used_version_keys = set()
 
     while len(skills) < count:
         platform = random.choice(PLATFORMS)
@@ -370,21 +372,25 @@ def generate_skills(count: int) -> list:
             if len(skills) >= count:
                 break
 
-            if num_versions > 1:
-                skill_id = f"{clean_name}:{version}"
-            else:
-                skill_id = clean_name
-
-            if skill_id in used_skill_ids:
+            skill_id = clean_name
+            if skill_id in used_skill_ids and not any(
+                existing["skill_id"] == skill_id for existing in skills
+            ):
                 skill_id = f"{clean_name}-{uuid.uuid4().hex[:8]}"
+
+            version_skill_key = f"{skill_id}:{version}"
+            if version_skill_key in used_version_keys:
+                continue
+
             used_skill_ids.add(skill_id)
+            used_version_keys.add(version_skill_key)
 
             commit_id = generate_commit_id()
 
             skill = {
                 "id": str(uuid.uuid4()),
                 "skill_id": skill_id,
-                "name": f"{name} v{version}" if len(versions) > 1 else name,
+                "name": name,
                 "description": f"A professional {name.lower()} solution with version {version}. "
                               f"Provides enterprise-grade features including advanced caching, "
                               f"rate limiting, and comprehensive error handling.",
@@ -424,13 +430,58 @@ def insert_skills(conn, skills):
     cursor.execute("TRUNCATE TABLE security_audits CASCADE")
     cursor.execute("TRUNCATE TABLE download_history CASCADE")
     cursor.execute("TRUNCATE TABLE skills CASCADE")
+    cursor.execute("TRUNCATE TABLE skill_source_repositories CASCADE")
     cursor.execute("TRUNCATE TABLE agents CASCADE")
+    conn.commit()
+
+    # Insert source repositories first so skills can reference them.
+    repositories_by_url = OrderedDict()
+    for skill in skills:
+        source_url = skill["source_url"]
+        if source_url not in repositories_by_url:
+            repo_name = source_url
+            repositories_by_url[source_url] = {
+                "id": str(uuid.uuid4()),
+                "repo_name": repo_name,
+                "source": skill["source"],
+                "branch": skill["version"] or "main",
+                "url": source_url,
+                "local_path": None,
+                "skill_discover_status": "done",
+                "skill_num": 0,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            }
+        repositories_by_url[source_url]["skill_num"] += 1
+
+    repository_insert_query = """
+        INSERT INTO skill_source_repositories (
+            id, repo_name, source, branch, url, local_path,
+            skill_discover_status, skill_num, created_at, updated_at
+        ) VALUES %s
+    """
+    repository_values = [
+        (
+            repo["id"],
+            repo["repo_name"],
+            repo["source"],
+            repo["branch"],
+            repo["url"],
+            repo["local_path"],
+            repo["skill_discover_status"],
+            repo["skill_num"],
+            repo["created_at"],
+            repo["updated_at"],
+        )
+        for repo in repositories_by_url.values()
+    ]
+    execute_values(cursor, repository_insert_query, repository_values)
     conn.commit()
 
     # Insert skills
     insert_query = """
         INSERT INTO skills (
-            id, skill_id, name, description, version, commit_id, author, source,
+            id, skill_source_repository_id, skill_id, name, description, version, commit_id, author, source,
             source_url, category, tags, platform, content, security_score,
             download_count, rating, created_at, updated_at, last_indexed_at, extra_metadata
         ) VALUES %s
@@ -438,7 +489,7 @@ def insert_skills(conn, skills):
 
     values = [
         (
-            s["id"], s["skill_id"], s["name"], s["description"], s["version"],
+            s["id"], repositories_by_url[s["source_url"]]["id"], s["skill_id"], s["name"], s["description"], s["version"],
             s["commit_id"], s["author"], s["source"], s["source_url"], s["category"],
             s["tags"], s["platform"], s["content"], s["security_score"],
             s["download_count"], s["rating"], s["created_at"], s["updated_at"],

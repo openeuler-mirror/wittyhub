@@ -20,32 +20,58 @@ AI Agent Skills 检索与分发平台。发现、评估和获取可复用的 AI 
 - **现代化前端** - Vue 3 + TypeScript，支持暗色模式
 
 ## 架构
+当前 Docker Compose 部署由 4 个服务组成：`web`、`api`、`embedding`、`db`。
+- `web`：提供 Vue 构建产物，并把 `/api/` 请求转发给 `api`
+- `api`：提供搜索、详情、版本、分类、安全检测等接口
+- `embedding`：为中文语义检索生成向量，供 `api` 调用
+- `db`：使用 PostgreSQL + pgvector 保存 `skills`、`agents`、`security_audits` 等表，以及 pgvector 向量列
 
-```
-PostgreSQL 单数据库:
-├── tsvector     ──► 全文搜索
-├── JSONB        ──► 灵活元数据
-└── ARRAY        ──► 标签数组
+```mermaid
+flowchart LR
+    User[Browser / CLI User]
 
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   前端 Vue   │────▶│  Nginx 代理 │────▶│   FastAPI   │
-│   (Port 80) │     │             │     │  (Port 8080)│
-└─────────────┘     └─────────────┘     └─────────────┘
-                                                 │
-                      ┌─────────────┬────────────┤
-                      │             │            │
-                 ┌────▼────┐  ┌────▼────┐ ┌────▼────┐
-                 │PostgreSQL│  │ LocalFS │
-                 │(5432)   │  │ /data   │
-                 └─────────┘  └─────────┘
+    subgraph Compose["Docker Compose / wittyhub-network"]
+        Web["web<br/>Nginx :80<br/>映射宿主机 8080"]
+        API["api<br/>FastAPI + Uvicorn :8081<br/>映射宿主机 8081"]
+        Embedding["embedding<br/>Embedding Service :8082<br/>模型: BAAI/bge-base-zh-v1.5"]
+        DB["db<br/>PostgreSQL + pgvector :5432"]
+        SkillData[("skill-data volume<br/>/data/skills")]
+        PgData[("postgres-data volume")]
+        ModelCache[("huggingface-cache volume")]
+    end
+
+    User -->|"访问前端"| Web
+    Web -->|"反向代理 /api/*"| API
+    User -.->|"本地调试可直连"| API
+
+    API -->|"全文检索 / 元数据 / 向量检索"| DB
+    API -->|"生成或查询 embedding"| Embedding
+    API -->|"本地文件存储"| SkillData
+
+    DB --> PgData
+    Embedding --> ModelCache
+
+    DB:::store
+    SkillData:::store
+    PgData:::store
+    ModelCache:::store
+
+    classDef store fill:#f8f5ec,stroke:#b6925e,color:#5b4636;
 ```
+
+### 数据层能力
+
+- `tsvector`：关键词全文搜索
+- `pgvector`：语义向量检索
+- `JSONB`：灵活元数据存储
+- `ARRAY`：标签等数组字段
 
 ## 快速开始
 
 ### 环境要求
 
 - Docker & Docker Compose
-- Python 3.10+ (本地开发)
+- Python 3.10+ (本地开发) + uv
 
 ### Docker 部署
 

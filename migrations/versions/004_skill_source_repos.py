@@ -55,7 +55,7 @@ def upgrade() -> None:
 
     op.add_column(
         "skills",
-        sa.Column("skill_source_repository_id", UUID, nullable=True),
+        sa.Column("skill_source_repository_id", UUID, nullable=False),
     )
     op.create_foreign_key(
         "fk_skills_skill_source_repository_id",
@@ -70,8 +70,6 @@ def upgrade() -> None:
         "skills",
         ["skill_source_repository_id"],
     )
-
-    op.alter_column("skills", "skill_source_repository_id", nullable=False)
 
 
 def downgrade() -> None:

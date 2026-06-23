@@ -1,5 +1,14 @@
 import axios from 'axios'
-import type { Skill, SkillListResponse, SearchResponse, SecurityAudit, DownloadResponse } from './types'
+import type {
+  Skill,
+  SkillListResponse,
+  SearchResponse,
+  SecurityAudit,
+  DownloadResponse,
+  Agent,
+  AgentListResponse,
+  AgentVersionsResponse
+} from './types'
 
 export interface SkillVersionsResponse {
   source_url: string
@@ -74,6 +83,31 @@ export const api = {
 
   async getCategories(): Promise<{ categories: { name: string; count: number }[] }> {
     const { data } = await client.get('/index/categories')
+    return data
+  },
+
+  async listAgents(params: {
+    skip?: number
+    limit?: number
+    category?: string
+    tags?: string
+  } = {}): Promise<AgentListResponse> {
+    const { data } = await client.get('/agents/', { params })
+    return data
+  },
+
+  async getAgent(agentId: string): Promise<Agent> {
+    const { data } = await client.get(`/agents/${encodeURIComponent(agentId)}`)
+    return data
+  },
+
+  async getAgentVersions(agentId: string): Promise<AgentVersionsResponse> {
+    const { data } = await client.get(`/agents/${encodeURIComponent(agentId)}/versions`)
+    return data
+  },
+
+  async getAgentDownload(agentId: string): Promise<{ download_url: string }> {
+    const { data } = await client.get(`/agents/${encodeURIComponent(agentId)}/download`)
     return data
   }
 }

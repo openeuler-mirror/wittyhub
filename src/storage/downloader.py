@@ -57,7 +57,7 @@ class DownloadManager:
                 return f"https://gitcode.com/{owner}/{repo}/archive/{commit_id}.zip"
 
             if skill_id:
-                skill_name = skill_id.split(":")[0].split("/")[-1]
+                skill_name = skill_id.split(":")[-1].split("/")[-1]
                 return f"https://gitcode.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
 
             return f"https://gitcode.com/{owner}/{repo}/archive/{version}.zip"
@@ -75,7 +75,7 @@ class DownloadManager:
                 return f"https://gitee.com/{owner}/{repo}/archive/{commit_id}.zip"
 
             if skill_id:
-                skill_name = skill_id.split(":")[0].split("/")[-1]
+                skill_name = skill_id.split(":")[-1].split("/")[-1]
                 return f"https://gitee.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
 
             return f"https://gitee.com/{owner}/{repo}/archive/{version}.zip"

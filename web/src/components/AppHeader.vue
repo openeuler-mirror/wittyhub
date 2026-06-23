@@ -30,15 +30,16 @@ onMounted(() => {
       <div class="flex items-center justify-between h-16">
         <RouterLink to="/" class="flex items-center gap-2">
           <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center">
-            <span class="text-white font-bold text-sm">S</span>
+            <span class="text-white font-bold text-sm">W</span>
           </div>
-          <span class="text-xl font-semibold text-primary-500">SkillHub</span>
+          <span class="text-xl font-semibold text-primary-500">wittyhub</span>
         </RouterLink>
 
         <nav class="hidden md:flex items-center gap-6">
           <RouterLink to="/" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">首页</RouterLink>
-          <RouterLink to="/skills/search" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">探索</RouterLink>
-          <RouterLink to="/skills/leaderboard" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">排行榜</RouterLink>
+          <RouterLink to="/agents/" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">Agents</RouterLink>
+          <RouterLink to="/skills/search" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">Skills</RouterLink>
+          <RouterLink to="/leaderboard" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">排行榜</RouterLink>
         </nav>
 
         <div class="flex items-center gap-4">
@@ -58,7 +59,7 @@ onMounted(() => {
             to="/skills/search"
             class="btn-primary text-sm"
           >
-            搜索 Skill
+            搜索
           </RouterLink>
         </div>
       </div>

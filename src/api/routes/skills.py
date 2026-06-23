@@ -54,12 +54,13 @@ async def list_skills(
     category: str | None = None,
     platform: str | None = None,
     tags: str | None = None,
+    source: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     tag_list = tags.split(",") if tags else None
     repo = SkillRepository(db)
     skills, total = await repo.list(
-        skip=skip, limit=limit, category=category, platform=platform, tags=tag_list
+        skip=skip, limit=limit, category=category, platform=platform, tags=tag_list, source=source
     )
 
     return SkillListResponse(
@@ -67,6 +68,54 @@ async def list_skills(
         total=total,
         skip=skip,
         limit=limit,
+    )
+
+
+@router.post("/", response_model=SkillResponse, status_code=201)
+async def create_skill(
+    skill_data: SkillCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    repo = SkillRepository(db)
+
+    existing = await repo.get_by_skill_id(skill_data.skill_id)
+    if existing:
+        raise HTTPException(status_code=409, detail="Skill already exists")
+
+    security_service = SecurityService(db)
+
+    skill_dict = skill_data.model_dump()
+    if security_service.detector.enable_audit:
+        audit_result = await security_service.audit_skill(
+            skill_data.skill_id,
+            skill_data.source,
+            skill_data.source_url,
+            skill_dict,
+        )
+        skill_dict["security_score"] = audit_result.get("security_score")
+
+    skill = await repo.create(skill_dict)
+    return skill_to_response(skill)
+
+
+@router.get("/versions/{repo}/{skill_name:path}", response_model=SkillVersionsResponse)
+async def get_skill_versions(
+    repo: str,
+    skill_name: str,
+    db: AsyncSession = Depends(get_db),
+):
+    skill_repo = SkillRepository(db)
+    skills = await skill_repo.get_by_repo_and_name(repo, skill_name)
+
+    if not skills:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    source_url = skills[0].source_url
+    return SkillVersionsResponse(
+        source_url=source_url,
+        skill_name=skill_name,
+        versions=[skill_to_response(s) for s in skills],
     )
 
 
@@ -98,26 +147,6 @@ async def audit_skill(
         )
 
     return {"error": "No audit found"}
-
-
-@router.get("/{repo}/{skill_name}/versions", response_model=SkillVersionsResponse)
-async def get_skill_versions(
-    repo: str,
-    skill_name: str,
-    db: AsyncSession = Depends(get_db),
-):
-    skill_repo = SkillRepository(db)
-    skills = await skill_repo.get_by_repo_and_name(repo, skill_name)
-
-    if not skills:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    source_url = skills[0].source_url
-    return SkillVersionsResponse(
-        source_url=source_url,
-        skill_name=skill_name,
-        versions=[skill_to_response(s) for s in skills],
-    )
 
 
 @router.get("/{skill_id:path}/download", response_model=DownloadResponse)
@@ -161,34 +190,6 @@ async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    return skill_to_response(skill)
-
-
-@router.post("/", response_model=SkillResponse, status_code=201)
-async def create_skill(
-    skill_data: SkillCreate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    repo = SkillRepository(db)
-
-    existing = await repo.get_by_skill_id(skill_data.skill_id)
-    if existing:
-        raise HTTPException(status_code=409, detail="Skill already exists")
-
-    security_service = SecurityService(db)
-
-    skill_dict = skill_data.model_dump()
-    if security_service.detector.enable_audit:
-        audit_result = await security_service.audit_skill(
-            skill_data.skill_id,
-            skill_data.source,
-            skill_data.source_url,
-            skill_dict,
-        )
-        skill_dict["security_score"] = audit_result.get("security_score")
-
-    skill = await repo.create(skill_dict)
     return skill_to_response(skill)
 
 

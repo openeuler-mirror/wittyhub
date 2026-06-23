@@ -89,11 +89,11 @@ def extract_skill_id(url: str, name: str) -> str:
         if len(parts) >= 5:
             author = parts[-2]
             skill_name = parts[-1]
-            return f"{author}/{skill_name}"
+            return f"clawhub:{author}/{skill_name}"
     elif "github.com" in url:
         match = re.search(r"github\.com/([^/]+)/([^/]+)", url)
         if match:
-            return f"{match.group(1)}/{match.group(2)}"
+            return f"github:{match.group(1)}/{match.group(2)}"
     return name.lower().replace(" ", "-")
 
 

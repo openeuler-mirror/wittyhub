@@ -5,7 +5,7 @@ from typing import Any, List
 from sqlalchemy import func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.models.models import Skill, Agent, SecurityAudit, DownloadHistory
+from src.api.models.models import Skill, Agent, AgentVersion, SecurityAudit, DownloadHistory
 
 
 class SkillRepository:
@@ -153,6 +153,7 @@ class AgentRepository:
         agent = Agent(**agent_data)
         self.session.add(agent)
         await self.session.flush()
+        await self.session.commit()
         await self.session.refresh(agent)
         return agent
 
@@ -173,11 +174,14 @@ class AgentRepository:
         skip: int = 0,
         limit: int = 20,
         category: str | None = None,
+        tags: list[str] | None = None,
     ) -> tuple[list[Agent], int]:
         query = select(Agent)
 
         if category:
             query = query.where(Agent.category == category)
+        if tags:
+            query = query.where(Agent.tags.contains(tags))
 
         count_query = select(func.count()).select_from(query.subquery())
         total = await self.session.scalar(count_query)
@@ -194,6 +198,30 @@ class AgentRepository:
         )
         await self.session.flush()
         return result.rowcount > 0
+
+    async def increment_download(self, agent_id: uuid.UUID) -> None:
+        await self.session.execute(
+            update(Agent)
+            .where(Agent.id == agent_id)
+            .values(download_count=Agent.download_count + 1)
+        )
+        await self.session.flush()
+
+    async def get_versions(self, agent_id: uuid.UUID) -> list[AgentVersion]:
+        result = await self.session.execute(
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent_id)
+            .order_by(AgentVersion.released_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def create_version(self, version_data: dict[str, Any]) -> AgentVersion:
+        version = AgentVersion(**version_data)
+        self.session.add(version)
+        await self.session.flush()
+        await self.session.commit()
+        await self.session.refresh(version)
+        return version
 
 
 class SecurityAuditRepository:

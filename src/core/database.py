@@ -13,8 +13,8 @@ async_engine = create_async_engine(
     settings.database.url,
     echo=False,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=50,
+    max_overflow=100,
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -35,7 +35,12 @@ SyncSessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=Fa
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 @asynccontextmanager

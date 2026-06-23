@@ -25,10 +25,8 @@ const selectedCommitId = ref<string | null>(null)
 const cliCopied = ref(false)
 
 const currentSkillId = computed(() => {
-  if (!skill.value) return ''
-  const repo = route.params.repo as string
-  const name = route.params.name as string
-  return `${repo}/${name}:${selectedVersion.value}`
+  if (!skill.value?.skill_id) return ''
+  return skill.value.skill_id
 })
 
 const renderedContent = computed(() => {
@@ -58,12 +56,34 @@ const browseUrl = computed(() => {
 })
 
 onMounted(async () => {
-  const repo = route.params.repo as string | undefined
-  const name = route.params.name as string
+  const path = route.params.path as string
   loading.value = true
   try {
-    if (repo && name) {
-      const baseSkillId = `${repo}/${name}`
+    if (path) {
+      const baseSkillId = path
+
+      const firstColon = path.indexOf(':')
+      const firstSlash = path.indexOf('/')
+
+      let repo = ''
+      let name = ''
+
+      if (firstColon > 0 && (firstSlash === -1 || firstColon < firstSlash)) {
+        const source = path.substring(0, firstColon)
+        const remaining = path.substring(firstColon + 1)
+        const slashIdx = remaining.indexOf('/')
+        if (slashIdx > 0) {
+          repo = source
+          name = remaining
+        } else {
+          repo = source
+          name = remaining
+        }
+      } else {
+        repo = path
+        name = path
+      }
+
       const versionsRes = await api.getSkillVersions(repo, name)
       versions.value = versionsRes.versions
 
@@ -71,9 +91,8 @@ onMounted(async () => {
         const latestVersion = versionsRes.versions[0]
         selectedVersion.value = latestVersion.version || 'main'
         selectedCommitId.value = latestVersion.commit_id
-        const versionedSkillId = `${repo}/${name}:${selectedVersion.value}`
-        skill.value = await api.getSkill(versionedSkillId)
-        const auditRes = await api.getSkillAudit(versionedSkillId)
+        skill.value = latestVersion
+        const auditRes = await api.getSkillAudit(baseSkillId)
         if ('error' in auditRes) {
           audit.value = null
         } else {
@@ -90,16 +109,6 @@ onMounted(async () => {
           }
         }
       }
-    } else {
-      skill.value = await api.getSkill(name)
-      if (skill.value) {
-        const auditRes = await api.getSkillAudit(name)
-        if ('error' in auditRes) {
-          audit.value = null
-        } else {
-          audit.value = auditRes
-        }
-      }
     }
   } catch (e: any) {
     error.value = e.message || 'Failed to load skill'
@@ -109,27 +118,24 @@ onMounted(async () => {
 })
 
 const selectVersion = async (version: string) => {
-  const repo = route.params.repo as string | undefined
-  const name = route.params.name as string
   selectedVersion.value = version
   const versionObj = versions.value.find(v => v.version === version)
   selectedCommitId.value = versionObj?.commit_id || null
-  const versionedSkillId = repo ? `${repo}/${name}:${version}` : `${name}:${version}`
-  try {
-    skill.value = await api.getSkill(versionedSkillId)
-    const auditRes = await api.getSkillAudit(versionedSkillId)
+  if (versionObj) {
+    skill.value = versionObj
+    const baseSkillId = skill.value.skill_id.split(':').slice(0, 2).join(':')
+    const auditRes = await api.getSkillAudit(baseSkillId)
     if ('error' in auditRes) {
       audit.value = null
     } else {
       audit.value = auditRes
     }
-  } catch (e: any) {
-    error.value = e.message || 'Failed to load skill'
   }
 }
 
+
 const copyCliCommand = async () => {
-  const command = `npx skillhub install ${currentSkillId.value}`
+  const command = `skillhub install ${currentSkillId.value}`
   try {
     await navigator.clipboard.writeText(command)
     cliCopied.value = true
@@ -204,11 +210,11 @@ const copyCliCommand = async () => {
           </div>
 
           <!-- CLI Install -->
-          <div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+          <div v-if="currentSkillId" class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CLI 安装</h3>
             <div class="flex items-center gap-2">
               <code class="flex-1 bg-gray-200 dark:bg-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200 overflow-x-auto">
-                npx skillhub install {{ currentSkillId }}
+                skillhub install {{ currentSkillId }}
               </code>
               <button
                 @click="copyCliCommand"

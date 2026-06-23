@@ -58,6 +58,7 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -73,9 +74,45 @@ class Agent(Base):
     )
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    homepage_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    license: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    readme_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_yaml_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parsed_config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    supported_platforms: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    verified: Mapped[bool] = mapped_column(default=False)
+    star_count: Mapped[int] = mapped_column(Integer, default=0)
+    contributor_count: Mapped[int] = mapped_column(Integer, default=0)
+    latest_commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    versions: Mapped[list["AgentVersion"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
+
     __table_args__ = (
         Index("idx_agents_category", "category"),
         Index("idx_agents_tags", "tags", postgresql_using="gin"),
+        Index("idx_agents_source", "source"),
+        Index("idx_agents_verified", "verified"),
+    )
+
+
+class AgentVersion(Base):
+    __tablename__ = "agent_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), nullable=False)
+    commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    download_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    agent: Mapped["Agent"] = relationship(back_populates="versions")
+
+    __table_args__ = (
+        Index("idx_agent_versions_agent_id", "agent_id"),
     )
 
 

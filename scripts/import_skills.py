@@ -112,7 +112,7 @@ def create_skill_data(skill_md: Path, skill_id: str, github_org: str, github_rep
     source_url = f"https://github.com/{github_org}/{github_repo}/tree/master/{skill_path}"
 
     return {
-        "skill_id": f"{github_org}/{skill_id}",
+        "skill_id": f"github:{github_org}/{skill_id}",
         "name": name,
         "description": description,
         "source": "github",

@@ -82,10 +82,7 @@ class SearchService:
         grouped: dict[str, dict[str, Any]] = {}
 
         for index, item in enumerate(results):
-            dedupe_key = (
-                str(item.get("name") or "").strip().lower()
-                or str(item.get("skill_id") or "").strip().lower()
-            )
+            dedupe_key = str(item.get("skill_id") or "").strip().lower()
             if not dedupe_key:
                 continue
 

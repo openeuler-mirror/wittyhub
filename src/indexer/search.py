@@ -137,9 +137,10 @@ class SearchService:
                 text_results.get("results", []),
                 vector_results.get("results", []),
             )
+            deduped = self._dedupe_skill_results(combined)
             return {
-                "results": combined[offset:offset + limit],
-                "total": len(combined),
+                "results": deduped[offset:offset + limit],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -155,9 +156,10 @@ class SearchService:
                 tags=tags,
             )
         else:
+            deduped = self._dedupe_skill_results(text_results["results"])
             return {
-                "results": text_results["results"][offset:offset + limit],
-                "total": text_results["total"],
+                "results": deduped[offset:offset + limit],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -197,23 +199,28 @@ class SearchService:
             (Skill.description.ilike(f"%{query}%"))
         )
 
-        if category:
-            base_query = base_query.where(Skill.category == category)
-        if platform:
-            base_query = base_query.where(Skill.platform == platform)
-        if tags:
-            base_query = base_query.where(Skill.tags.contains(tags))
+        base_query = self._apply_skill_filters(
+            base_query,
+            category=category,
+            platform=platform,
+            tags=tags,
+        )
 
-        count_query = select(func.count()).select_from(
-            base_query.subquery()
+        count_subquery = base_query.subquery()
+        count_query = select(func.count(func.distinct(count_subquery.c.skill_id))).select_from(
+            count_subquery
         )
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
 
-        base_query = base_query.order_by(text("rank desc"), Skill.download_count.desc())
-        base_query = base_query.offset(offset).limit(limit)
-
-        result = await self.session.execute(base_query)
+        # Pull a bounded candidate set, then choose the representative version per skill_id
+        # in Python so search cards use the same "latest version" rule as the detail page.
+        candidate_query = (
+            base_query
+            .order_by(text("rank desc"), Skill.download_count.desc(), desc(Skill.updated_at), desc(Skill.created_at))
+            .limit(max(limit * 10, offset + limit * 5, 100))
+        )
+        result = await self.session.execute(candidate_query)
         rows = result.all()
 
         results = []
@@ -238,7 +245,8 @@ class SearchService:
                 "text_rank": float(rank) if rank else 0,
             })
 
-        return {"results": results, "total": total}
+        deduped = self._dedupe_skill_results(results)
+        return {"results": deduped[offset:offset + limit], "total": total}
 
     async def _vector_search(
         self,
@@ -253,7 +261,7 @@ class SearchService:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
         where_clauses = ["embedding IS NOT NULL"]
-        params = {"limit": limit, "offset": offset}
+        params = {"limit": limit, "offset": offset, "embedding": embedding_str}
 
         if category:
             where_clauses.append("category = :category")
@@ -271,7 +279,7 @@ class SearchService:
             SELECT id, skill_id, name, description, version, commit_id, author, source,
                    source_url, category, tags, platform, extra_metadata, content,
                    security_score, download_count, rating, created_at, updated_at,
-                   l2_distance(embedding::vector, '{embedding_str}'::vector) AS distance
+                   embedding <-> CAST(:embedding AS vector) AS distance
             FROM skills
             WHERE {where_sql}
             ORDER BY distance ASC

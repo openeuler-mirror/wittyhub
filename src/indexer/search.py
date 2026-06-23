@@ -50,6 +50,15 @@ class SearchService:
 
     def _item_version_sort_key(self, item: dict[str, Any]) -> tuple[int, tuple[int, ...], int, str, str, str]:
         version = str(item.get("version") or "").strip()
+        if version.lower() == "latest":
+            return (
+                2,
+                tuple(),
+                0,
+                "",
+                str(item.get("updated_at") or ""),
+                str(item.get("created_at") or ""),
+            )
         match = re.fullmatch(
             r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?",
             version,

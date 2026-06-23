@@ -20,6 +20,8 @@ class SkillRepository:
 
     def _version_sort_key(self, skill: Skill) -> tuple[int, tuple[int, ...], int, str, datetime, datetime]:
         version = (skill.version or "").strip()
+        if version.lower() == "latest":
+            return (2, tuple(), 0, "", skill.updated_at, skill.created_at)
         match = re.fullmatch(
             r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?",
             version,

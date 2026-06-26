@@ -431,7 +431,7 @@ def insert_skills(conn, skills):
     for skill in skills:
         source_url = skill["source_url"]
         if source_url not in repositories_by_url:
-            repo_name = source_url
+            repo_name = source_url.rstrip("/").split("/")[-1]
             repositories_by_url[source_url] = {
                 "id": str(uuid.uuid4()),
                 "repo_name": repo_name,

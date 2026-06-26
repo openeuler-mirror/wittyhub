@@ -373,9 +373,7 @@ def generate_skills(count: int) -> list:
                 break
 
             skill_id = clean_name
-            if skill_id in used_skill_ids and not any(
-                existing["skill_id"] == skill_id for existing in skills
-            ):
+            if skill_id in used_skill_ids:
                 skill_id = f"{clean_name}-{uuid.uuid4().hex[:8]}"
 
             version_skill_key = f"{skill_id}:{version}"

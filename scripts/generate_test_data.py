@@ -307,12 +307,6 @@ Apache-2.0 / MIT
 """
 ]
 
-def generate_skill_id(base_name: str, version: str = None) -> str:
-    """Generate a unique skill ID"""
-    clean_name = base_name.lower().replace(" ", "-").replace("_", "-")
-    if version:
-        return f"{clean_name}:{version}"
-    return clean_name
 
 def generate_commit_id() -> str:
     """Generate a realistic commit hash"""

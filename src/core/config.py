@@ -11,9 +11,9 @@ from pydantic_settings import BaseSettings
 class DatabaseConfig(BaseSettings):
     host: str = "localhost"
     port: int = 5432
-    user: str = "skillhub"
-    password: str = "skillhub_secret"
-    dbname: str = "skillhub"
+    user: str = "wittyhub"
+    password: str = "wittyhub_secret"
+    dbname: str = "wittyhub"
     sslmode: str = "disable"
 
     @property
@@ -83,5 +83,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    config_path = os.environ.get("SKILLHUB_CONFIG", "config.yaml")
+    default_config_path = Path(__file__).resolve().parents[2] / "config.yaml"
+    config_path = os.environ.get("WITTYHUB_CONFIG", str(default_config_path))
     return Settings.from_yaml(config_path)

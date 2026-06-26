@@ -15,16 +15,6 @@ const router = createRouter({
       component: () => import('@/pages/Search.vue')
     },
     {
-      path: '/skills/:name',
-      name: 'skill-detail-single',
-      component: () => import('@/pages/SkillDetail.vue')
-    },
-    {
-      path: '/skills/:repo/:name',
-      name: 'skill-detail',
-      component: () => import('@/pages/SkillDetail.vue')
-    },
-    {
       path: '/skills/categories/:category',
       name: 'category',
       component: () => import('@/pages/Category.vue')
@@ -33,6 +23,11 @@ const router = createRouter({
       path: '/skills/leaderboard',
       name: 'leaderboard',
       component: () => import('@/pages/Leaderboard.vue')
+    },
+    {
+      path: '/skills/:skillId(.*)',
+      name: 'skill-detail',
+      component: () => import('@/pages/SkillDetail.vue')
     }
   ]
 })

@@ -13,17 +13,6 @@ function truncate(text: string | null, length: number = 120): string {
 }
 
 function getSkillRoutePath(skillId: string): string {
-  const lastColonIndex = skillId.lastIndexOf(':')
-  if (lastColonIndex > 0) {
-    const base = skillId.substring(0, lastColonIndex)
-    const firstSlashIndex = base.indexOf('/')
-    if (firstSlashIndex > 0) {
-      const owner = base.substring(0, firstSlashIndex)
-      const name = base.substring(firstSlashIndex + 1)
-      return `/skills/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
-    }
-    return `/skills/${encodeURIComponent(base)}`
-  }
   return `/skills/${encodeURIComponent(skillId)}`
 }
 </script>
@@ -72,7 +61,7 @@ function getSkillRoutePath(skillId: string): string {
         class="text-xs text-gray-400 hover:text-primary-500 dark:text-gray-500 dark:hover:text-primary-400"
         @click.stop
       >
-        {{ skill.source === 'github' ? 'GitHub' : skill.source }}
+        {{ skill.source }}
       </a>
     </div>
   </RouterLink>

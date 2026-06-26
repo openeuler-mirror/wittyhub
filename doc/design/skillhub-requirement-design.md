@@ -1,10 +1,10 @@
-# SkillHub 平台需求设计说明书
+# WittyHub 平台需求设计说明书
 
 ## 文档信息
 
 | 项目 | 内容 |
 |------|------|
-| 项目名称 | SkillHub - Agent/Skill 检索与下载平台 |
+| 项目名称 | WittyHub - Agent/Skill 检索与下载平台 |
 | 文档版本 | v2.0 |
 | 创建日期 | 2026-05-15 |
 | 更新日期 | 2026-05-28 |
@@ -16,7 +16,7 @@
 
 ### 1.1 项目背景
 
-随着AI Agent和Skill生态的快速发展，开发者需要在一个集中的平台上发现、评估和获取可复用的Skill。当前存在多个Skill分发渠道（如skills.sh、clawhub.ai等），但缺乏统一的标准和本地化支持。本项目旨在构建一个去中心化的SkillHub平台，支持CLI/API访问，本地只存储索引，Skill内容存储在GitHub/GitCode等外部仓库。
+随着AI Agent和Skill生态的快速发展，开发者需要在一个集中的平台上发现、评估和获取可复用的Skill。当前存在多个Skill分发渠道（如skills.sh、clawhub.ai等），但缺乏统一的标准和本地化支持。本项目旨在构建一个去中心化的WittyHub平台，支持CLI/API访问，本地只存储索引，Skill内容存储在GitHub/GitCode等外部仓库。
 
 ### 1.2 项目目标
 
@@ -77,7 +77,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    SkillHub Platform                                   │
+│                                    WittyHub Platform                                   │
 │                                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                         Web UI (Vue.js + TypeScript + Tailwind CSS)              │   │
@@ -284,7 +284,7 @@
 ### 5.2 项目目录结构
 
 ```
-skillhub/
+wittyhub/
 ├── src/                           # 后端源代码
 │   ├── __init__.py
 │   ├── api/                      # FastAPI 应用
@@ -388,10 +388,10 @@ skillhub/
 ### 6.1 CLI 功能概览
 
 ```
-skillhub - Agent/Skill 检索与下载平台 CLI
+wittyhub - Agent/Skill 检索与下载平台 CLI
 
 用法:
-  skillhub [选项] 命令 [参数]
+  wittyhub [选项] 命令 [参数]
 
 命令:
   list       列出已安装的 Skills
@@ -412,20 +412,20 @@ skillhub - Agent/Skill 检索与下载平台 CLI
 #### 6.2.1 search - 搜索命令
 
 ```
-skillhub search [关键词] [选项]
+wittyhub search [关键词] [选项]
 
 选项:
   --limit, -l <数量>         返回结果数量 (默认 20)
 
 示例:
-  skillhub search "代码调试"
-  skillhub search --limit 10
+  wittyhub search "代码调试"
+  wittyhub search --limit 10
 ```
 
 #### 6.2.2 install - 安装命令
 
 ```
-skillhub install <skill-id> [选项]
+wittyhub install <skill-id> [选项]
 
 参数:
   <skill-id>                 Skill 的唯一标识 (如 vercel-labs/skills/find-skills)
@@ -434,8 +434,8 @@ skillhub install <skill-id> [选项]
   --target, -t <目录>        安装目标目录 (默认 ~/.agents/skills)
 
 示例:
-  skillhub install vercel-labs/skills/find-skills
-  skillhub install anthropics/skills/frontend-design --target ./my-skills
+  wittyhub install vercel-labs/skills/find-skills
+  wittyhub install anthropics/skills/frontend-design --target ./my-skills
 ```
 
 #### 6.2.3 其他命令
@@ -723,7 +723,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://skillhub:skillhub@postgres:5432/skillhub
+      - DATABASE_URL=postgresql://wittyhub:wittyhub@postgres:5432/wittyhub
 
   web:
     build: ./web
@@ -754,9 +754,9 @@ services:
 database:
   host: "localhost"
   port: 5432
-  user: "skillhub"
-  password: "skillhub_secret"
-  dbname: "skillhub"
+  user: "wittyhub"
+  password: "wittyhub_secret"
+  dbname: "wittyhub"
 
 storage:
   local_path: ~/.agents/skills

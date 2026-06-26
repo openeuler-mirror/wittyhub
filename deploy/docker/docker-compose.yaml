@@ -4,28 +4,34 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=skillhub
-      - POSTGRES_PASSWORD=skillhub_secret
-      - POSTGRES_DB=skillhub
+      - POSTGRES_USER=wittyhub
+      - POSTGRES_PASSWORD=wittyhub_secret
+      - POSTGRES_DB=wittyhub
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - skillhub-network
+      - wittyhub-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U skillhub -d skillhub"]
+      test: ["CMD-SHELL", "pg_isready -U wittyhub -d wittyhub"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   embedding:
     build:
-      context: .
-      dockerfile: embedding.Dockerfile
+      context: ../..
+      dockerfile: deploy/docker/embedding.Dockerfile
     ports:
       - "8082:8081"
+    environment:
+      - MODEL_NAME=BAAI/bge-base-zh-v1.5
+      - MODEL_PATH=/models/bge-base-zh-v1.5
+      - SENTENCE_TRANSFORMERS_HOME=/models-cache
+    volumes:
+      - ../../models:/models:ro
+      - huggingface-cache:/models-cache
     networks:
-      - skillhub-network
+      - wittyhub-network
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/health').raise_for_status()"]
       interval: 30s
@@ -42,32 +48,32 @@ services:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
     ports:
-      - "8081:8080"
+      - "8081:8081"
     environment:
-      - SKILLHUB_CONFIG=/app/config.yaml
+      - WITTYHUB_CONFIG=/app/config.yaml
       - DATABASE__HOST=db
       - DATABASE__PORT=5432
-      - DATABASE__USER=skillhub
-      - DATABASE__PASSWORD=skillhub_secret
-      - DATABASE__DBNAME=skillhub
+      - DATABASE__USER=wittyhub
+      - DATABASE__PASSWORD=wittyhub_secret
+      - DATABASE__DBNAME=wittyhub
     volumes:
       - ./config.docker.yaml:/app/config.yaml:ro
       - ../../src:/app/src:ro
+      - ../../scripts:/app/scripts:ro
+      - ../../migrations:/app/migrations:ro
       - skill-data:/data/skills
     networks:
-      - skillhub-network
+      - wittyhub-network
     depends_on:
       db:
         condition: service_healthy
-      embedding:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/api/v1/health').raise_for_status()"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/api/v1/health').raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8080 --reload
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8081 --reload
 
   web:
     image: nginx:alpine
@@ -77,14 +83,15 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ../../web/dist:/usr/share/nginx/html:ro
     networks:
-      - skillhub-network
+      - wittyhub-network
     depends_on:
       - api
 
 volumes:
   postgres-data:
   skill-data:
+  huggingface-cache:
 
 networks:
-  skillhub-network:
+  wittyhub-network:
     driver: bridge

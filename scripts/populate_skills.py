@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from core.database import get_sync_db, sync_engine
 from core.config import get_settings
-from api.models.models import Base, Skill, Agent
+from src.models.orm import Base, Skill, Agent
 
 settings = get_settings()
 

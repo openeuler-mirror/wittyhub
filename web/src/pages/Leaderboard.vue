@@ -19,17 +19,6 @@ onMounted(async () => {
 })
 
 function getSkillRoutePath(skillId: string): string {
-  const lastColonIndex = skillId.lastIndexOf(':')
-  if (lastColonIndex > 0) {
-    const base = skillId.substring(0, lastColonIndex)
-    const firstSlashIndex = base.indexOf('/')
-    if (firstSlashIndex > 0) {
-      const owner = base.substring(0, firstSlashIndex)
-      const name = base.substring(firstSlashIndex + 1)
-      return `/skills/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
-    }
-    return `/skills/${encodeURIComponent(base)}`
-  }
   return `/skills/${encodeURIComponent(skillId)}`
 }
 </script>

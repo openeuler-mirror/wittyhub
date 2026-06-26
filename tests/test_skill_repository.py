@@ -1,6 +1,6 @@
 import uuid
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
 
@@ -52,7 +52,7 @@ class TestSkillRepositoryUnit:
             "category": "Testing",
             "tags": ["test"],
             "platform": "openclaw",
-            "metadata": {},
+            "extra_metadata": {},
             "security_score": 85,
             "download_count": 10,
             "rating": "4.5",
@@ -81,7 +81,7 @@ class TestConfig:
         with patch.dict(
             "os.environ",
             {
-                "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/skillhub",
+                "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/wittyhub",
             },
         ):
             settings = get_settings()
@@ -115,7 +115,7 @@ class TestSkillSchema:
             "category": "Testing",
             "tags": ["test"],
             "platform": "openclaw",
-            "metadata": {},
+            "extra_metadata": {},
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }

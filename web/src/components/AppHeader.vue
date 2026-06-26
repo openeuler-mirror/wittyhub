@@ -32,7 +32,7 @@ onMounted(() => {
           <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center">
             <span class="text-white font-bold text-sm">S</span>
           </div>
-          <span class="text-xl font-semibold text-primary-500">SkillHub</span>
+          <span class="text-xl font-semibold text-primary-500">WittyHub</span>
         </RouterLink>
 
         <nav class="hidden md:flex items-center gap-6">

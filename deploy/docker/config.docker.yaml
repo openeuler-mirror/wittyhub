@@ -1,9 +1,9 @@
 database:
   host: "db"
   port: 5432
-  user: "skillhub"
-  password: "skillhub_secret"
-  dbname: "skillhub"
+  user: "wittyhub"
+  password: "wittyhub_secret"
+  dbname: "wittyhub"
   sslmode: "disable"
 
 storage:

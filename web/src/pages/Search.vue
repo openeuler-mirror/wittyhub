@@ -44,6 +44,7 @@ async function fetchSkills(reset = true) {
         skip: skip.value,
         limit: limit,
         category: selectedCategory.value || undefined,
+        mode: 'text',
       })
       let results = res.results as Skill[]
       if (selectedSecurity.value) {
@@ -91,7 +92,7 @@ async function fetchSkills(reset = true) {
 }
 
 async function loadMore() {
-  if (loadingMore.value || !hasMore.value) return
+  if (loading.value || loadingMore.value || !hasMore.value) return
   await fetchSkills(false)
 }
 
@@ -114,7 +115,12 @@ function setupObserver() {
 
   observer = new IntersectionObserver(
     (entries) => {
-      if (entries[0].isIntersecting && hasMore.value && !loadingMore.value) {
+      if (
+        entries[0].isIntersecting &&
+        hasMore.value &&
+        !loading.value &&
+        !loadingMore.value
+      ) {
         loadMore()
       }
     },

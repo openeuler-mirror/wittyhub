@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate test data for SkillHub
+Generate test data for WittyHub
 Creates 200 skills with multiple versions and realistic content
 
 Usage:

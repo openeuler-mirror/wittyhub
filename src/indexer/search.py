@@ -1,10 +1,11 @@
 from collections import defaultdict
+import re
 
-from sqlalchemy import func, select, text, String, cast, column
+from sqlalchemy import func, select, text, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
-from src.api.models.models import Skill
+from src.models.orm import Skill
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
@@ -30,6 +31,84 @@ def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]
 class SearchService:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    def _apply_skill_filters(
+        self,
+        query,
+        *,
+        category: str | None = None,
+        platform: str | None = None,
+        tags: list[str] | None = None,
+    ):
+        if category:
+            query = query.where(Skill.category == category)
+        if platform:
+            query = query.where(Skill.platform == platform)
+        if tags:
+            query = query.where(Skill.tags.contains(tags))
+        return query
+
+    def _item_version_sort_key(self, item: dict[str, Any]) -> tuple[int, tuple[int, ...], int, str, str, str]:
+        version = str(item.get("version") or "").strip()
+        if version.lower() == "latest":
+            return (
+                2,
+                tuple(),
+                0,
+                "",
+                str(item.get("updated_at") or ""),
+                str(item.get("created_at") or ""),
+            )
+        match = re.fullmatch(
+            r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?",
+            version,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            major = int(match.group(1) or 0)
+            minor = int(match.group(2) or 0)
+            patch = int(match.group(3) or 0)
+            prerelease = (match.group(4) or "").lower()
+            is_stable = 1 if not prerelease else 0
+            return (
+                1,
+                (major, minor, patch),
+                is_stable,
+                prerelease,
+                str(item.get("updated_at") or ""),
+                str(item.get("created_at") or ""),
+            )
+        return (
+            0,
+            tuple(),
+            0,
+            "",
+            str(item.get("updated_at") or ""),
+            str(item.get("created_at") or ""),
+        )
+
+    def _dedupe_skill_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+
+        for index, item in enumerate(results):
+            dedupe_key = str(item.get("skill_id") or "").strip().lower()
+            if not dedupe_key:
+                continue
+
+            existing = grouped.get(dedupe_key)
+            if existing is None:
+                grouped[dedupe_key] = {
+                    "first_index": index,
+                    "representative": item,
+                }
+                continue
+
+            existing_item = existing["representative"]
+            if self._item_version_sort_key(item) > self._item_version_sort_key(existing_item):
+                existing["representative"] = item
+
+        ordered = sorted(grouped.values(), key=lambda entry: entry["first_index"])
+        return [entry["representative"] for entry in ordered]
 
     async def search_skills(
         self,
@@ -64,9 +143,10 @@ class SearchService:
                 text_results.get("results", []),
                 vector_results.get("results", []),
             )
+            deduped = self._dedupe_skill_results(combined)
             return {
-                "results": combined[offset:offset + limit],
-                "total": len(combined),
+                "results": deduped[offset:offset + limit],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -82,9 +162,10 @@ class SearchService:
                 tags=tags,
             )
         else:
+            deduped = self._dedupe_skill_results(text_results["results"])
             return {
-                "results": text_results["results"][offset:offset + limit],
-                "total": text_results["total"],
+                "results": deduped[offset:offset + limit],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -124,23 +205,28 @@ class SearchService:
             (Skill.description.ilike(f"%{query}%"))
         )
 
-        if category:
-            base_query = base_query.where(Skill.category == category)
-        if platform:
-            base_query = base_query.where(Skill.platform == platform)
-        if tags:
-            base_query = base_query.where(Skill.tags.contains(tags))
+        base_query = self._apply_skill_filters(
+            base_query,
+            category=category,
+            platform=platform,
+            tags=tags,
+        )
 
-        count_query = select(func.count()).select_from(
-            base_query.subquery()
+        count_subquery = base_query.subquery()
+        count_query = select(func.count(func.distinct(count_subquery.c.skill_id))).select_from(
+            count_subquery
         )
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
 
-        base_query = base_query.order_by(text("rank desc"), Skill.download_count.desc())
-        base_query = base_query.offset(offset).limit(limit)
-
-        result = await self.session.execute(base_query)
+        # Pull a bounded candidate set, then choose the representative version per skill_id
+        # in Python so search cards use the same "latest version" rule as the detail page.
+        candidate_query = (
+            base_query
+            .order_by(text("rank desc"), Skill.download_count.desc(), desc(Skill.updated_at), desc(Skill.created_at))
+            .limit(max(limit * 10, offset + limit * 5, 100))
+        )
+        result = await self.session.execute(candidate_query)
         rows = result.all()
 
         results = []
@@ -165,7 +251,8 @@ class SearchService:
                 "text_rank": float(rank) if rank else 0,
             })
 
-        return {"results": results, "total": total}
+        deduped = self._dedupe_skill_results(results)
+        return {"results": deduped[offset:offset + limit], "total": total}
 
     async def _vector_search(
         self,
@@ -180,7 +267,7 @@ class SearchService:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
         where_clauses = ["embedding IS NOT NULL"]
-        params = {"limit": limit, "offset": offset}
+        params = {"limit": limit, "offset": offset, "embedding": embedding_str}
 
         if category:
             where_clauses.append("category = :category")
@@ -198,7 +285,7 @@ class SearchService:
             SELECT id, skill_id, name, description, version, commit_id, author, source,
                    source_url, category, tags, platform, extra_metadata, content,
                    security_score, download_count, rating, created_at, updated_at,
-                   l2_distance(embedding::vector, '{embedding_str}'::vector) AS distance
+                   embedding <-> CAST(:embedding AS vector) AS distance
             FROM skills
             WHERE {where_sql}
             ORDER BY distance ASC
@@ -243,7 +330,7 @@ class SearchService:
         offset: int = 0,
         category: str | None = None,
     ) -> dict[str, Any]:
-        from src.api.models.models import Agent
+        from src.models.orm import Agent
 
         agent_search_text = func.concat(
             Agent.name, " ",

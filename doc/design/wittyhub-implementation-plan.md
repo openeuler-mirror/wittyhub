@@ -1,11 +1,11 @@
-# SkillHub 系统设计说明书
+# WittyHub 系统设计说明书
 
 ## 文档信息
 
 | 项目 | 内容 |
 |------|------|
-| 项目名称 | SkillHub - Agent/Skill 检索与下载平台 |
-| 文档版本 | v4.0 |
+| 项目名称 | WittyHub - Agent/Skill 检索与下载平台 |
+| 文档版本 | v5.0 |
 | 文档类型 | 系统设计说明书 |
 
 ---
@@ -14,7 +14,7 @@
 
 ### 1.1 系统定位
 
-SkillHub 是一个去中心化的 Agent/Skill 检索与下载平台。平台本地只存储索引元数据，Skill 内容托管在 GitHub / GitCode / Gitee 等外部仓库，通过 REST API、Web UI 和 CLI 三种方式对外提供服务。
+WittyHub 是一个去中心化的 Agent/Skill 检索与下载平台。平台本地只存储索引元数据，Skill 内容托管在 GitHub / GitCode / Gitee 等外部仓库，通过 REST API、Web UI 和 CLI 三种方式对外提供服务。
 
 ### 1.2 核心设计原则
 
@@ -50,8 +50,8 @@ graph LR
         SD[Skill Developer<br/>Skill 开发者]
     end
 
-    subgraph SkillHub 系统
-        SYS((SkillHub Platform))
+    subgraph WittyHub 系统
+        SYS((WittyHub Platform))
     end
 
     subgraph 外部系统
@@ -72,7 +72,7 @@ graph LR
 | 参与者 | 说明 | 典型操作 |
 |--------|------|----------|
 | Web User | 浏览器访问平台 | 搜索、浏览详情、查看安全报告、获取安装命令 |
-| CLI User | 使用 `skillhub` 命令行 | search / install / download / audit |
+| CLI User | 使用 `wittyhub` 命令行 | search / install / download / audit |
 | System Admin | 运维人员 | 触发重索引、查看统计、Docker 部署 |
 | Skill Developer | 本地管理 Skill | install 到 `~/.agents/skills/` |
 
@@ -153,14 +153,14 @@ graph TB
 | EmbeddingService | `src/ai/embedding.py` | 调用 BGE 模型生成查询/文档向量 |
 | DownloadManager | `src/storage/downloader.py` | 多平台下载 URL 格式化与本地存储 |
 | SecurityDetector | `src/security/detector.py` | 供应链安全检测与风险评分 |
-| Repository | `src/api/models/repository.py` | 数据库 CRUD 与统计查询 |
-| CLI | `cli/` | 命令行封装，install 含 ZIP 解压逻辑 |
+| Repository | `src/models/repository.py` | 数据库 CRUD 与统计查询 |
+| SkillClawer | `skillclawer/` | 技能仓库爬取、发现、分类 |
 
 ### 3.3 包依赖关系
 
 ```
 web/ ──HTTP──► src/api/routes/*
-cli/ ──HTTP──► src/api/routes/*
+skillclawer/ ──► src/models/repository.py
 src/api/routes/index.py ──► src/indexer/search.py
                           ──► src/ai/embedding.py
 src/api/routes/skills.py ──► src/storage/downloader.py
@@ -174,12 +174,25 @@ src/storage/downloader.py ──► GitHub/GitCode/Gitee (HTTP)
 
 ```mermaid
 erDiagram
+    SKILL_SOURCE_REPOSITORIES ||--o{ SKILLS : contains
     SKILLS ||--o{ SECURITY_AUDITS : has
     SKILLS ||--o{ DOWNLOAD_HISTORY : tracks
     AGENTS ||--o{ SECURITY_AUDITS : has
 
+    SKILL_SOURCE_REPOSITORIES {
+        uuid id PK
+        string repo_name UK
+        string source
+        string branch
+        text url
+        text local_path
+        string skill_discover_status
+        int skill_num
+    }
+
     SKILLS {
         uuid id PK
+        uuid skill_source_repository_id FK
         string skill_id UK
         string name
         text description
@@ -302,7 +315,7 @@ RRF_score(d) = Σ  1 / (k + rank_i(d))     , k = 60
 |----------|------|------|
 | 全量重索引 | `POST /api/v1/index/reindex` | 遍历 skills，批量生成 embedding 并更新 |
 | 单条重索引 | `POST /api/v1/index/reindex/{skill_id}` | 针对单个 Skill 更新向量 |
-| CLI 触发 | `skillhub reindex` | 调用全量重索引 API |
+| CLI 触发 | `wittyhub reindex` | 调用全量重索引 API |
 
 #### 4.1.8 降级策略
 
@@ -354,7 +367,7 @@ graph LR
         CLI[CLI install]
     end
 
-    subgraph SkillHub API
+    subgraph WittyHub API
         DL[GET /skills/id/download]
         DM[DownloadManager]
     end
@@ -443,9 +456,9 @@ graph TB
         U[用户浏览器 / CLI]
     end
 
-    subgraph Docker Compose : skillhub-network
+    subgraph Docker Compose : wittyhub-network
         NG[web<br/>nginx:alpine<br/>:8080→80]
-        API[api<br/>FastAPI uvicorn<br/>:8081→8080]
+        API[api<br/>FastAPI uvicorn<br/>:8081→8081]
         EMB[embedding<br/>BGE 模型服务<br/>:8082→8081]
         DB[(db<br/>pgvector/pg16<br/>:5432)]
     end
@@ -471,9 +484,9 @@ graph TB
 
 | 服务 | 镜像/构建 | 端口 | 依赖 | 说明 |
 |------|-----------|------|------|------|
-| db | pgvector/pgvector:pg16 | 5432 | — | 初始化 init.sql（扩展 + 表结构） |
+| db | pgvector/pgvector:pg16 | 5432 | — | 初始化 Alembic 迁移（扩展 + 表结构） |
 | embedding | embedding.Dockerfile | 8082→8081 | — | BGE 模型，内存限制 4G，启动 ~120s |
-| api | deploy/docker/Dockerfile | 8081→8080 | db ✓, embedding ✓ | FastAPI，挂载 config.docker.yaml |
+| api | deploy/docker/Dockerfile | 8081→8081 | db ✓ | FastAPI，挂载 config.docker.yaml |
 | web | nginx:alpine | 8080→80 | api | 静态 SPA + `/api/` 反向代理 |
 
 #### 4.3.4 Nginx 路由规则
@@ -481,14 +494,14 @@ graph TB
 | 路径 | 目标 | 说明 |
 |------|------|------|
 | `/` | `web/dist/index.html` | SPA fallback (`try_files`) |
-| `/api/` | `http://api:8080/api/` | 反向代理到 FastAPI |
+| `/api/` | `http://api:8081/api/` | 反向代理到 FastAPI |
 | `/assets/` | 静态文件 | 1 年缓存 |
 
 #### 4.3.5 健康检查与启动顺序
 
 ```yaml
 # 启动依赖链
-db (pg_isready) ──► embedding (HTTP /health) ──► api (HTTP /api/v1/health) ──► web
+db (pg_isready) ──► api (HTTP /api/v1/health) ──► web
 ```
 
 | 服务 | 检查方式 | 间隔 | 启动宽限期 |
@@ -515,7 +528,7 @@ storage:
   local_path: "/data/skills"    # 挂载 skill-data 卷
 ```
 
-环境变量 `SKILLHUB_CONFIG` 指向配置文件路径；数据库连接亦可通过 `DATABASE__*` 环境变量覆盖。
+环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；数据库连接亦可通过 `DATABASE__*` 环境变量覆盖。
 
 #### 4.3.7 一键部署
 
@@ -581,7 +594,7 @@ sequenceDiagram
     participant PG as PostgreSQL
     participant GH as GitHub
 
-    User->>CLI: skillhub install owner/repo/skill-name
+    User->>CLI: wittyhub install owner/repo/skill-name
 
     CLI->>API: GET /skills/{skill_id}/download
     API->>PG: 查询 skill 记录
@@ -720,8 +733,8 @@ GET /api/v1/index/search?q={query}&mode=hybrid&category=&tags=&skip=0&limit=20
 **命令**：
 
 ```bash
-skillhub install vercel-labs/skills/find-skills
-skillhub install anthropics/skills/frontend-design --target ./my-skills
+wittyhub install vercel-labs/skills/find-skills
+wittyhub install anthropics/skills/frontend-design --target ./my-skills
 ```
 
 ---
@@ -743,7 +756,7 @@ skillhub install anthropics/skills/frontend-design --target ./my-skills
 **命令**：
 
 ```bash
-skillhub reindex
+wittyhub reindex
 # 或
 curl -X POST http://localhost:8081/api/v1/index/reindex
 ```
@@ -759,10 +772,10 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  Host Machine                                                            │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │  Docker Network: skillhub-network                                  │  │
+│  │  Docker Network: wittyhub-network                                  │  │
 │  │                                                                    │  │
 │  │  ┌─────────────┐   proxy /api/   ┌─────────────┐                  │  │
-│  │  │  web:80     │──────────────►│  api:8080   │                  │  │
+│  │  │  web:80     │──────────────►│  api:8081   │                  │  │
 │  │  │  (nginx)    │               │  (FastAPI)  │                  │  │
 │  │  │  :8080      │               │  :8081      │                  │  │
 │  │  └─────────────┘               └──────┬──────┘                  │  │
@@ -807,7 +820,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 - [ ] `GET /api/v1/index/search?q=测试&mode=hybrid` 返回结果
 - [ ] Web 首页 `http://localhost:8080` 可访问
 - [ ] PostgreSQL 扩展：`vector`, `pg_trgm`, `unaccent`, `zhcfg`
-- [ ] `skillhub search "调试"` 与 `skillhub install <id>` 正常
+- [ ] `wittyhub search "调试"` 与 `wittyhub install <id>` 正常
 
 ---
 
@@ -832,6 +845,15 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | `download` | 仅获取下载 URL |
 | `audit` | 查看安全审计 |
 | `reindex` | 触发向量重索引 |
+
+### 8.3 SkillClawer 命令
+
+| 命令 | 说明 |
+|------|------|
+| `query` | 查询技能仓库 |
+| `create` | 创建技能仓库记录 |
+| `update` | 更新技能仓库 |
+| `delete` | 删除技能仓库 |
 
 ---
 
@@ -867,8 +889,10 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | Embedding 编码 | `src/ai/embedding.py` |
 | 搜索 API + 重索引 | `src/api/routes/index.py` |
 | 下载 URL 格式化 | `src/storage/downloader.py` |
-| CLI 安装解压 | `cli/main.py` (install 命令) |
+| 数据访问层 | `src/models/repository.py` |
+| ORM 模型 | `src/models/orm.py` |
+| 技能爬取 | `skillclawer/main.py` |
 | Docker 编排 | `deploy/docker/docker-compose.yaml` |
 | Nginx 配置 | `deploy/docker/nginx.conf` |
-| DB 初始化 | `deploy/docker/init.sql` |
+| 数据库迁移 | `migrations/versions/` |
 

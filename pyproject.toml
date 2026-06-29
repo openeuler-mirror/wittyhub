@@ -1,12 +1,12 @@
 [project]
-name = "skillhub"
+name = "wittyhub"
 version = "0.1.0"
-description = "SkillHub Platform for Agent and Skill Discovery"
+description = "WittyHub Platform for Agent and Skill Discovery"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "SkillHub Team"}
+    {name = "WittyHub Team"}
 ]
 
 dependencies = [
@@ -22,6 +22,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.26.0",
     "aiohttp>=3.9.1",
+    "lxml>=5.0.0",
+    "PyYAML>=6.0.0",
     "rich>=13.7.0",
     "typer>=0.9.0",
     "click>=8.1.7",
@@ -29,6 +31,7 @@ dependencies = [
     "python-multipart>=0.0.6",
     "aiofiles>=23.2.1",
     "pillow>=10.2.0",
+    "pgvector>=0.3.6",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +47,7 @@ dev = [
 ]
 
 [project.scripts]
-skillhub = "src.cli.main:app"
+wittyhub = "src.cli.main:app"
 
 [build-system]
 requires = ["hatchling"]

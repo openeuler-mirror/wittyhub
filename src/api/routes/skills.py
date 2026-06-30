@@ -1,8 +1,6 @@
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.repository import SkillRepository, DownloadHistoryRepository
@@ -106,16 +104,20 @@ async def get_skill_versions(
     db: AsyncSession = Depends(get_db),
 ):
     skill_repo = SkillRepository(db)
-    skills = await skill_repo.get_versions_by_base_skill(None, skill_id)
+    latest_skill = await skill_repo.get_by_skill_id(skill_id)
+    tagged_versions = await skill_repo.get_versions_by_base_skill(None, skill_id)
 
-    if not skills:
+    if not latest_skill and not tagged_versions:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    source_url = skills[0].source_url
+    versions = [latest_skill]
+    if tagged_versions is not None:
+        versions.extend(tagged_versions)
+
     return SkillVersionsResponse(
-        source_url=source_url,
+        source_url=latest_skill.source_url,
         skill_id=skill_id,
-        versions=[skill_to_response(s) for s in skills],
+        versions=[skill_to_response(s) for s in versions],
     )
 
 

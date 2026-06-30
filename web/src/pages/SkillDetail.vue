@@ -63,22 +63,10 @@ const orderedVersions = computed(() => {
 
 function formatVersionLabel(version: string | null | undefined): string {
   if ((version || '').toLowerCase() === 'latest') {
-    return 'latest (最新分支)'
+    return 'latest (最新提交)'
   }
   return version || 'main'
 }
-
-const downloadUrl = computed(() => {
-  if (!skill.value) return ''
-  const version = selectedVersion.value || 'main'
-  const owner = skill.value.source_url.match(/github\.com\/([^\/]+)/)?.[1] || ''
-  const repo = skill.value.source_url.match(/github\.com\/[^\/]+\/([^\/]+)/)?.[1] || ''
-  const commitId = selectedCommitId.value
-  if (commitId) {
-    return `https://github.com/${owner}/${repo}/archive/${commitId}.zip`
-  }
-  return `https://github.com/${owner}/${repo}/archive/refs/heads/${version}.zip`
-})
 
 const browseUrl = computed(() => {
   if (!skill.value) return ''
@@ -87,7 +75,7 @@ const browseUrl = computed(() => {
 
 const selectedVersionSourceLabel = computed(() => {
   const version = (skill.value?.version || '').toLowerCase()
-  if (version === 'latest') return '最新分支'
+  if (version === 'latest') return '最新提交'
   if (skill.value?.version) return '发布版本'
   return '-'
 })
@@ -201,7 +189,7 @@ const copyCliCommand = async () => {
                 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600': selectedVersion !== v.version
               }"
             >
-              {{ formatVersionLabel(v.version) }}{{ v.commit_id ? ` (${v.commit_id.slice(0, 7)})` : '' }}
+              {{ formatVersionLabel(v.version) }}
             </button>
           </div>
         </div>

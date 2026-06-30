@@ -285,7 +285,7 @@ class SkillRepository:
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
             return None
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(datetime.timezone.utc)
         await self.session.execute(
             update(Skill).where(Skill.id == existing.id).values(**update_data)
         )
@@ -321,7 +321,7 @@ class SkillRepository:
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
-            .values(last_indexed_at=datetime.utcnow())
+            .values(last_indexed_at=datetime.now(datetime.timezone.utc))
         )
         await self.session.flush()
 
@@ -332,7 +332,7 @@ class SkillRepository:
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
-            .values(embedding=embedding, last_indexed_at=datetime.utcnow())
+            .values(embedding=embedding, last_indexed_at=datetime.now(datetime.timezone.utc))
         )
         await self.session.flush()
         await self.session.commit()

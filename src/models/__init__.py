@@ -4,6 +4,7 @@ from src.models.orm import (
     DownloadHistory,
     SecurityAudit,
     Skill,
+    SkillVersion,
     SkillSourceRepositoryModel,
 )
 from src.models.repository import (
@@ -22,6 +23,7 @@ __all__ = [
     "SecurityAudit",
     "SecurityAuditRepository",
     "Skill",
+    "SkillVersion",
     "SkillRepository",
     "SkillSourceRepositoryModel",
 ]

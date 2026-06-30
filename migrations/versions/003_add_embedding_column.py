@@ -21,9 +21,15 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # pgvector 索引不依赖 ORM autogenerate，统一由 migration 手写维护
     op.add_column("skills", sa.Column("embedding", Vector(dim=768), nullable=True))
+    op.add_column("skill_versions", sa.Column("embedding", Vector(dim=768), nullable=True))
     op.execute('CREATE INDEX idx_skills_embedding ON skills USING ivfflat (embedding vector_l2_ops);')
+    op.execute(
+        'CREATE INDEX idx_skill_versions_embedding ON skill_versions USING ivfflat (embedding vector_l2_ops);'
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("idx_skill_versions_embedding", table_name="skill_versions")
     op.drop_index("idx_skills_embedding", table_name="skills")
+    op.drop_column("skill_versions", "embedding")
     op.drop_column("skills", "embedding")

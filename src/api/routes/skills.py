@@ -14,10 +14,33 @@ from src.api.schemas.skill import (
     DownloadResponse,
 )
 from src.api.services.security import SecurityService
+from src.api.services.telemetry import TelemetryService
 from src.core.database import get_db
 from src.storage.downloader import DownloadManager
 
 router = APIRouter()
+
+
+@router.get("/telemetry")
+async def receive_telemetry(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Receive telemetry data from wittyhub CLI and update counters for installs.
+    request params: 
+    {   
+        'v': '1.5.13', 
+        'event': 'install', 
+        'source': 'vercel-labs/agent-skills', 
+        'skills': 'deploy-to-vercel', 
+        'agents': 'amp,antigravity,antigravity-cli,cline,codex,cursor,deepagents,gemini-cli,github-copilot,kimi-code-cli,opencode,warp,zed,openclaw', 
+        'skillFiles': '{"deploy-to-vercel":"skills/deploy-to-vercel/SKILL.md"}'
+    }
+    """
+    params = dict(request.query_params)
+    telemetry_service = TelemetryService(db)
+    matched_skill_ids = await telemetry_service.process(params)
+    return {"ok": True, "matched_skill_ids": matched_skill_ids}
 
 
 def skill_to_response(skill) -> SkillResponse:

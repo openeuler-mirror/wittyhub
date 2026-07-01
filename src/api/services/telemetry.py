@@ -15,18 +15,17 @@ def _slugify_telemetry_value(value: str) -> str:
     return normalized.strip("-")
 
 
-def _derive_telemetry_skill_slug(skill_name: str, skill_files: dict[str, str] | None) -> str:
+def _derive_telemetry_skill_path(skill_name: str, skill_files: dict[str, str] | None) -> str:
     if skill_files:
         skill_path = skill_files.get(skill_name)
         if skill_path:
             normalized_path = skill_path.strip().replace("\\", "/").rstrip("/")
-            parts = [part for part in normalized_path.split("/") if part]
-            if parts:
-                candidate = parts[-2] if parts[-1].lower() == "skill.md" and len(parts) >= 2 else parts[-1]
-                stem = candidate.rsplit(".", 1)[0]
-                slug = _slugify_telemetry_value(stem)
-                if slug:
-                    return slug
+            if normalized_path.lower() == "skill.md":
+                fallback_slug = _slugify_telemetry_value(skill_name)
+                if fallback_slug:
+                    return fallback_slug
+            if normalized_path.lower().endswith("/skill.md"):
+                return normalized_path[: -len("/SKILL.md")]
     return _slugify_telemetry_value(skill_name)
 
 
@@ -47,11 +46,11 @@ def build_skill_id_from_telemetry(
 
     owner = _slugify_telemetry_value(segments[-2])
     repo = _slugify_telemetry_value(segments[-1])
-    skill_slug = _derive_telemetry_skill_slug(skill_name, skill_files)
-    if not owner or not repo or not skill_slug:
+    skill_path = _derive_telemetry_skill_path(skill_name, skill_files)
+    if not owner or not repo or not skill_path:
         return None
 
-    return f"{source_type}/{owner}/{repo}/{skill_slug}"
+    return f"{source_type}/{owner}/{repo}/{skill_path}"
 
 
 class TelemetryService:

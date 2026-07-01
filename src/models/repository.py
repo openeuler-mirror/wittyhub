@@ -250,6 +250,7 @@ class SkillRepository:
         platform: str | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
+        sort_by: str = "updated_at",
     ) -> tuple[list[Skill], int]:
         filtered_query = self._apply_skill_filters(
             select(Skill),
@@ -270,9 +271,14 @@ class SkillRepository:
         )
         total = await self.session.scalar(count_query)
 
+        if sort_by == "download_count":
+            order_by = [desc(Skill.download_count), desc(Skill.updated_at), desc(Skill.created_at)]
+        else:
+            order_by = [desc(Skill.updated_at), desc(Skill.created_at)]
+
         query = (
             filtered_query
-            .order_by(desc(Skill.updated_at), desc(Skill.created_at))
+            .order_by(*order_by)
             .offset(skip)
             .limit(limit)
         )

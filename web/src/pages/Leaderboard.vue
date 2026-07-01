@@ -9,8 +9,8 @@ const loading = ref(true)
 
 onMounted(async () => {
   try {
-    const res = await api.listSkills({ limit: 20 })
-    skills.value = res.skills.sort((a, b) => b.download_count - a.download_count)
+    const res = await api.listSkills({ limit: 20, sort_by: 'download_count' })
+    skills.value = res.skills
   } catch (e) {
     console.error('Failed to load leaderboard:', e)
   } finally {

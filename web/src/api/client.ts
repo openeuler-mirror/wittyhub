@@ -25,6 +25,7 @@ export const api = {
     category?: string
     platform?: string
     tags?: string
+    sort_by?: 'updated_at' | 'download_count'
   } = {}): Promise<SkillListResponse> {
     const { data } = await client.get('/skills/', { params })
     return data

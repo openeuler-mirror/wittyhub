@@ -34,17 +34,20 @@ function getRepoUrlFromSourceUrl(sourceUrl: string): string {
   return sourceUrl.replace(/\/blob\/[^/]+\/.*$/, '')
 }
 
-function getSkillSlug(skillId: string): string {
-  const parts = skillId.split('/')
-  return parts[parts.length - 1] || skillId
+function quoteCliArg(value: string): string {
+  if (!value) return ''
+  if (/^[A-Za-z0-9._/-]+$/.test(value)) {
+    return value
+  }
+  return `"${value.replace(/"/g, '\\"')}"`
 }
 
-const installSourceArg = computed(() => {
+const installCommandArgs = computed(() => {
   if (!skill.value) return ''
   const repoUrl = getRepoUrlFromSourceUrl(skill.value.source_url || '')
-  const skillSlug = getSkillSlug(skill.value.skill_id || routeSkillId.value)
-  if (!repoUrl || !skillSlug) return ''
-  return `${repoUrl} --skill ${skillSlug}`
+  const skillName = skill.value.name || ''
+  if (!repoUrl || !skillName) return ''
+  return `${repoUrl} --skill ${quoteCliArg(skillName)}`
 })
 
 const renderedContent = computed(() => {
@@ -140,7 +143,7 @@ const selectVersion = async (version: string) => {
 }
 
 const copyCliCommand = async () => {
-  const command = `npx wittyhub install ${installSourceArg.value}`
+  const command = `npx wittyhub install ${installCommandArgs.value}`
   try {
     await navigator.clipboard.writeText(command)
     cliCopied.value = true
@@ -219,7 +222,7 @@ const copyCliCommand = async () => {
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CLI 安装</h3>
             <div class="flex items-center gap-2">
               <code class="flex-1 bg-gray-200 dark:bg-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200 overflow-x-auto">
-                npx wittyhub install {{ installSourceArg }}
+                npx wittyhub install {{ installCommandArgs }}
               </code>
               <button
                 @click="copyCliCommand"

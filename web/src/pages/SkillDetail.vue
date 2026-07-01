@@ -64,6 +64,15 @@ const orderedVersions = computed(() => {
   })
 })
 
+const latestDownloadCount = computed(() => {
+  const latestVersion = versions.value.find(v => (v.version || '').toLowerCase() === 'latest')
+  if (latestVersion) return latestVersion.download_count
+  if ((skill.value?.version || '').toLowerCase() === 'latest') {
+    return skill.value?.download_count ?? 0
+  }
+  return null
+})
+
 function formatVersionLabel(version: string | null | undefined): string {
   if ((version || '').toLowerCase() === 'latest') {
     return 'latest (最新提交)'
@@ -207,13 +216,28 @@ const copyCliCommand = async () => {
             >
               📦 下载 ZIP {{ selectedCommitId ? `(commit: ${selectedCommitId.slice(0, 7)})` : '' }}
             </a> -->
+            <div
+              v-if="latestDownloadCount !== null"
+              class="inline-flex min-h-[44px] items-center gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-cyan-50 px-4 py-2.5 shadow-sm dark:border-sky-900 dark:from-sky-950/40 dark:to-cyan-950/30"
+            >
+              <div class="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-sky-700 shadow-sm dark:bg-sky-900/40 dark:text-sky-200">
+                ↓
+              </div>
+              <div class="leading-tight">
+                <div class="text-xs font-medium uppercase tracking-[0.12em] text-sky-600 dark:text-sky-300">下载量</div>
+                <div class="text-lg font-semibold text-sky-950 dark:text-sky-100">
+                  {{ latestDownloadCount.toLocaleString() }}
+                </div>
+              </div>
+            </div>
             <a
               :href="browseUrl"
               target="_blank"
               rel="noopener"
-              class="btn-secondary"
+              class="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-primary-200 bg-white px-4 py-2.5 text-primary-600 shadow-sm transition-colors hover:bg-primary-50 hover:border-primary-300 dark:border-primary-500/50 dark:bg-gray-800 dark:text-primary-300 dark:hover:bg-gray-700"
             >
-              🌐 浏览仓库
+              <span class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300">↗</span>
+              <span class="font-medium">浏览仓库</span>
             </a>
           </div>
 
@@ -269,10 +293,6 @@ const copyCliCommand = async () => {
             <div>
               <dt class="text-sm text-gray-500 dark:text-gray-400">来源</dt>
               <dd class="font-medium text-gray-900 dark:text-white">{{ skill.source }}</dd>
-            </div>
-            <div>
-              <dt class="text-sm text-gray-500 dark:text-gray-400">下载量</dt>
-              <dd class="font-medium text-gray-900 dark:text-white">{{ skill.download_count.toLocaleString() }}</dd>
             </div>
             <div>
               <dt class="text-sm text-gray-500 dark:text-gray-400">版本</dt>

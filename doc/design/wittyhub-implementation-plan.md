@@ -154,13 +154,13 @@ graph TB
 | DownloadManager | `src/storage/downloader.py` | 多平台下载 URL 格式化与本地存储 |
 | SecurityDetector | `src/security/detector.py` | 供应链安全检测与风险评分 |
 | Repository | `src/models/repository.py` | 数据库 CRUD 与统计查询 |
-| SkillClawer | `skillclawer/` | 技能仓库爬取、发现、分类 |
+| SkillCrawler | `skillcrawler/` | 技能仓库爬取、发现、分类 |
 
 ### 3.3 包依赖关系
 
 ```
 web/ ──HTTP──► src/api/routes/*
-skillclawer/ ──► src/models/repository.py
+skillcrawler/ ──► src/models/repository.py
 src/api/routes/index.py ──► src/indexer/search.py
                           ──► src/ai/embedding.py
 src/api/routes/skills.py ──► src/storage/downloader.py
@@ -846,7 +846,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | `audit` | 查看安全审计 |
 | `reindex` | 触发向量重索引 |
 
-### 8.3 SkillClawer 命令
+### 8.3 SkillCrawler 命令
 
 | 命令 | 说明 |
 |------|------|
@@ -891,7 +891,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | 下载 URL 格式化 | `src/storage/downloader.py` |
 | 数据访问层 | `src/models/repository.py` |
 | ORM 模型 | `src/models/orm.py` |
-| 技能爬取 | `skillclawer/main.py` |
+| 技能爬取 | `skillcrawler/main.py` |
 | Docker 编排 | `deploy/docker/docker-compose.yaml` |
 | Nginx 配置 | `deploy/docker/nginx.conf` |
 | 数据库迁移 | `migrations/versions/` |

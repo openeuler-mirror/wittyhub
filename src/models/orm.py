@@ -12,8 +12,8 @@ class Base(DeclarativeBase):
     pass
 
 
-class SkillSourceRepositoryModel(Base):
-    __tablename__ = "skill_source_repositories"
+class SkillRepoModel(Base):
+    __tablename__ = "skill_repos"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     repo_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
@@ -29,18 +29,18 @@ class SkillSourceRepositoryModel(Base):
     )
 
     skills: Mapped[list["Skill"]] = relationship(
-        back_populates="source_repository",
+        back_populates="skill_repo",
         cascade="all, delete-orphan",
     )
     skill_versions: Mapped[list["SkillVersion"]] = relationship(
-        back_populates="source_repository",
+        back_populates="skill_repo",
         cascade="all, delete-orphan",
     )
 
     __table_args__ = (
-        Index("idx_skill_source_repositories_source", "source"),
-        Index("idx_skill_source_repositories_status", "skill_discover_status"),
-        Index("idx_skill_source_repositories_created_at", desc("created_at")),
+        Index("idx_skill_repos_source", "source"),
+        Index("idx_skill_repos_status", "skill_discover_status"),
+        Index("idx_skill_repos_created_at", desc("created_at")),
     )
 
 
@@ -48,9 +48,9 @@ class Skill(Base):
     __tablename__ = "skills"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    skill_source_repository_id: Mapped[uuid.UUID] = mapped_column(
+    skill_repo_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("skill_source_repositories.id", ondelete="CASCADE"),
+        ForeignKey("skill_repos.id", ondelete="CASCADE"),
         nullable=False,
     )
     skill_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -76,11 +76,11 @@ class Skill(Base):
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
-    source_repository: Mapped["SkillSourceRepositoryModel"] = relationship(back_populates="skills")
+    skill_repo: Mapped["SkillRepoModel"] = relationship(back_populates="skills")
     audits: Mapped[list["SecurityAudit"]] = relationship(back_populates="skill", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("idx_skills_source_repository_id", "skill_source_repository_id"),
+        Index("idx_skills_skill_repo_id", "skill_repo_id"),
         Index("idx_skills_category", "category"),
         Index("idx_skills_platform", "platform"),
         Index("idx_skills_source", "source"),
@@ -95,9 +95,9 @@ class SkillVersion(Base):
     __tablename__ = "skill_versions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    skill_source_repository_id: Mapped[uuid.UUID] = mapped_column(
+    skill_repo_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("skill_source_repositories.id", ondelete="CASCADE"),
+        ForeignKey("skill_repos.id", ondelete="CASCADE"),
         nullable=False,
     )
     skill_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -123,10 +123,10 @@ class SkillVersion(Base):
     last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
-    source_repository: Mapped["SkillSourceRepositoryModel"] = relationship(back_populates="skill_versions")
+    skill_repo: Mapped["SkillRepoModel"] = relationship(back_populates="skill_versions")
 
     __table_args__ = (
-        Index("idx_skill_versions_source_repository_id", "skill_source_repository_id"),
+        Index("idx_skill_versions_skill_repo_id", "skill_repo_id"),
         Index("idx_skill_versions_category", "category"),
         Index("idx_skill_versions_platform", "platform"),
         Index("idx_skill_versions_source", "source"),

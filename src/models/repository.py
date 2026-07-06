@@ -12,7 +12,118 @@ from src.models.orm import (
     Agent,
     SecurityAudit,
     DownloadHistory,
+    SkillRepoModel,
 )
+
+
+class SkillRepoRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    def _coerce_repository_id(self, repository_id: str | uuid.UUID) -> uuid.UUID:
+        if isinstance(repository_id, uuid.UUID):
+            return repository_id
+        return uuid.UUID(str(repository_id))
+
+    async def list_skill_repositories(self) -> list[SkillRepoModel]:
+        result = await self.session.execute(
+            select(SkillRepoModel).order_by(SkillRepoModel.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def create_skill_repository(
+        self,
+        *,
+        repo_name: str,
+        source: str,
+        branch: str | None,
+        url: str | None,
+        local_path: str | None,
+        skill_discover_status: str,
+    ) -> SkillRepoModel:
+        repository = SkillRepoModel(
+            repo_name=repo_name,
+            source=source,
+            branch=branch,
+            url=url,
+            local_path=local_path,
+            skill_discover_status=skill_discover_status,
+            skill_num=0,
+        )
+        self.session.add(repository)
+        await self.session.flush()
+        await self.session.commit()
+        await self.session.refresh(repository)
+        return repository
+
+    async def update_skill_repository(
+        self,
+        repository_id: str | uuid.UUID,
+        *,
+        source: str | None = None,
+        branch: str | None = None,
+        url: str | None = None,
+        local_path: str | None = None,
+        skill_discover_status: str | None = None,
+        skill_num: int | None = None,
+    ) -> SkillRepoModel:
+        values: dict[str, Any] = {"updated_at": datetime.now(datetime.timezone.utc)}
+        if source is not None:
+            values["source"] = source
+        if branch is not None:
+            values["branch"] = branch
+        if url is not None:
+            values["url"] = url
+        if local_path is not None:
+            values["local_path"] = local_path
+        if skill_discover_status is not None:
+            values["skill_discover_status"] = skill_discover_status
+        if skill_num is not None:
+            values["skill_num"] = skill_num
+
+        await self.session.execute(
+            update(SkillRepoModel)
+            .where(SkillRepoModel.id == self._coerce_repository_id(repository_id))
+            .values(**values)
+        )
+        await self.session.flush()
+        await self.session.commit()
+
+        repository = await self.get_skill_repository_by_id(repository_id)
+        if repository is None:
+            raise ValueError(f"Skill repo not found: {repository_id}")
+        return repository
+
+    async def delete_skill_repository(self, repository_id: str | uuid.UUID) -> None:
+        await self.session.execute(
+            delete(SkillRepoModel).where(
+                SkillRepoModel.id == self._coerce_repository_id(repository_id)
+            )
+        )
+        await self.session.flush()
+        await self.session.commit()
+
+    async def get_skill_repository_by_id(
+        self,
+        repository_id: str | uuid.UUID,
+    ) -> SkillRepoModel | None:
+        result = await self.session.execute(
+            select(SkillRepoModel).where(
+                SkillRepoModel.id == self._coerce_repository_id(repository_id)
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_skill_repository_by_repo_name(
+        self,
+        repo_name: str,
+    ) -> SkillRepoModel | None:
+        result = await self.session.execute(
+            select(SkillRepoModel).where(
+                SkillRepoModel.repo_name == repo_name
+            )
+        )
+        return result.scalar_one_or_none()
 
 
 class SkillRepository:
@@ -99,7 +210,7 @@ class SkillRepository:
         download_count: int = 0,
     ) -> Skill:
         return Skill(
-            skill_source_repository_id=representative.skill_source_repository_id,
+            skill_repo_id=representative.skill_repo_id,
             skill_id=representative.skill_id,
             name=representative.name,
             description=representative.description,
@@ -178,15 +289,15 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
-    async def replace_for_source_repository(
+    async def replace_for_skill_repo(
         self,
-        source_repository_id: uuid.UUID,
+        skill_repo_id: uuid.UUID,
         latest_skills: list[SkillVersion],
         tagged_skills: list[SkillVersion],
     ) -> tuple[list[SkillVersion], list[SkillVersion]]:
         existing_result = await self.session.execute(
             select(Skill.skill_id, Skill.download_count)
-            .where(Skill.skill_source_repository_id == source_repository_id)
+            .where(Skill.skill_repo_id == skill_repo_id)
         )
         existing_download_counts = {
             skill_id: download_count
@@ -195,7 +306,7 @@ class SkillRepository:
 
         summary_skills: list[Skill] = []
         for skill in latest_skills:
-            skill.skill_source_repository_id = source_repository_id
+            skill.skill_repo_id = skill_repo_id
             summary_skills.append(
                 self._build_summary_skill(
                     skill,
@@ -203,13 +314,13 @@ class SkillRepository:
                 )
             )
         for skill in tagged_skills:
-            skill.skill_source_repository_id = source_repository_id
+            skill.skill_repo_id = skill_repo_id
 
         await self.session.execute(
-            delete(SkillVersion).where(SkillVersion.skill_source_repository_id == source_repository_id)
+            delete(SkillVersion).where(SkillVersion.skill_repo_id == skill_repo_id)
         )
         await self.session.execute(
-            delete(Skill).where(Skill.skill_source_repository_id == source_repository_id)
+            delete(Skill).where(Skill.skill_repo_id == skill_repo_id)
         )
         self.session.add_all(summary_skills)
         self.session.add_all(tagged_skills)

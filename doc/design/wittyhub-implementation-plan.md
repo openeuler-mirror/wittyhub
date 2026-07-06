@@ -192,7 +192,7 @@ erDiagram
 
     SKILLS {
         uuid id PK
-        uuid skill_source_repository_id FK
+        uuid skill_repo_id FK
         string skill_id UK
         string name
         text description

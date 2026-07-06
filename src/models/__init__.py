@@ -5,12 +5,13 @@ from src.models.orm import (
     SecurityAudit,
     Skill,
     SkillVersion,
-    SkillSourceRepositoryModel,
+    SkillRepoModel,
 )
 from src.models.repository import (
     AgentRepository,
     DownloadHistoryRepository,
     SecurityAuditRepository,
+    SkillRepoRepository,
     SkillRepository,
 )
 
@@ -23,7 +24,8 @@ __all__ = [
     "SecurityAudit",
     "SecurityAuditRepository",
     "Skill",
+    "SkillRepoRepository",
     "SkillVersion",
     "SkillRepository",
-    "SkillSourceRepositoryModel",
+    "SkillRepoModel",
 ]

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from typing import Any, List
 
@@ -67,7 +67,7 @@ class SkillRepoRepository:
         skill_discover_status: str | None = None,
         skill_num: int | None = None,
     ) -> SkillRepoModel:
-        values: dict[str, Any] = {"updated_at": datetime.now(datetime.timezone.utc)}
+        values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if source is not None:
             values["source"] = source
         if branch is not None:
@@ -402,7 +402,7 @@ class SkillRepository:
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
             return None
-        update_data["updated_at"] = datetime.now(datetime.timezone.utc)
+        update_data["updated_at"] = datetime.now(timezone.utc)
         await self.session.execute(
             update(Skill).where(Skill.id == existing.id).values(**update_data)
         )
@@ -438,7 +438,7 @@ class SkillRepository:
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
-            .values(last_indexed_at=datetime.now(datetime.timezone.utc))
+            .values(last_indexed_at=datetime.now(timezone.utc))
         )
         await self.session.flush()
 
@@ -449,7 +449,7 @@ class SkillRepository:
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
-            .values(embedding=embedding, last_indexed_at=datetime.now(datetime.timezone.utc))
+            .values(embedding=embedding, last_indexed_at=datetime.now(timezone.utc))
         )
         await self.session.flush()
         await self.session.commit()

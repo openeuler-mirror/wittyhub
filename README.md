@@ -213,7 +213,6 @@ wittyhub/
 │       ├── api/          # API 客户端
 │       └── router/       # 路由配置
 ├── scripts/              # 脚本
-│   ├── init_db.sh        # 数据库初始化
 │   └── generate_test_data.py  # 测试数据生成
 ├── deploy/               # 部署配置
 │   └── docker/           # Docker 部署

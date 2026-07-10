@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, desc, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -29,6 +29,10 @@ class SkillSourceRepositoryModel(Base):
     )
 
     skills: Mapped[list["Skill"]] = relationship(
+        back_populates="source_repository",
+        cascade="all, delete-orphan",
+    )
+    skill_versions: Mapped[list["SkillVersion"]] = relationship(
         back_populates="source_repository",
         cascade="all, delete-orphan",
     )
@@ -82,7 +86,54 @@ class Skill(Base):
         Index("idx_skills_source", "source"),
         Index("idx_skills_created_at", desc("created_at")),
         Index("idx_skills_tags", "tags", postgresql_using="gin"),
-        Index("idx_skills_unique", "source", "source_url", "version", "commit_id", unique=True),
+        UniqueConstraint("skill_id", name="uq_skills_skill_id"),
+        Index("idx_skills_unique", "skill_id", unique=True),
+    )
+
+
+class SkillVersion(Base):
+    __tablename__ = "skill_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    skill_source_repository_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skill_source_repositories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    skill_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    extra_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    security_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    download_count: Mapped[int] = mapped_column(Integer, default=0)
+    rating: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+
+    source_repository: Mapped["SkillSourceRepositoryModel"] = relationship(back_populates="skill_versions")
+
+    __table_args__ = (
+        Index("idx_skill_versions_source_repository_id", "skill_source_repository_id"),
+        Index("idx_skill_versions_category", "category"),
+        Index("idx_skill_versions_platform", "platform"),
+        Index("idx_skill_versions_source", "source"),
+        Index("idx_skill_versions_created_at", desc("created_at")),
+        Index("idx_skill_versions_tags", "tags", postgresql_using="gin"),
+        Index("idx_skill_versions_skill_id", "skill_id"),
+        Index("idx_skill_versions_unique", "skill_id", "version", unique=True),
     )
 
 

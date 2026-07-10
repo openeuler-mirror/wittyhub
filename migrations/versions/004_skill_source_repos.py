@@ -57,9 +57,21 @@ def upgrade() -> None:
         "skills",
         sa.Column("skill_source_repository_id", UUID, nullable=False),
     )
+    op.add_column(
+        "skill_versions",
+        sa.Column("skill_source_repository_id", UUID, nullable=False),
+    )
     op.create_foreign_key(
         "fk_skills_skill_source_repository_id",
         "skills",
+        "skill_source_repositories",
+        ["skill_source_repository_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "fk_skill_versions_skill_source_repository_id",
+        "skill_versions",
         "skill_source_repositories",
         ["skill_source_repository_id"],
         ["id"],
@@ -70,11 +82,19 @@ def upgrade() -> None:
         "skills",
         ["skill_source_repository_id"],
     )
+    op.create_index(
+        "idx_skill_versions_source_repository_id",
+        "skill_versions",
+        ["skill_source_repository_id"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("idx_skill_versions_source_repository_id", table_name="skill_versions")
     op.drop_index("idx_skills_source_repository_id", table_name="skills")
+    op.drop_constraint("fk_skill_versions_skill_source_repository_id", "skill_versions", type_="foreignkey")
     op.drop_constraint("fk_skills_skill_source_repository_id", "skills", type_="foreignkey")
+    op.drop_column("skill_versions", "skill_source_repository_id")
     op.drop_column("skills", "skill_source_repository_id")
 
     op.drop_index(

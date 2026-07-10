@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.orm import (
     Skill,
+    SkillVersion,
     Agent,
     SecurityAudit,
     DownloadHistory,
@@ -18,7 +19,9 @@ class SkillRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    def _version_sort_key(self, skill: Skill) -> tuple[int, tuple[int, ...], int, str, datetime, datetime]:
+    def _version_sort_key(
+        self, skill: Skill | SkillVersion
+    ) -> tuple[int, tuple[int, ...], int, str, datetime, datetime]:
         version = (skill.version or "").strip()
         if version.lower() == "latest":
             return (2, tuple(), 0, "", skill.updated_at, skill.created_at)
@@ -43,8 +46,8 @@ class SkillRepository:
             )
         return (0, tuple(), 0, "", skill.updated_at, skill.created_at)
 
-    def _dedupe_skills(self, skills: list[Skill]) -> list[Skill]:
-        grouped: dict[str, Skill] = {}
+    def _dedupe_skills(self, skills: list[Skill | SkillVersion]) -> list[Skill | SkillVersion]:
+        grouped: dict[str, Skill | SkillVersion] = {}
 
         for skill in skills:
             skill_id = (skill.skill_id or "").strip()
@@ -65,6 +68,7 @@ class SkillRepository:
     def _apply_skill_filters(
         self,
         query,
+        skill_model,
         *,
         category: str | None = None,
         platform: str | None = None,
@@ -72,21 +76,50 @@ class SkillRepository:
         source: str | None = None,
     ):
         if category:
-            query = query.where(Skill.category == category)
+            query = query.where(skill_model.category == category)
         if platform:
-            query = query.where(Skill.platform == platform)
+            query = query.where(skill_model.platform == platform)
         if tags:
-            query = query.where(Skill.tags.contains(tags))
+            query = query.where(skill_model.tags.contains(tags))
         if source:
-            query = query.where(Skill.source == source)
+            query = query.where(skill_model.source == source)
         return query
 
     def _latest_unique_skills_subquery(self):
         return (
             select(Skill)
-            .distinct(Skill.skill_id)
-            .order_by(Skill.skill_id, desc(Skill.updated_at), desc(Skill.created_at))
+            .order_by(desc(Skill.updated_at), desc(Skill.created_at))
             .subquery()
+        )
+
+    def _build_summary_skill(
+        self,
+        representative: SkillVersion,
+        *,
+        download_count: int = 0,
+    ) -> Skill:
+        return Skill(
+            skill_source_repository_id=representative.skill_source_repository_id,
+            skill_id=representative.skill_id,
+            name=representative.name,
+            description=representative.description,
+            version=representative.version,
+            commit_id=representative.commit_id,
+            author=representative.author,
+            source=representative.source,
+            source_url=representative.source_url,
+            category=representative.category,
+            tags=representative.tags,
+            platform=representative.platform,
+            extra_metadata=representative.extra_metadata,
+            content=representative.content,
+            security_score=representative.security_score,
+            download_count=download_count,
+            rating=representative.rating,
+            created_at=representative.created_at,
+            updated_at=representative.updated_at,
+            last_indexed_at=representative.last_indexed_at,
+            embedding=representative.embedding,
         )
 
     async def create(self, skill_data: dict[str, Any]) -> Skill:
@@ -97,9 +130,27 @@ class SkillRepository:
         await self.session.refresh(skill)
         return skill
 
+    def _select_skill_by_version(
+        self, skills: list[SkillVersion], version: str | None = None
+    ) -> SkillVersion | None:
+        if not skills:
+            return None
+        if len(skills) == 1:
+            return skills[0]
+
+        target_version = (version or "latest").strip()
+        if target_version:
+            for skill in skills:
+                if (skill.version or "").strip() == target_version:
+                    return skill
+
+        return skills[0]
+
     async def get_by_skill_id(self, skill_id: str) -> Skill | None:
-        skills = await self.get_versions_by_base_skill(None, skill_id)
-        return skills[0] if skills else None
+        result = await self.session.execute(
+            select(Skill).where(Skill.skill_id == skill_id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_category_by_source_url(self, source_url: str) -> str | None:
         result = await self.session.execute(
@@ -130,34 +181,58 @@ class SkillRepository:
     async def replace_for_source_repository(
         self,
         source_repository_id: uuid.UUID,
-        skills: list[Skill],
-    ) -> list[Skill]:
+        latest_skills: list[SkillVersion],
+        tagged_skills: list[SkillVersion],
+    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+        existing_result = await self.session.execute(
+            select(Skill.skill_id, Skill.download_count)
+            .where(Skill.skill_source_repository_id == source_repository_id)
+        )
+        existing_download_counts = {
+            skill_id: download_count
+            for skill_id, download_count in existing_result.all()
+        }
+
+        summary_skills: list[Skill] = []
+        for skill in latest_skills:
+            skill.skill_source_repository_id = source_repository_id
+            summary_skills.append(
+                self._build_summary_skill(
+                    skill,
+                    download_count=existing_download_counts.get(skill.skill_id, 0),
+                )
+            )
+        for skill in tagged_skills:
+            skill.skill_source_repository_id = source_repository_id
+
+        await self.session.execute(
+            delete(SkillVersion).where(SkillVersion.skill_source_repository_id == source_repository_id)
+        )
         await self.session.execute(
             delete(Skill).where(Skill.skill_source_repository_id == source_repository_id)
         )
-        for skill in skills:
-            skill.skill_source_repository_id = source_repository_id
-        self.session.add_all(skills)
+        self.session.add_all(summary_skills)
+        self.session.add_all(tagged_skills)
         await self.session.flush()
         await self.session.commit()
-        return skills
+        return latest_skills, tagged_skills
 
-    async def get_versions_by_base_skill(self, source_url: str | None, skill_id: str) -> list[Skill]:
-        query = select(Skill)
-        query = query.where(Skill.skill_id == skill_id)
+    async def get_versions_by_base_skill(self, source_url: str | None, skill_id: str) -> list[SkillVersion]:
+        query = select(SkillVersion)
+        query = query.where(SkillVersion.skill_id == skill_id)
         if source_url:
-            query = query.where(Skill.source_url == source_url)
-        query = query.order_by(desc(Skill.updated_at), desc(Skill.created_at))
+            query = query.where(SkillVersion.source_url == source_url)
+        query = query.order_by(desc(SkillVersion.updated_at), desc(SkillVersion.created_at))
         result = await self.session.execute(query)
         skills = list(result.scalars().all())
         return sorted(skills, key=self._version_sort_key, reverse=True)
 
-    async def get_by_repo_and_name(self, repo: str, skill_name: str) -> list[Skill]:
+    async def get_by_repo_and_name(self, repo: str, skill_name: str) -> list[SkillVersion]:
         public_skill_id = f"{repo}/{skill_name}"
         result = await self.session.execute(
-            select(Skill)
-            .where(Skill.skill_id == public_skill_id)
-            .order_by(desc(Skill.updated_at), desc(Skill.created_at))
+            select(SkillVersion)
+            .where(SkillVersion.skill_id == public_skill_id)
+            .order_by(desc(SkillVersion.updated_at), desc(SkillVersion.created_at))
         )
         return list(result.scalars().all())
 
@@ -175,9 +250,11 @@ class SkillRepository:
         platform: str | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
+        sort_by: str = "updated_at",
     ) -> tuple[list[Skill], int]:
         filtered_query = self._apply_skill_filters(
             select(Skill),
+            Skill,
             category=category,
             platform=platform,
             tags=tags,
@@ -185,7 +262,8 @@ class SkillRepository:
         )
 
         count_query = self._apply_skill_filters(
-            select(func.count(func.distinct(Skill.skill_id))),
+            select(func.count()),
+            Skill,
             category=category,
             platform=platform,
             tags=tags,
@@ -193,20 +271,18 @@ class SkillRepository:
         )
         total = await self.session.scalar(count_query)
 
-        distinct_query = (
+        if sort_by == "download_count":
+            order_by = [desc(Skill.download_count), desc(Skill.updated_at), desc(Skill.created_at)]
+        else:
+            order_by = [desc(Skill.updated_at), desc(Skill.created_at)]
+
+        query = (
             filtered_query
-            .distinct(Skill.skill_id)
-            .order_by(Skill.skill_id, desc(Skill.updated_at), desc(Skill.created_at))
-        )
-        subquery = distinct_query.subquery()
-        deduped_query = (
-            select(Skill)
-            .join(subquery, Skill.id == subquery.c.id)
-            .order_by(desc(Skill.updated_at), desc(Skill.created_at))
+            .order_by(*order_by)
             .offset(skip)
             .limit(limit)
         )
-        result = await self.session.execute(deduped_query)
+        result = await self.session.execute(query)
         skills = list(result.scalars().all())
 
         return skills, total or 0
@@ -215,7 +291,7 @@ class SkillRepository:
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
             return None
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(datetime.timezone.utc)
         await self.session.execute(
             update(Skill).where(Skill.id == existing.id).values(**update_data)
         )
@@ -223,22 +299,26 @@ class SkillRepository:
         return await self.get_by_skill_id(skill_id)
 
     async def delete(self, skill_id: str) -> bool:
-        result = await self.session.execute(
+        version_result = await self.session.execute(
+            delete(SkillVersion).where(SkillVersion.skill_id == skill_id)
+        )
+        summary_result = await self.session.execute(
             delete(Skill).where(Skill.skill_id == skill_id)
         )
         await self.session.flush()
-        return result.rowcount > 0
+        return (version_result.rowcount or 0) > 0 or (summary_result.rowcount or 0) > 0
 
-    async def increment_download(self, skill_id: str) -> None:
+    async def increment_download(self, skill_id: str) -> bool:
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
-            return
+            return False
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
             .values(download_count=Skill.download_count + 1)
         )
         await self.session.flush()
+        return True
 
     async def update_last_indexed(self, skill_id: str) -> None:
         existing = await self.get_by_skill_id(skill_id)
@@ -247,7 +327,7 @@ class SkillRepository:
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
-            .values(last_indexed_at=datetime.utcnow())
+            .values(last_indexed_at=datetime.now(datetime.timezone.utc))
         )
         await self.session.flush()
 
@@ -258,7 +338,7 @@ class SkillRepository:
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
-            .values(embedding=embedding, last_indexed_at=datetime.utcnow())
+            .values(embedding=embedding, last_indexed_at=datetime.now(datetime.timezone.utc))
         )
         await self.session.flush()
         await self.session.commit()

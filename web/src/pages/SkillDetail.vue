@@ -34,17 +34,20 @@ function getRepoUrlFromSourceUrl(sourceUrl: string): string {
   return sourceUrl.replace(/\/blob\/[^/]+\/.*$/, '')
 }
 
-function getSkillSlug(skillId: string): string {
-  const parts = skillId.split('/')
-  return parts[parts.length - 1] || skillId
+function quoteCliArg(value: string): string {
+  if (!value) return ''
+  if (/^[A-Za-z0-9._/-]+$/.test(value)) {
+    return value
+  }
+  return `"${value.replace(/"/g, '\\"')}"`
 }
 
-const installSourceArg = computed(() => {
+const installCommandArgs = computed(() => {
   if (!skill.value) return ''
   const repoUrl = getRepoUrlFromSourceUrl(skill.value.source_url || '')
-  const skillSlug = getSkillSlug(skill.value.skill_id || routeSkillId.value)
-  if (!repoUrl || !skillSlug) return ''
-  return `${repoUrl} --skill ${skillSlug}`
+  const skillName = skill.value.name || ''
+  if (!repoUrl || !skillName) return ''
+  return `${repoUrl} --skill ${quoteCliArg(skillName)}`
 })
 
 const renderedContent = computed(() => {
@@ -61,24 +64,21 @@ const orderedVersions = computed(() => {
   })
 })
 
+const latestDownloadCount = computed(() => {
+  const latestVersion = versions.value.find(v => (v.version || '').toLowerCase() === 'latest')
+  if (latestVersion) return latestVersion.download_count
+  if ((skill.value?.version || '').toLowerCase() === 'latest') {
+    return skill.value?.download_count ?? 0
+  }
+  return null
+})
+
 function formatVersionLabel(version: string | null | undefined): string {
   if ((version || '').toLowerCase() === 'latest') {
-    return 'latest (最新分支)'
+    return 'latest (最新提交)'
   }
   return version || 'main'
 }
-
-const downloadUrl = computed(() => {
-  if (!skill.value) return ''
-  const version = selectedVersion.value || 'main'
-  const owner = skill.value.source_url.match(/github\.com\/([^\/]+)/)?.[1] || ''
-  const repo = skill.value.source_url.match(/github\.com\/[^\/]+\/([^\/]+)/)?.[1] || ''
-  const commitId = selectedCommitId.value
-  if (commitId) {
-    return `https://github.com/${owner}/${repo}/archive/${commitId}.zip`
-  }
-  return `https://github.com/${owner}/${repo}/archive/refs/heads/${version}.zip`
-})
 
 const browseUrl = computed(() => {
   if (!skill.value) return ''
@@ -87,7 +87,7 @@ const browseUrl = computed(() => {
 
 const selectedVersionSourceLabel = computed(() => {
   const version = (skill.value?.version || '').toLowerCase()
-  if (version === 'latest') return '最新分支'
+  if (version === 'latest') return '最新提交'
   if (skill.value?.version) return '发布版本'
   return '-'
 })
@@ -152,7 +152,7 @@ const selectVersion = async (version: string) => {
 }
 
 const copyCliCommand = async () => {
-  const command = `npx wittyhub install ${installSourceArg.value}`
+  const command = `npx wittyhub install ${installCommandArgs.value}`
   try {
     await navigator.clipboard.writeText(command)
     cliCopied.value = true
@@ -201,7 +201,7 @@ const copyCliCommand = async () => {
                 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600': selectedVersion !== v.version
               }"
             >
-              {{ formatVersionLabel(v.version) }}{{ v.commit_id ? ` (${v.commit_id.slice(0, 7)})` : '' }}
+              {{ formatVersionLabel(v.version) }}
             </button>
           </div>
         </div>
@@ -216,13 +216,28 @@ const copyCliCommand = async () => {
             >
               📦 下载 ZIP {{ selectedCommitId ? `(commit: ${selectedCommitId.slice(0, 7)})` : '' }}
             </a> -->
+            <div
+              v-if="latestDownloadCount !== null"
+              class="inline-flex min-h-[44px] items-center gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-cyan-50 px-4 py-2.5 shadow-sm dark:border-sky-900 dark:from-sky-950/40 dark:to-cyan-950/30"
+            >
+              <div class="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-sky-700 shadow-sm dark:bg-sky-900/40 dark:text-sky-200">
+                ↓
+              </div>
+              <div class="leading-tight">
+                <div class="text-xs font-medium uppercase tracking-[0.12em] text-sky-600 dark:text-sky-300">下载量</div>
+                <div class="text-lg font-semibold text-sky-950 dark:text-sky-100">
+                  {{ latestDownloadCount.toLocaleString() }}
+                </div>
+              </div>
+            </div>
             <a
               :href="browseUrl"
               target="_blank"
               rel="noopener"
-              class="btn-secondary"
+              class="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-primary-200 bg-white px-4 py-2.5 text-primary-600 shadow-sm transition-colors hover:bg-primary-50 hover:border-primary-300 dark:border-primary-500/50 dark:bg-gray-800 dark:text-primary-300 dark:hover:bg-gray-700"
             >
-              🌐 浏览仓库
+              <span class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-50 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300">↗</span>
+              <span class="font-medium">浏览仓库</span>
             </a>
           </div>
 
@@ -231,7 +246,7 @@ const copyCliCommand = async () => {
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">CLI 安装</h3>
             <div class="flex items-center gap-2">
               <code class="flex-1 bg-gray-200 dark:bg-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200 overflow-x-auto">
-                npx wittyhub install {{ installSourceArg }}
+                npx wittyhub install {{ installCommandArgs }}
               </code>
               <button
                 @click="copyCliCommand"
@@ -278,10 +293,6 @@ const copyCliCommand = async () => {
             <div>
               <dt class="text-sm text-gray-500 dark:text-gray-400">来源</dt>
               <dd class="font-medium text-gray-900 dark:text-white">{{ skill.source }}</dd>
-            </div>
-            <div>
-              <dt class="text-sm text-gray-500 dark:text-gray-400">下载量</dt>
-              <dd class="font-medium text-gray-900 dark:text-white">{{ skill.download_count.toLocaleString() }}</dd>
             </div>
             <div>
               <dt class="text-sm text-gray-500 dark:text-gray-400">版本</dt>

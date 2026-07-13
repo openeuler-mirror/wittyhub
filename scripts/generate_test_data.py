@@ -422,7 +422,7 @@ def insert_skills(conn, skills):
     cursor.execute("TRUNCATE TABLE security_audits CASCADE")
     cursor.execute("TRUNCATE TABLE download_history CASCADE")
     cursor.execute("TRUNCATE TABLE skills CASCADE")
-    cursor.execute("TRUNCATE TABLE skill_source_repositories CASCADE")
+    cursor.execute("TRUNCATE TABLE skill_repos CASCADE")
     cursor.execute("TRUNCATE TABLE agents CASCADE")
     conn.commit()
 
@@ -447,7 +447,7 @@ def insert_skills(conn, skills):
         repositories_by_url[source_url]["skill_num"] += 1
 
     repository_insert_query = """
-        INSERT INTO skill_source_repositories (
+        INSERT INTO skill_repos (
             id, repo_name, source, branch, url, local_path,
             skill_discover_status, skill_num, created_at, updated_at
         ) VALUES %s
@@ -473,7 +473,7 @@ def insert_skills(conn, skills):
     # Insert skills
     insert_query = """
         INSERT INTO skills (
-            id, skill_source_repository_id, skill_id, name, description, version, commit_id, author, source,
+            id, skill_repo_id, skill_id, name, description, version, commit_id, author, source,
             source_url, category, tags, platform, content, security_score,
             download_count, rating, created_at, updated_at, last_indexed_at, extra_metadata
         ) VALUES %s

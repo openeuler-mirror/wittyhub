@@ -12,8 +12,9 @@ storage:
   github_token: ""
 
 security:
-  socket_api_key: ""
-  enable_audit: true
+  # Skillspector (Jenkins-based scanner) — sensitive fields via env vars
+  skillspector_enabled: true
+  skillspector_jenkins_url: "http://120.26.120.159:18080"
 
 ai:
   embedding_model: "bge-base-zh-v1.5"

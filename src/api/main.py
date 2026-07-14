@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import agents, health, index, skills
 from src.core.config import get_settings
+from src.core.database import AsyncSessionLocal
 
 settings = get_settings()
 
@@ -27,9 +28,34 @@ def configure_logging() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    structlog.get_logger().info("wittyhub starting up")
+    logger = structlog.get_logger()
+    logger.info("wittyhub starting up")
+
+    collector = None
+    if settings.security.skillspector_enabled:
+        from src.security.detector import SkillspectorClient, SkillspectorCollector
+
+        client = SkillspectorClient(
+            jenkins_url=settings.security.skillspector_jenkins_url,
+            user=settings.security.skillspector_jenkins_user,
+            token=settings.security.skillspector_jenkins_token,
+        )
+        if client.enabled:
+            collector = SkillspectorCollector(
+                client=client,
+                session_factory=AsyncSessionLocal,
+                poll_interval=30,
+            )
+            await collector.start()
+            logger.info("SkillspectorCollector background task started")
+        else:
+            logger.warning("Skillspector enabled but no credentials — collector skipped")
+
     yield
-    structlog.get_logger().info("wittyhub shutting down")
+
+    if collector is not None:
+        await collector.stop()
+    logger.info("wittyhub shutting down")
 
 
 def create_app() -> FastAPI:

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 import re
@@ -14,6 +16,8 @@ from src.models.orm import (
     DownloadHistory,
     SkillRepoModel,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class SkillRepoRepository:
@@ -233,12 +237,78 @@ class SkillRepository:
             embedding=representative.embedding,
         )
 
-    async def create(self, skill_data: dict[str, Any]) -> Skill:
+    @staticmethod
+    def _derive_repo_name(source: str, source_url: str) -> str:
+        """Derive repo_name from source_url.  ``https://github.com/o/r`` → ``github-o-r``."""
+        if not source_url:
+            return f"{source}-unknown"
+        path_parts = source_url.rstrip("/").split("/")
+        if len(path_parts) >= 2:
+            return f"{source}-{path_parts[-2]}-{path_parts[-1]}"
+        return f"{source}-{source_url}"
+
+    async def _resolve_skill_repo_id(self, skill_data: dict[str, Any]) -> uuid.UUID:
+        """Look up or create a SkillRepoModel row and return its id."""
+        source = skill_data.get("source", "")
+        source_url = skill_data.get("source_url", "")
+        repo_name = self._derive_repo_name(source, source_url)
+
+        result = await self.session.execute(
+            select(SkillRepoModel).where(SkillRepoModel.repo_name == repo_name)
+        )
+        existing = result.scalar_one_or_none()
+        if existing is not None:
+            return existing.id
+
+        repo = SkillRepoModel(
+            id=uuid.uuid4(),
+            repo_name=repo_name,
+            source=source,
+            branch=skill_data.get("version") or "main",
+            url=source_url,
+            local_path=None,
+            skill_discover_status="init",
+            skill_num=0,
+        )
+        self.session.add(repo)
+        await self.session.flush()
+        return repo.id
+
+    async def create(
+        self, skill_data: dict[str, Any],
+        auto_audit: bool = True,
+        async_audit: bool = False,
+    ) -> Skill:
+        # ---- auto-resolve skill_repo_id ----
+        if not skill_data.get("skill_repo_id"):
+            skill_data["skill_repo_id"] = await self._resolve_skill_repo_id(skill_data)
+
+        # ---- original logic ----
+
+        skill_path = skill_data.pop("skill_path", "")
         skill = Skill(**skill_data)
         self.session.add(skill)
         await self.session.flush()
         await self.session.commit()
         await self.session.refresh(skill)
+
+        # ---- auto-trigger security audit ----
+        if auto_audit:
+            try:
+                from src.api.services.security import SecurityService  # late import
+
+                security = SecurityService(self.session)
+                await security.audit_skill(
+                    skill_id=skill.skill_id,
+                    source=skill.source,
+                    source_url=skill.source_url,
+                    metadata={"version": skill.version, "content": skill.content or "", "skill_path": skill_path},
+                    async_mode=async_audit,
+                )
+                await self.session.refresh(skill)
+            except Exception:
+                _logger.exception("Security audit failed for skill %s", skill.skill_id)
+
         return skill
 
     def _select_skill_by_version(

@@ -127,6 +127,57 @@ async def audit_skill(
     return {"error": "No audit found"}
 
 
+@router.post("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
+async def trigger_skill_audit(
+    skill_id: str,
+    scanners: str | None = Query(None, description="Comma-separated: skillspector"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger a fresh security audit for a skill and return the result."""
+    repo = SkillRepository(db)
+    skill = await repo.get_by_skill_id(skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    scanner_list = None
+    if scanners:
+        scanner_list = [s.strip() for s in scanners.split(",") if s.strip()]
+
+    security_service = SecurityService(db)
+    audit_result = await security_service.audit_skill(
+        skill_id=skill.skill_id,
+        source=skill.source,
+        source_url=skill.source_url,
+        metadata={
+            "version": skill.version,
+            "content": skill.content,
+        },
+        scanners=scanner_list,
+    )
+
+    if "error" in audit_result:
+        return {"error": audit_result["error"]}
+
+    # Fetch the newly created audit record
+    audit_repo = security_service.audit_repo
+    latest_audit = await audit_repo.get_latest_by_resource("skill", skill.id)
+
+    if not latest_audit:
+        return {"error": "Audit completed but no record found"}
+
+    return SecurityAuditResponse(
+        id=str(latest_audit.id),
+        resource_type=latest_audit.resource_type,
+        resource_id=str(latest_audit.resource_id),
+        audit_type=latest_audit.audit_type,
+        risk_level=latest_audit.risk_level,
+        risk_signals=latest_audit.risk_signals,
+        details=latest_audit.details,
+        audited_at=latest_audit.audited_at,
+    )
+
+
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
 async def get_skill_versions(
     skill_id: str,

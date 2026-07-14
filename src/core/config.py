@@ -32,8 +32,11 @@ class StorageConfig(BaseSettings):
 
 
 class SecurityConfig(BaseSettings):
-    socket_api_key: str = ""
-    enable_audit: bool = True
+    # Skillspector (Jenkins-based scanner)
+    skillspector_enabled: bool = False
+    skillspector_jenkins_url: str = ""
+    skillspector_jenkins_user: str = ""  # env: SKILLSPECTOR_JENKINS_USER
+    skillspector_jenkins_token: str = ""  # env: SKILLSPECTOR_JENKINS_TOKEN
 
 
 class AppConfig(BaseSettings):

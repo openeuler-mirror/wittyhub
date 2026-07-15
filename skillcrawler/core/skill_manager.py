@@ -178,7 +178,7 @@ class SkillManager:
             _logger.info('Crawl: existing clone found, pulling updates: %s', clone_dir)
             self._git_ops.update_existing_repository(
                 clone_dir, clone_url,
-                type('R', (), {'branch': normalized.branch, 'url': normalized.url})(),
+                branch=normalized.branch, repo_url=normalized.url,
             )
         else:
             if clone_dir.exists():
@@ -188,7 +188,7 @@ class SkillManager:
             clone_dir.mkdir(parents=True, exist_ok=True)
             self._git_ops.clone_repository(
                 clone_dir, clone_url,
-                type('R', (), {'branch': normalized.branch, 'url': normalized.url})(),
+                branch=normalized.branch, repo_url=normalized.url,
             )
 
         # Check for SKILL.md
@@ -241,14 +241,14 @@ class SkillManager:
         clone_dir = self.workspace_base / 'skill-repositories' / f'{repo_name}'
         if clone_dir.is_dir() and (clone_dir / '.git').exists():
             _logger.info('Using existing skill repo, fetching updates: %s', clone_dir)
-            self._git_ops.update_existing_repository(clone_dir, clone_url, repo)
+            self._git_ops.update_existing_repository(clone_dir, clone_url, branch=repo.branch, repo_url=repo.url)
         else:
             if clone_dir.exists():
                 _logger.info('Removing non-git skill repo directory before clone: %s', clone_dir)
                 shutil.rmtree(clone_dir)
             _logger.info('Repository not found locally, cloning: %s', clone_dir)
             clone_dir.mkdir(parents=True, exist_ok=True)
-            self._git_ops.clone_repository(clone_dir, clone_url, repo)
+            self._git_ops.clone_repository(clone_dir, clone_url, branch=repo.branch, repo_url=repo.url)
 
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
             clone_dir, clone_url, repo.url,

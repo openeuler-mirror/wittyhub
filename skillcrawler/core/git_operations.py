@@ -7,13 +7,10 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
 from skillcrawler.core.config import load_crawler_config
-
-if TYPE_CHECKING:
-    from src.models.orm import SkillRepoModel
 
 _logger = logging.getLogger(__name__)
 
@@ -45,32 +42,36 @@ class GitOperations:
         self,
         clone_dir: Path,
         clone_url: str,
-        repo: "SkillRepoModel",
+        *,
+        branch: str | None = None,
+        repo_url: str | None = None,
     ) -> None:
         command = ['git', 'clone', '--depth', '1']
-        if repo.branch:
-            command.extend(['--branch', repo.branch])
+        if branch:
+            command.extend(['--branch', branch])
         command.extend([clone_url, str(clone_dir)])
-        self._run_git_command_with_auth_retry(command, clone_url, repo.url, 'clone')
+        self._run_git_command_with_auth_retry(command, clone_url, repo_url, 'clone')
 
     def update_existing_repository(
         self,
         clone_dir: Path,
         clone_url: str,
-        repo: "SkillRepoModel",
+        *,
+        branch: str | None = None,
+        repo_url: str | None = None,
     ) -> None:
         self._run_git_command_with_retries(
             ['git', '-C', str(clone_dir), 'remote', 'set-url', 'origin', clone_url]
         )
 
-        target_branch = repo.branch or self._get_cloned_repo_branch(clone_dir)
+        target_branch = branch or self._get_cloned_repo_branch(clone_dir)
         if target_branch:
             fetch_command = [
                 'git', '-C', str(clone_dir), 'fetch',
                 '--depth', '1', 'origin', target_branch,
             ]
             self._run_git_command_with_auth_retry(
-                fetch_command, clone_url, repo.url, 'fetch',
+                fetch_command, clone_url, repo_url, 'fetch',
             )
             self._run_git_command_with_retries(
                 ['git', '-C', str(clone_dir), 'checkout', '-B', target_branch, 'FETCH_HEAD']
@@ -79,7 +80,7 @@ class GitOperations:
 
         self._run_git_command_with_auth_retry(
             ['git', '-C', str(clone_dir), 'fetch', '--depth', '1', 'origin'],
-            clone_url, repo.url, 'fetch',
+            clone_url, repo_url, 'fetch',
         )
 
     def collect_repository_git_metadata(

@@ -28,6 +28,16 @@ const router = createRouter({
       path: '/skills/:skillId(.*)',
       name: 'skill-detail',
       component: () => import('@/pages/SkillDetail.vue')
+    },
+    {
+      path: '/agents',
+      name: 'agent-list',
+      component: () => import('@/pages/AgentList.vue')
+    },
+    {
+      path: '/agents/:path',
+      name: 'agent-detail',
+      component: () => import('@/pages/AgentDetail.vue')
     }
   ]
 })

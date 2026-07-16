@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from skillcrawler.core.config import load_crawler_config
+from skillcrawler.config import load_crawler_config
 
 _logger = logging.getLogger(__name__)
 

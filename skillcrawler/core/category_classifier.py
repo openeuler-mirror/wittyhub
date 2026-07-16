@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from skillcrawler.core.config import load_crawler_config
+from skillcrawler.config import load_crawler_config
 
 
 _logger = logging.getLogger(__name__)

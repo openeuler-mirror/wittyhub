@@ -237,7 +237,7 @@ storage:
   github_token: your_github_token
 
 security:
-  skillspector_enabled: true
+  enable_audit: true
 
 app:
   host: 0.0.0.0

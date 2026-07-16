@@ -764,7 +764,7 @@ storage:
 
 security:
   socket_api_key: ""
-  skillspector_enabled: true
+  enable_audit: true
 
 app:
   host: 0.0.0.0

@@ -2,7 +2,7 @@
 
 ## 一、功能概述
 
-安全审计在 Skill 入库时自动触发，对 Skill 源码执行深度扫描：
+安全审计在 Skill 入库后自动触发，对 Skill 源码执行深度扫描：
 
 | 扫描层 | 引擎 | 检测内容 |
 |------|------|------|
@@ -17,7 +17,7 @@
 ```yaml
 # config.yaml
 security:
-  skillspector_enabled: true   # 关闭则跳过全部审计
+  enable_audit: true   # 关闭则跳过全部审计
 ```
 
 ---
@@ -31,14 +31,20 @@ POST /skills/
 
 routes/skills.py : create_skill()
   │
-  ├── skillspector_enabled == false ──▶ 直接入库，无审计
+  ├── SkillRepository.create()              ← 入库（纯数据写入，不触发审计）
   │
-  └── skillspector_enabled == true
+  ├── enable_audit == false ──▶ 返回（security_score = NULL）
+  │
+  └── enable_audit == true
         │
         ▼
   SecurityService.audit_skill()
     │
-    ├── Skillspector (同步)
+    ├── scanners 默认: 自动检测
+    │     ├── has_skillspector → ["skillspector"]
+    │     └── 否则 → []（无可用扫描器）
+    │
+    ├── Skillspector（已配置时）
     │     SkillspectorClient.run_scan()
     │       ├── POST Jenkins /buildWithParameters
     │       ├── 轮询 build 状态（每5秒，最多150秒）
@@ -46,9 +52,13 @@ routes/skills.py : create_skill()
     │       └── report_to_risk_signals()
     │     → security_score = report.risk_assessment.score
     │
-    └── 持久化
+    └── 持久化（audit_skill 内部完成）
           ├── INSERT security_audits（风险信号 + 完整 report.json）
-          └── UPDATE skills.security_score
+          ├── UPDATE skills.security_score
+          └── COMMIT
+
+routes/skills.py
+  └── 返回 SkillResponse（security_score 已由 audit_skill 写入）
 ```
 
 ### 3.2 异步模式
@@ -60,14 +70,14 @@ SkillspectorClient.trigger_scan()
   └── POST Jenkins /buildWithParameters → fire-and-forget
        details 记录: { skillspector_async: true, skillspector_build_number: N }
 
-后台: SkillspectorCollector（每 30s）
+后台: SkillspectorCollector（每 30s，仅 enable_audit=true + 凭证已配时启动）
   ├── 查询 pending audits（skillspector_async=true, collected=null）
   ├── wait_for_build(N)
   ├── fetch_report(N)
   └── 回写 skills.security_score + security_audits
 ```
 
-启动: `src/api/main.py` lifespan → `SkillspectorCollector.start()`
+启动: `src/security/detector.py` → `start_skillspector_collector()`，由 `src/api/main.py` lifespan 调用。
 
 ### 3.3 手动触发
 
@@ -82,23 +92,26 @@ POST /skills/{skill_id}/audit?scanners=skillspector
 ## 四、模块架构
 
 ```
-src/security/detector.py          ← 唯一核心（全部扫描逻辑）
+src/security/detector.py          ← 唯一核心（扫描逻辑 + Collector 工厂函数）
   ├── SecurityDetector             ← 总入口
   ├── SkillspectorClient           ← Jenkins HTTP 交互
-  └── SkillspectorCollector        ← 后台异步回写
+  ├── SkillspectorCollector        ← 后台异步回写
+  └── start_skillspector_collector()  ← 工厂函数，由 main.py 调用
 
 src/api/services/security.py      ← 编排层
   └── SecurityService.audit_skill()
 
 src/api/routes/skills.py          ← 业务入口
-  ├── create_skill()              ← POST /skills/        自动触发
+  ├── create_skill()              ← POST /skills/        先入库 → 再审计
   ├── trigger_skill_audit()       ← POST /skills/{id}/audit  手动触发
   └── audit_skill()               ← GET  /skills/{id}/audit  查询结果
 
 src/models/repository.py
-  └── SkillRepository.create(auto_audit=True)  ← 自动调用 SecurityService
+  ├── SkillRepository.create()    ← 纯数据写入，不触发审计
+  ├── SkillRepository.update()    ← 审计结果回写 security_score
+  └── SecurityAuditRepository     ← security_audits 表 CRUD
 
-src/api/main.py                   ← 启动时拉起 SkillspectorCollector
+src/api/main.py                   ← lifespan 调用 start_skillspector_collector()
 ```
 
 ---
@@ -109,7 +122,7 @@ src/api/main.py                   ← 启动时拉起 SkillspectorCollector
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `security_score` | `INTEGER` | 0=critical → 100=safe。Skillspector 原始 score，未扫描时为 `NULL` |
+| `security_score` | `INTEGER` | 0=critical → 100=safe。未审计时为 `NULL` |
 
 ### 5.2 security_audits
 
@@ -120,7 +133,7 @@ src/api/main.py                   ← 启动时拉起 SkillspectorCollector
 | `resource_id` | `UUID` | `skills.id` 外键 |
 | `version` | `VARCHAR(50)` | Skill 版本号 |
 | `commit_id` | `VARCHAR(40)` | Git commit |
-| `audit_type` | `VARCHAR(50)` | 扫描器组合：`skillspector` |
+| `audit_type` | `VARCHAR(50)` | 扫描器组合：`skillspector`；无扫描时 `none` |
 | `risk_level` | `VARCHAR(20)` | `critical` / `high` / `medium` / `low` / `unknown` |
 | `risk_signals` | `JSONB` | 风险信号数组 |
 | `details` | `JSONB` | 扫描元数据 + 完整 report.json |
@@ -134,7 +147,7 @@ src/api/main.py                   ← 启动时拉起 SkillspectorCollector
     "skillspector_score": 85,
     "skillspector_version": "2.3.1",
     "recommendation": "SAFE",
-    "skillspector_report": { /* Jenkins 返回的完整 report.json */ }
+    "skillspector_report": { /* Jenkins 返回的完整 report.json，供前端渲染 */ }
 }
 ```
 
@@ -150,7 +163,7 @@ src/api/main.py                   ← 启动时拉起 SkillspectorCollector
 POST /api/v1/skills/
 ```
 
-请求体 → `SkillCreate schema`。`skillspector_enabled=true` 时自动触发审计，`skill.security_score` 返回审计分数。
+请求体 → `SkillCreate schema`。`enable_audit=true` 时入库后自动触发审计，`security_score` 由 `audit_skill()` 写入并返回。审计失败不影响入库。
 
 ### 6.2 查询审计结果
 
@@ -168,7 +181,7 @@ POST /api/v1/skills/{skill_id}/audit
 
 | Query 参数 | 类型 | 必填 | 说明 |
 |------|------|:---:|------|
-| `scanners` | `str` | 否 | `skillspector`。默认 skillspector |
+| `scanners` | `str` | 否 | `skillspector`。默认自动检测可用扫描器 |
 
 **返回** `SecurityAuditResponse`:
 
@@ -214,7 +227,7 @@ async def audit_skill(
     source: str,                          # "github" / "gitcode" / "clawhub"
     source_url: str,                      # 仓库 URL
     metadata: dict[str, Any],             # { version, content, skill_path }
-    scanners: list[str] | None = None,    # 默认 ["skillspector"]（已配置时）
+    scanners: list[str] | None = None,    # None → 自动检测可用扫描器
     async_mode: bool = False,             # True → skillspector fire-and-forget
 ) -> dict[str, Any]:
 ```
@@ -239,7 +252,8 @@ async def audit_skill(
 | 来源 | 规则 |
 |------|------|
 | Skillspector | 直接使用 `report.risk_assessment.score`（0-100） |
-| 降级 | 无 Skillspector 时 `risk_level` 映射：critical=0, high=25, medium=50, low=75, unknown=100；无扫描则 `security_score` 为 `NULL` |
+| 无可用扫描器 | `risk_level = unknown` → `security_score = 100` |
+| 降级（Jenkins 不可用） | `risk_level = unknown` → `security_score = 100` |
 
 ---
 
@@ -260,7 +274,7 @@ async def audit_skill(
 
 | 配置 | 环境变量 | 说明 |
 |------|------|------|
-| `skillspector_enabled` | — | 总开关，yaml 配置 |
+| `enable_audit` | — | 总开关，yaml 配置 |
 | `skillspector_jenkins_url` | `SKILLSPECTOR_JENKINS_URL` | Jenkins 地址 |
 | `skillspector_jenkins_user` | `SKILLSPECTOR_JENKINS_USER` | Basic Auth 用户名 |
 | `skillspector_jenkins_token` | `SKILLSPECTOR_JENKINS_TOKEN` | Basic Auth Token |
@@ -271,8 +285,8 @@ async def audit_skill(
 
 | # | 原则 | 说明 |
 |---|------|------|
-| 1 | **入库即审计** | `SkillRepository.create(auto_audit=True)` 自动触发扫描，审计失败不影响入库 |
+| 1 | **入库与审计分离** | `SkillRepository.create()` 只做数据写入；`routes/skills.py` 在入库后调用 `SecurityService.audit_skill()` 触发审计 |
 | 2 | **skill_repo_id 自动推导** | 无 `skill_repo_id` 时从 `source_url` 自动解析 `repo_name`，查重或新建 `SkillRepoModel` |
 | 3 | **只读展示** | `GET /audit` 仅返回已存储结果，不触发新扫描 |
-| 4 | **降级容错** | Jenkins 不可用时 `risk_level=unknown`，`security_score=100` |
+| 4 | **降级容错** | 无可用扫描器或 Jenkins 不可用时，降级为 `risk_level=unknown`，审计失败不影响入库 |
 | 5 | **异步优先** | 批量场景用 `async_mode`，后台 `SkillspectorCollector` 每 30s 轮询回写 |

@@ -472,11 +472,11 @@ class SkillspectorCollector:
 class SecurityDetector:
 
     def __init__(self):
-        self.enable_audit = settings.security.skillspector_enabled
+        self.enable_audit = settings.security.enable_audit
 
         # Skillspector (Jenkins-based scanner)
         self._skillspector_client: SkillspectorClient | None = None
-        if settings.security.skillspector_enabled:
+        if settings.security.enable_audit:
             self._skillspector_client = SkillspectorClient(
                 jenkins_url=settings.security.skillspector_jenkins_url,
                 user=settings.security.skillspector_jenkins_user,
@@ -631,3 +631,33 @@ class SecurityDetector:
                 "skillspector_report": report,
             },
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Factory — start the background collector from app lifecycle
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def start_skillspector_collector(session_factory) -> SkillspectorCollector | None:
+    """Create and start the Skillspector background collector.
+
+    Returns the collector instance for later shutdown, or *None* if credentials
+    are not configured.
+    """
+    client = SkillspectorClient(
+        jenkins_url=settings.security.skillspector_jenkins_url,
+        user=settings.security.skillspector_jenkins_user,
+        token=settings.security.skillspector_jenkins_token,
+    )
+    if not client.enabled:
+        logger.warning("Skillspector enabled but no credentials — collector skipped")
+        return None
+
+    collector = SkillspectorCollector(
+        client=client,
+        session_factory=session_factory,
+        poll_interval=30,
+    )
+    await collector.start()
+    logger.info("SkillspectorCollector background task started")
+    return collector

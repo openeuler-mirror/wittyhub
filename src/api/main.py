@@ -32,24 +32,10 @@ async def lifespan(app: FastAPI):
     logger.info("wittyhub starting up")
 
     collector = None
-    if settings.security.skillspector_enabled:
-        from src.security.detector import SkillspectorClient, SkillspectorCollector
+    if settings.security.enable_audit:
+        from src.security.detector import start_skillspector_collector
 
-        client = SkillspectorClient(
-            jenkins_url=settings.security.skillspector_jenkins_url,
-            user=settings.security.skillspector_jenkins_user,
-            token=settings.security.skillspector_jenkins_token,
-        )
-        if client.enabled:
-            collector = SkillspectorCollector(
-                client=client,
-                session_factory=AsyncSessionLocal,
-                poll_interval=30,
-            )
-            await collector.start()
-            logger.info("SkillspectorCollector background task started")
-        else:
-            logger.warning("Skillspector enabled but no credentials — collector skipped")
+        collector = await start_skillspector_collector(AsyncSessionLocal)
 
     yield
 

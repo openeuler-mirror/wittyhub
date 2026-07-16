@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -274,41 +273,16 @@ class SkillRepository:
         await self.session.flush()
         return repo.id
 
-    async def create(
-        self, skill_data: dict[str, Any],
-        auto_audit: bool = True,
-        async_audit: bool = False,
-    ) -> Skill:
+    async def create(self, skill_data: dict[str, Any]) -> Skill:
         # ---- auto-resolve skill_repo_id ----
         if not skill_data.get("skill_repo_id"):
             skill_data["skill_repo_id"] = await self._resolve_skill_repo_id(skill_data)
 
-        # ---- original logic ----
-
-        skill_path = skill_data.pop("skill_path", "")
         skill = Skill(**skill_data)
         self.session.add(skill)
         await self.session.flush()
         await self.session.commit()
         await self.session.refresh(skill)
-
-        # ---- auto-trigger security audit ----
-        if auto_audit:
-            try:
-                from src.api.services.security import SecurityService  # late import
-
-                security = SecurityService(self.session)
-                await security.audit_skill(
-                    skill_id=skill.skill_id,
-                    source=skill.source,
-                    source_url=skill.source_url,
-                    metadata={"version": skill.version, "content": skill.content or "", "skill_path": skill_path},
-                    async_mode=async_audit,
-                )
-                await self.session.refresh(skill)
-            except Exception:
-                _logger.exception("Security audit failed for skill %s", skill.skill_id)
-
         return skill
 
     def _select_skill_by_version(

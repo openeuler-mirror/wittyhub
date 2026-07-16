@@ -12,7 +12,7 @@ storage:
   github_token: ""
 
 security:
-  skillspector_enabled: false
+  enable_audit: false
 
 ai:
   embedding_model: "BAAI/bge-base-zh-v1.5"

@@ -257,19 +257,23 @@ async def create_skill(
     if existing:
         raise HTTPException(status_code=409, detail="Skill already exists")
 
-    security_service = SecurityService(db)
-
     skill_dict = skill_data.model_dump()
-    if security_service.detector.enable_audit:
-        audit_result = await security_service.audit_skill(
-            skill_data.skill_id,
-            skill_data.source,
-            skill_data.source_url,
-            skill_dict,
-        )
-        skill_dict["security_score"] = audit_result.get("security_score")
-
     skill = await repo.create(skill_dict)
+
+    # Run security audit after skill is persisted, then write back the score
+    security_service = SecurityService(db)
+    if security_service.detector.enable_audit:
+        try:
+            audit_result = await security_service.audit_skill(
+                skill.skill_id,
+                skill.source,
+                skill.source_url,
+                {"version": skill.version, "content": skill.content or ""},
+            )
+            # security_score is already persisted by audit_skill internally
+        except Exception:
+            pass  # audit failure must not block skill creation
+
     return skill_to_response(skill)
 
 

@@ -66,14 +66,19 @@ class SecurityService:
                 sp_report = await self.detector.detect_skillspector(
                     source_url, version=version, skill_path=skill_path,
                 )
-                all_signals.extend(sp_report.risk_signals)
-                merged_details.update(sp_report.details)
-                scanner_names.append("skillspector")
-                if sp_report.details.get("skillspector_score") is not None:
-                    skillspector_score = sp_report.details["skillspector_score"]
+                # Only count this scanner when it actually produced results
+                if sp_report.risk_level != "unknown" or sp_report.risk_signals:
+                    all_signals.extend(sp_report.risk_signals)
+                    merged_details.update(sp_report.details)
+                    scanner_names.append("skillspector")
+                    if sp_report.details.get("skillspector_score") is not None:
+                        skillspector_score = sp_report.details["skillspector_score"]
 
         # --- Calculate risk level & score ---
-        risk_level = self.detector._calculate_risk_level(all_signals)
+        if scanner_names:
+            risk_level = self.detector._calculate_risk_level(all_signals)
+        else:
+            risk_level = "unknown"
         security_score = (
             skillspector_score
             if skillspector_score is not None

@@ -6,7 +6,7 @@ from typing import Any
 import yaml
 
 
-DEFAULT_CRAWLER_CONFIG_PATH = Path(__file__).resolve().parent.parent / "crawler.yaml"
+DEFAULT_CRAWLER_CONFIG_PATH = Path(__file__).resolve().parent.parent / "skills" / "skill-repos.yaml"
 
 
 def normalize_dict_keys(data: Any) -> Any:

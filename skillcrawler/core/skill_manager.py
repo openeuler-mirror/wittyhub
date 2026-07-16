@@ -47,9 +47,7 @@ class SkillDiscoverStatus:
 class SkillManager:
     skill_repository: SkillRepository
     skill_repo_repository: SkillRepoRepository
-    workspace_base: Path = Path(
-        os.getenv('WITTY_WORKSPACE_ROOT', '~/.witty/')
-    ).expanduser()
+    workspace_base: Path = Path(os.environ.get("WITTY_WORKSPACE_ROOT", Path.home() / ".witty"))
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
 

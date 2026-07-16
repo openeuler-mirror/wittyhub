@@ -264,8 +264,11 @@ async def create_skill(
         repo_repo = SkillRepoRepository(db)
         source = skill_data.source
         source_url = skill_data.source_url
-        path_parts = source_url.rstrip("/").split("/")
-        repo_name = f"{source}-{path_parts[-2]}-{path_parts[-1]}" if len(path_parts) >= 2 else f"{source}-{source_url}"
+        repo_name = source_url
+        for prefix in ("https://", "http://"):
+            if repo_name.startswith(prefix):
+                repo_name = repo_name[len(prefix):]
+        repo_name = repo_name.removesuffix(".git").replace("/", "_")
         existing_repo = await repo_repo.get_skill_repository_by_repo_name(repo_name)
         if existing_repo:
             skill_dict["skill_repo_id"] = existing_repo.id

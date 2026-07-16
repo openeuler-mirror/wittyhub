@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import agents, health, index, skills
 from src.core.config import get_settings
-from src.core.database import AsyncSessionLocal
 
 settings = get_settings()
 
@@ -35,7 +34,7 @@ async def lifespan(app: FastAPI):
     if settings.security.enable_audit:
         from src.security.detector import start_skillspector_collector
 
-        collector = await start_skillspector_collector(AsyncSessionLocal)
+        collector = await start_skillspector_collector()
 
     yield
 

@@ -638,12 +638,14 @@ class SecurityDetector:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-async def start_skillspector_collector(session_factory) -> SkillspectorCollector | None:
+async def start_skillspector_collector() -> SkillspectorCollector | None:
     """Create and start the Skillspector background collector.
 
     Returns the collector instance for later shutdown, or *None* if credentials
     are not configured.
     """
+    from src.core.database import AsyncSessionLocal
+
     client = SkillspectorClient(
         jenkins_url=settings.security.skillspector_jenkins_url,
         user=settings.security.skillspector_jenkins_user,
@@ -655,7 +657,7 @@ async def start_skillspector_collector(session_factory) -> SkillspectorCollector
 
     collector = SkillspectorCollector(
         client=client,
-        session_factory=session_factory,
+        session_factory=AsyncSessionLocal,
         poll_interval=30,
     )
     await collector.start()

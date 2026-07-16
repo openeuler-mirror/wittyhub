@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.repository import SkillRepository, DownloadHistoryRepository
+from src.models.repository import SkillRepository, DownloadHistoryRepository, SkillRepoRepository
 from src.api.schemas.skill import (
     SkillCreate,
     SkillListResponse,
@@ -258,6 +258,28 @@ async def create_skill(
         raise HTTPException(status_code=409, detail="Skill already exists")
 
     skill_dict = skill_data.model_dump()
+
+    # Resolve skill_repo_id: look up or create the source repository
+    if not skill_dict.get("skill_repo_id"):
+        repo_repo = SkillRepoRepository(db)
+        source = skill_data.source
+        source_url = skill_data.source_url
+        path_parts = source_url.rstrip("/").split("/")
+        repo_name = f"{source}-{path_parts[-2]}-{path_parts[-1]}" if len(path_parts) >= 2 else f"{source}-{source_url}"
+        existing_repo = await repo_repo.get_skill_repository_by_repo_name(repo_name)
+        if existing_repo:
+            skill_dict["skill_repo_id"] = existing_repo.id
+        else:
+            new_repo = await repo_repo.create_skill_repository(
+                repo_name=repo_name,
+                source=source,
+                branch=skill_data.version or "main",
+                url=source_url,
+                local_path=None,
+                skill_discover_status="init",
+            )
+            skill_dict["skill_repo_id"] = new_repo.id
+
     skill = await repo.create(skill_dict)
 
     # Run security audit after skill is persisted, then write back the score

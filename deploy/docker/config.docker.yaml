@@ -8,7 +8,7 @@ database:
 
 storage:
   type: "local"
-  local_path: "/data/skills"
+  local_path: "/opt/wittyhub/skill-data"
   github_token: ""
 
 security:

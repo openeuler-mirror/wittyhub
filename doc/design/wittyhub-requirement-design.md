@@ -759,7 +759,7 @@ database:
   dbname: "wittyhub"
 
 storage:
-  local_path: ~/.agents/skills
+  local_path: /opt/wittyhub/skill-data
   github_token: ""
 
 security:

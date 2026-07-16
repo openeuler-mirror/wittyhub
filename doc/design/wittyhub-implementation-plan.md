@@ -473,7 +473,7 @@ graph TB
 
     subgraph 持久化卷
         V1[(postgres-data)]
-        V2[(skill-data)]
+        V2[(/opt/wittyhub/skill-data)]
     end
 
     DB --- V1
@@ -525,7 +525,16 @@ ai:
   enable_semantic_search: true
 
 storage:
-  local_path: "/data/skills"    # 挂载 skill-data 卷
+  local_path: "/opt/wittyhub/skill-data"    # 挂载宿主机同路径目录
+```
+
+`storage.local_path` 同时作为爬虫和下载接口的运行时数据根目录：
+
+```text
+/opt/wittyhub/skill-data/
+├── skill-repositories/      # clone 后的 Git 仓库
+├── download-cache/          # Skill ZIP 缓存
+└── logs/                    # skillcrawler 日志
 ```
 
 环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；数据库连接亦可通过 `DATABASE__*` 环境变量覆盖。
@@ -788,7 +797,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  │                              └──────┬──────┘          └────────┘│  │
 │  │                                     │                            │  │
 │  │                              postgres-data                       │  │
-│  │                              skill-data                          │  │
+│  │                              /opt/wittyhub/skill-data            │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  External: GitHub / GitCode / Gitee / Socket.dev                        │
@@ -810,7 +819,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 |------|-----|------|------|
 | db | 1 核 | 512MB+ | postgres-data 卷 |
 | embedding | 2 核+ | 4GB（限制） | 模型镜像 ~1.5GB |
-| api | 1 核 | 256MB+ | skill-data 卷 |
+| api | 1 核 | 256MB+ | `/opt/wittyhub/skill-data` |
 | web | — | 64MB | web/dist 静态文件 |
 
 ### 7.4 部署验证清单
@@ -895,4 +904,3 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | Docker 编排 | `deploy/docker/docker-compose.yaml` |
 | Nginx 配置 | `deploy/docker/nginx.conf` |
 | 数据库迁移 | `migrations/versions/` |
-

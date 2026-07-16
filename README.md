@@ -35,7 +35,7 @@ flowchart LR
         API["api<br/>FastAPI + Uvicorn :8081<br/>映射宿主机 8081"]
         Embedding["embedding<br/>Embedding Service :8082<br/>模型: BAAI/bge-base-zh-v1.5"]
         DB["db<br/>PostgreSQL + pgvector :5432"]
-        SkillData[("skill-data volume<br/>/data/skills")]
+        SkillData[("/opt/wittyhub/skill-data<br/>bind mount")]
         PgData[("postgres-data volume")]
         ModelCache[("huggingface-cache volume")]
     end
@@ -233,7 +233,7 @@ database:
 
 storage:
   type: local
-  local_path: /data/skills
+  local_path: /opt/wittyhub/skill-data
   github_token: your_github_token
 
 security:
@@ -244,6 +244,15 @@ app:
   port: 8080
   cors_origins:
     - "*"
+```
+
+`storage.local_path` 是运行时数据根目录，包含：
+
+```text
+/opt/wittyhub/skill-data/
+├── skill-repositories/      # 爬虫 clone 的 Skill 仓库
+├── download-cache/          # 下载接口生成的 ZIP 缓存
+└── logs/                    # skillcrawler 日志
 ```
 
 ## 开发指南

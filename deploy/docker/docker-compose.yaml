@@ -61,7 +61,7 @@ services:
       - ../../src:/app/src:ro
       - ../../scripts:/app/scripts:ro
       - ../../migrations:/app/migrations:ro
-      - skill-data:/data/skills
+      - /opt/wittyhub/skill-data:/opt/wittyhub/skill-data
     networks:
       - wittyhub-network
     depends_on:
@@ -89,7 +89,6 @@ services:
 
 volumes:
   postgres-data:
-  skill-data:
   huggingface-cache:
 
 networks:

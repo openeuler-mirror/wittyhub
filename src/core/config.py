@@ -27,7 +27,7 @@ class DatabaseConfig(BaseSettings):
 
 class StorageConfig(BaseSettings):
     type: str = "local"
-    local_path: str = "./data/skills"
+    local_path: str = "/opt/wittyhub/skill-data"
     github_token: str = ""
 
 

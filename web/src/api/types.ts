@@ -55,9 +55,3 @@ export interface RiskSignal {
   severity: string
   data: Record<string, any>
 }
-
-export interface DownloadResponse {
-  download_url: string
-  file_path: string | null
-  security_audit: SecurityAudit | null
-}

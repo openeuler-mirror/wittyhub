@@ -23,6 +23,8 @@ const error = ref('')
 const selectedVersion = ref<string>('latest')
 const selectedCommitId = ref<string | null>(null)
 const cliCopied = ref(false)
+const downloading = ref(false)
+const downloadError = ref('')
 
 const routeSkillId = computed(() => {
   const raw = route.params.skillId
@@ -73,6 +75,15 @@ const latestDownloadCount = computed(() => {
   return null
 })
 
+function incrementDisplayedDownloadCount() {
+  const latestVersion = versions.value.find(v => (v.version || '').toLowerCase() === 'latest')
+  if (latestVersion) {
+    latestVersion.download_count += 1
+  } else if (skill.value) {
+    skill.value.download_count += 1
+  }
+}
+
 function formatVersionLabel(version: string | null | undefined): string {
   if ((version || '').toLowerCase() === 'latest') {
     return 'latest (最新提交)'
@@ -83,6 +94,17 @@ function formatVersionLabel(version: string | null | undefined): string {
 const browseUrl = computed(() => {
   if (!skill.value) return ''
   return skill.value.source_url || ''
+})
+
+function sanitizeFilename(value: string): string {
+  return value.replace(/[^0-9A-Za-z._-]+/g, '-').replace(/^[._-]+|[._-]+$/g, '') || 'skill'
+}
+
+const downloadFilename = computed(() => {
+  if (!skill.value) return 'skill.zip'
+  const name = sanitizeFilename(skill.value.name || 'skill')
+  const version = skill.value.version ? sanitizeFilename(skill.value.version) : ''
+  return version ? `${name}-${version}.zip` : `${name}.zip`
 })
 
 const selectedVersionSourceLabel = computed(() => {
@@ -161,6 +183,28 @@ const copyCliCommand = async () => {
     console.error('Failed to copy:', e)
   }
 }
+
+const downloadSkill = async () => {
+  if (!skill.value || downloading.value) return
+  downloading.value = true
+  downloadError.value = ''
+  try {
+    const blob = await api.getSkillDownload(skill.value.skill_id)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = downloadFilename.value
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    incrementDisplayedDownloadCount()
+  } catch (e: any) {
+    downloadError.value = e?.response?.data?.detail || e.message || '下载失败'
+  } finally {
+    downloading.value = false
+  }
+}
 </script>
 
 <template>
@@ -209,13 +253,15 @@ const copyCliCommand = async () => {
         <!-- Actions -->
         <div class="space-y-4">
           <div class="flex flex-wrap gap-3">
-            <!-- <a
-              :href="downloadUrl"
-              target="_blank"
-              class="btn-primary"
+            <button
+              type="button"
+              @click="downloadSkill"
+              :disabled="downloading"
+              class="btn-primary disabled:cursor-not-allowed disabled:opacity-70"
             >
-              📦 下载 ZIP {{ selectedCommitId ? `(commit: ${selectedCommitId.slice(0, 7)})` : '' }}
-            </a> -->
+              {{ downloading ? '下载中...' : '下载 ZIP' }}
+              {{ selectedCommitId ? `(commit: ${selectedCommitId.slice(0, 7)})` : '' }}
+            </button>
             <div
               v-if="latestDownloadCount !== null"
               class="inline-flex min-h-[44px] items-center gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-cyan-50 px-4 py-2.5 shadow-sm dark:border-sky-900 dark:from-sky-950/40 dark:to-cyan-950/30"
@@ -240,6 +286,7 @@ const copyCliCommand = async () => {
               <span class="font-medium">浏览仓库</span>
             </a>
           </div>
+          <p v-if="downloadError" class="text-sm text-red-500">{{ downloadError }}</p>
 
           <!-- CLI Install -->
           <div class="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">

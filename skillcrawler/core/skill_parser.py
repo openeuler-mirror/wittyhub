@@ -1,0 +1,327 @@
+"""Skill frontmatter parsing, ID generation, and URL building."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from src.models.orm import SkillRepoModel
+
+
+# ── URL building ───────────────────────────────────────────────────
+
+
+def build_skill_md_url(
+    repo: "SkillRepoModel",
+    relative_path: str,
+    ref: str | None = None,
+) -> str | None:
+    if not repo.url:
+        return None
+    browse_base_url = normalize_repository_browse_base_url(repo.url)
+    if not browse_base_url:
+        return None
+    if ref and ref != 'HEAD':
+        branch = ref
+    elif repo.branch:
+        branch = repo.branch
+    else:
+        # GitHub supports /blob/HEAD/ as a placeholder for the default branch;
+        # other platforms (GitCode, Gitee, GitLab) do not and need an actual
+        # branch name.  Fall back to 'master' which is the most common default
+        # on those platforms.
+        branch = 'HEAD' if repo.source == 'github' else 'master'
+    cleaned_relative_path = relative_path.lstrip('/')
+    return f'{browse_base_url}/blob/{branch}/{cleaned_relative_path}'
+
+
+def normalize_repository_browse_base_url(repo_url: str) -> str | None:
+    normalized_url = repo_url.strip()
+    if not normalized_url:
+        return None
+
+    ssh_match = re.match(r'git@([^:]+):(.+)', normalized_url)
+    if ssh_match:
+        host = ssh_match.group(1)
+        path = ssh_match.group(2).strip('/')
+        if path.endswith('.git'):
+            path = path[:-4]
+        return f'https://{host}/{path}'
+
+    parsed = urlparse(normalized_url)
+    if not parsed.netloc:
+        return None
+    path = parsed.path.strip('/')
+    if path.endswith('.git'):
+        path = path[:-4]
+    if not path:
+        return None
+    return f'{parsed.scheme}://{parsed.netloc}/{path}'
+
+
+# ── Skill ID generation ────────────────────────────────────────────
+
+
+def build_public_skill_id(
+    repo: "SkillRepoModel",
+    repo_root: Path,
+    skill_file: Path,
+) -> str:
+    owner_repo = extract_owner_repo(repo.url)
+    relative_path = to_repository_relative_path(repo_root, skill_file)
+    if relative_path == 'SKILL.md':
+        skill_path = owner_repo.rsplit('/', 1)[-1]
+    elif relative_path.endswith('/SKILL.md'):
+        skill_path = relative_path.removesuffix('/SKILL.md')
+    else:
+        raise ValueError(f'Expected a SKILL.md file, got: {skill_file}')
+    return f'{repo.source}/{owner_repo}/{skill_path}'
+
+
+def extract_owner_repo(repo_url: str | None) -> str:
+    if not repo_url:
+        raise ValueError('Repository url is required to derive skill_id')
+
+    normalized_url = repo_url.strip()
+    ssh_match = re.match(r'git@([^:]+):(.+)', normalized_url)
+    if ssh_match:
+        path = ssh_match.group(2).strip('/')
+    else:
+        parsed = urlparse(normalized_url)
+        path = parsed.path.strip('/')
+
+    if path.endswith('.git'):
+        path = path[:-4]
+
+    segments = [segment for segment in path.split('/') if segment]
+    if len(segments) < 2:
+        raise ValueError(f'Failed to extract owner/repo from url: {repo_url}')
+
+    owner = slugify_identifier(segments[-2])
+    repo = slugify_identifier(segments[-1])
+    if not owner or not repo:
+        raise ValueError(f'Invalid owner/repo derived from url: {repo_url}')
+    return f'{owner}/{repo}'
+
+
+def slugify_identifier(value: str) -> str:
+    lowered = value.strip().lower()
+    if not lowered:
+        return ''
+    normalized = re.sub(r'[^a-z0-9._-]+', '-', lowered)
+    normalized = re.sub(r'-{2,}', '-', normalized)
+    return normalized.strip('-')
+
+
+# ── Skill source derivation ────────────────────────────────────────
+
+
+def derive_skill_source(repo_url: str | None) -> tuple[str, str]:
+    if not repo_url:
+        raise ValueError('Repository url is required to derive skill source')
+
+    normalized_url = repo_url.strip()
+    ssh_match = re.match(r'git@([^:]+):(.+)', normalized_url)
+    if ssh_match:
+        raw_host = ssh_match.group(1).lower()
+        path = ssh_match.group(2).strip('/')
+    else:
+        parsed = urlparse(normalized_url)
+        if not parsed.netloc:
+            raise ValueError(f'Invalid git repository url: {repo_url}')
+        raw_host = parsed.netloc.lower()
+        path = parsed.path.strip('/')
+
+    if path.endswith('.git'):
+        path = path[:-4]
+
+    if raw_host == 'github.com':
+        host = 'github'
+    elif raw_host == 'gitcode.com':
+        host = 'gitcode'
+    elif raw_host == 'gitlab.com':
+        host = 'gitlab'
+    elif raw_host == 'gitee.com':
+        host = 'gitee'
+    else:
+        raise ValueError(f'Unsupported git repository host: {repo_url}')
+
+    segments = [segment for segment in path.split('/') if segment]
+    if len(segments) < 2:
+        raise ValueError(f'Failed to extract repository owner from url: {repo_url}')
+
+    owner = segments[-2].strip()
+    if not owner:
+        raise ValueError(f'Invalid repository owner derived from url: {repo_url}')
+
+    return host, owner
+
+
+# ── Frontmatter parsing ────────────────────────────────────────────
+
+
+def load_skill_frontmatter(
+    skill_file: Path,
+) -> tuple[dict[str, object], str]:
+    text = skill_file.read_text(encoding='utf-8')
+    return parse_skill_frontmatter_text(text)
+
+
+def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
+    stripped = text.lstrip()
+    if not stripped.startswith('---'):
+        return {}, text.strip()
+    parts = stripped.split('---', maxsplit=2)
+    if len(parts) < 3:
+        return {}, text.strip()
+
+    raw_frontmatter = parts[1]
+    content = parts[2].lstrip('\r\n')
+
+    metadata: dict[str, object] = {}
+    current_key: str | None = None
+    for line in raw_frontmatter.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith('#'):
+            continue
+
+        if stripped_line.startswith('- ') and current_key == 'triggers':
+            triggers = metadata.setdefault('triggers', [])
+            if isinstance(triggers, list):
+                trigger = stripped_line[2:].strip()
+                if trigger:
+                    triggers.append(trigger)
+            continue
+
+        if ':' not in line:
+            if current_key is not None:
+                existing = metadata.get(current_key)
+                if isinstance(existing, str):
+                    metadata[current_key] = f'{existing} {stripped_line}'.strip()
+            continue
+
+        key, value = line.split(':', 1)
+        current_key = key.strip()
+        metadata[current_key] = _parse_frontmatter_value(current_key, value.strip())
+
+    return metadata, content.strip()
+
+
+def _parse_frontmatter_value(key: str, value: str) -> object:
+    if not value:
+        return [] if key == 'triggers' else ''
+
+    if key == 'triggers':
+        if value.startswith('[') and value.endswith(']'):
+            try:
+                parsed = json.loads(value.replace("'", '"'))
+            except Exception:
+                parsed = None
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        return [value.strip('"\'')] if value.strip('"\'') else []
+
+    lowered = value.lower()
+    if lowered == 'true':
+        return True
+    if lowered == 'false':
+        return False
+    return value.strip('"\'')
+
+
+# ── Misc helpers ───────────────────────────────────────────────────
+
+
+def derive_repository_skill_name(
+    skill_file: Path, metadata: dict[str, object],
+) -> str:
+    metadata_name = metadata.get('name')
+    if isinstance(metadata_name, str) and metadata_name.strip():
+        return metadata_name.strip()
+    if skill_file.name == 'SKILL.md':
+        return skill_file.parent.name
+    return skill_file.stem
+
+
+def to_repository_relative_path(repo_root: Path, skill_file: Path) -> str:
+    return skill_file.relative_to(repo_root).as_posix()
+
+
+def should_skip_relative_path(relative_path: str) -> bool:
+    relative_path = relative_path.lower()
+    path_parts = relative_path.split('/')
+    return any(
+        part in {
+            'template', 'templates', 'example', 'examples',
+            'demo', 'demos', 'test', 'tests',
+            'fixture', 'fixtures', 'docs', 'doc',
+            'archive', 'archives', 'legacy',
+        }
+        for part in path_parts[:-1]
+    )
+
+
+def find_scannable_skill_files(repo_root: Path) -> list[Path]:
+    """Return SKILL.md files that are eligible for repository discovery."""
+    return sorted(
+        skill_file
+        for skill_file in repo_root.rglob('SKILL.md')
+        if skill_file.is_file()
+        and not should_skip_relative_path(
+            to_repository_relative_path(repo_root, skill_file)
+        )
+    )
+
+
+def normalize_git_clone_url(url: str | None) -> str:
+    if not url:
+        return ''
+    stripped = url.strip()
+
+    ssh_match = re.match(r'git@([^:]+):(.+)', stripped)
+    if ssh_match:
+        host = ssh_match.group(1)
+        path = ssh_match.group(2).strip('/')
+        return f'git@{host}:{path}'
+
+    parsed = urlparse(stripped)
+    if not parsed.scheme or not parsed.netloc:
+        return ''
+
+    path = parsed.path.strip('/')
+    if path.endswith('.git'):
+        path = path[:-4]
+    return f'{parsed.scheme}://{parsed.netloc}/{path}'
+
+
+def normalize_clone_url_for_git(repo_url: str | None) -> str:
+    if not repo_url:
+        raise ValueError('git skill repos require url')
+    if repo_url.endswith('.git'):
+        return repo_url
+    return f'{repo_url}.git'
+
+
+def as_optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return str(value)
+
+
+def as_optional_str_list(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        return normalized or None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else None
+    return [str(value)]

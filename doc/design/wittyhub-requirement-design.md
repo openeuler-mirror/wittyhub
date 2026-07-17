@@ -762,6 +762,16 @@ storage:
   local_path: /opt/wittyhub/skill-data
   github_token: ""
 
+model:
+  name: deepseek-chat
+  base_url: https://api.deepseek.com
+  api_key: ""
+  timeout: 30
+
+crawler:
+  github_token: ""
+  max_tags_per_repo: 3
+
 security:
   socket_api_key: ""
   enable_audit: true

@@ -8,9 +8,10 @@ from typing import Any
 import httpx
 
 from skillcrawler.config import load_crawler_config
-
+from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class CategoryClassificationError(RuntimeError):
@@ -66,24 +67,16 @@ class DeepSeekCategoryClassifier:
         return normalized
 
     def _load_model_name(self) -> str:
-        model_cfg = self._config.get("model") or {}
-        value = model_cfg.get("name") or "deepseek-chat"
-        return str(value).strip()
+        return settings.model.name.strip()
 
     def _load_api_key(self) -> str:
-        model_cfg = self._config.get("model") or {}
-        value = model_cfg.get("api_key") or ""
-        return str(value).strip()
+        return settings.model.api_key.strip()
 
     def _load_base_url(self) -> str:
-        model_cfg = self._config.get("model") or {}
-        value = model_cfg.get("base_url") or "https://api.deepseek.com"
-        return str(value).rstrip("/")
+        return settings.model.base_url.rstrip("/")
 
     def _load_timeout(self) -> float:
-        model_cfg = self._config.get("model") or {}
-        value = model_cfg.get("timeout") or 30
-        return float(value)
+        return float(settings.model.timeout)
 
     def _build_prompt(
         self,

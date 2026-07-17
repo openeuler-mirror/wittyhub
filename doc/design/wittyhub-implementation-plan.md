@@ -526,6 +526,16 @@ ai:
 
 storage:
   local_path: "/opt/wittyhub/skill-data"    # 挂载宿主机同路径目录
+
+model:
+  name: "deepseek-chat"                     # Skill 分类模型
+  base_url: "https://api.deepseek.com"
+  api_key: ""
+  timeout: 30
+
+crawler:
+  github_token: ""                          # GitHub clone 认证回退
+  max_tags_per_repo: 3
 ```
 
 `storage.local_path` 同时作为爬虫和下载接口的运行时数据根目录：

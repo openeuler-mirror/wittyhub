@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,8 +10,6 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from src.models.orm import SkillVersion
-from src.models.repository import SkillRepository, SkillRepoRepository
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.skill_parser import (
@@ -24,11 +21,15 @@ from skillcrawler.core.skill_parser import (
     normalize_git_clone_url,
 )
 from skillcrawler.core.skill_scanner import SkillScanner
+from src.core.config import get_settings
+from src.models.orm import SkillVersion
+from src.models.repository import SkillRepoRepository, SkillRepository
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
 
 _logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class SkillRepositoryRequest(BaseModel):
@@ -47,11 +48,14 @@ class SkillDiscoverStatus:
 class SkillManager:
     skill_repository: SkillRepository
     skill_repo_repository: SkillRepoRepository
-    workspace_base: Path = Path(os.environ.get("WITTY_WORKSPACE_ROOT", Path.home() / ".witty"))
+    workspace_base: Path | None = None
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.workspace_base is None:
+            self.workspace_base = Path(settings.storage.local_path).expanduser().resolve()
+
         category_classifier: DeepSeekCategoryClassifier | None = None
         try:
             category_classifier = DeepSeekCategoryClassifier()

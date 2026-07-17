@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from skillcrawler.config import load_crawler_config
+from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
+settings = get_settings()
 
 GIT_CLONE_RETRY_TIMES = 3
 GIT_CLONE_TIMEOUT_SECONDS = 120
@@ -322,49 +323,17 @@ class GitOperations:
 
     @staticmethod
     def _load_github_token() -> str | None:
-        try:
-            config = load_crawler_config()
-        except Exception as exc:
-            _logger.warning('Failed to load crawler config: %s', exc)
-            return None
-        crawler_config = config.get('crawler')
-        if not isinstance(crawler_config, dict):
-            return None
-        token = crawler_config.get('github_token')
-        if not isinstance(token, str):
-            return None
-        token = token.strip()
+        token = settings.crawler.github_token.strip()
         return token or None
 
     @staticmethod
     def _load_github_username() -> str | None:
-        try:
-            config = load_crawler_config()
-        except Exception:
-            return None
-        crawler_config = config.get('crawler')
-        if not isinstance(crawler_config, dict):
-            return None
-        username = crawler_config.get('github_username')
-        if not isinstance(username, str):
-            return 'git'
-        username = username.strip()
+        username = settings.crawler.github_username.strip()
         return username or 'git'
 
     @staticmethod
     def _load_max_tags_per_repo() -> int:
-        try:
-            config = load_crawler_config()
-        except Exception:
-            return DEFAULT_MAX_TAGS_PER_REPO
-        crawler_config = config.get('crawler')
-        if not isinstance(crawler_config, dict):
-            return DEFAULT_MAX_TAGS_PER_REPO
-        value = crawler_config.get('max_tags_per_repo')
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return DEFAULT_MAX_TAGS_PER_REPO
+        parsed = int(settings.crawler.max_tags_per_repo)
         return parsed if parsed > 0 else DEFAULT_MAX_TAGS_PER_REPO
 
     def _build_github_token_command(

@@ -31,6 +31,19 @@ class StorageConfig(BaseSettings):
     github_token: str = ""
 
 
+class ModelConfig(BaseSettings):
+    name: str = "deepseek-chat"
+    base_url: str = "https://api.deepseek.com"
+    api_key: str = ""
+    timeout: float = 30
+
+
+class CrawlerConfig(BaseSettings):
+    github_token: str = ""
+    github_username: str = "git"
+    max_tags_per_repo: int = 3
+
+
 class SecurityConfig(BaseSettings):
     socket_api_key: str = ""
     enable_audit: bool = True
@@ -57,6 +70,8 @@ class AIConfig(BaseSettings):
 class Settings(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    crawler: CrawlerConfig = Field(default_factory=CrawlerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     app: AppConfig = Field(default_factory=AppConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
@@ -74,6 +89,8 @@ class Settings(BaseSettings):
         return cls(
             database=DatabaseConfig(**data.get("database", {})),
             storage=StorageConfig(**data.get("storage", {})),
+            model=ModelConfig(**data.get("model", {})),
+            crawler=CrawlerConfig(**data.get("crawler", {})),
             security=SecurityConfig(**data.get("security", {})),
             app=AppConfig(**data.get("app", {})),
             logging=LoggingConfig(**data.get("logging", {})),

@@ -1,10 +1,3 @@
-model:
-  name: deepseek-chat
-  base_url: https://api.deepseek.com
-  api_key: 
-  timeout: 30
-crawler:
-  github_token: 
 categories:
 - Research and Design
 - Development and Build

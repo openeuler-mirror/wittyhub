@@ -290,6 +290,17 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_commit_ids_for_skill_repo(self, skill_repo_id: uuid.UUID) -> set[str]:
+        result = await self.session.execute(
+            select(Skill.commit_id)
+            .where(
+                Skill.skill_repo_id == skill_repo_id,
+                Skill.commit_id.is_not(None),
+                Skill.commit_id != "",
+            )
+        )
+        return {commit_id for commit_id in result.scalars().all() if commit_id}
+
     async def replace_for_skill_repo(
         self,
         skill_repo_id: uuid.UUID,

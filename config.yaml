@@ -1,3 +1,21 @@
+storage:
+  type: "local"
+  local_path: "/opt/wittyhub/skill-data"
+
+model:
+  name: deepseek-chat
+  base_url: https://api.deepseek.com
+  api_key: ""
+  timeout: 30
+
+crawler:
+  github_token: ""
+
+security:
+  # Skillspector (Jenkins-based scanner) — sensitive fields via env vars
+  enable_audit: true
+  skillspector_jenkins_url: ""  # 通过环境变量 SKILLSPECTOR_JENKINS_URL 配置
+
 database:
   host: "localhost"
   port: 5432
@@ -5,25 +23,6 @@ database:
   password: "wittyhub_secret"
   dbname: "wittyhub"
   sslmode: "disable"
-
-storage:
-  type: "local"
-  local_path: "/opt/wittyhub/skill-data"
-  github_token: ""
-
-model:
-  name: deepseek-chat
-  base_url: https://api.deepseek.com
-  api_key: 
-  timeout: 30
-
-crawler:
-  github_token: 
-
-security:
-  # Skillspector (Jenkins-based scanner) — sensitive fields via env vars
-  enable_audit: true
-  skillspector_jenkins_url: ""  # 通过环境变量 SKILLSPECTOR_JENKINS_URL 配置
 
 ai:
   embedding_model: "bge-base-zh-v1.5"

@@ -91,11 +91,11 @@ class Settings(BaseSettings):
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Settings":
         path = Path(path)
-        if not path.exists():
-            return cls()
-
-        with open(path) as f:
-            data: dict[str, Any] = yaml.safe_load(f) or {}
+        data: dict[str, Any] = {}
+        if path.exists():
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+        _apply_env_overrides(data)
 
         return cls(
             database=DatabaseConfig(**data.get("database", {})),
@@ -110,6 +110,29 @@ class Settings(BaseSettings):
             personal_repos=data.get("personal_repos", []) or [],
             enterprise_repos=data.get("enterprise_repos", []) or [],
         )
+
+
+def _apply_env_overrides(data: dict[str, Any]) -> None:
+    for key, value in os.environ.items():
+        if "__" not in key:
+            continue
+        section, field = key.split("__", 1)
+        section = section.strip().lower()
+        field = field.strip().lower()
+        if not section or not field:
+            continue
+        section_data = data.setdefault(section, {})
+        if isinstance(section_data, dict):
+            section_data[field] = _parse_env_value(value)
+
+
+def _parse_env_value(value: str) -> Any:
+    if value == "":
+        return ""
+    try:
+        return yaml.safe_load(value)
+    except yaml.YAMLError:
+        return value
 
 
 @lru_cache

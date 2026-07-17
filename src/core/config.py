@@ -44,6 +44,11 @@ class CrawlerConfig(BaseSettings):
     max_tags_per_repo: int = 3
 
 
+class SkillRepoEntry(BaseSettings):
+    url: str
+    branch: str | None = None
+
+
 class SecurityConfig(BaseSettings):
     # Skillspector (Jenkins-based scanner)
     enable_audit: bool = False
@@ -79,6 +84,9 @@ class Settings(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
+    openeuler_repos: list[SkillRepoEntry] = Field(default_factory=list)
+    personal_repos: list[SkillRepoEntry] = Field(default_factory=list)
+    enterprise_repos: list[SkillRepoEntry] = Field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Settings":
@@ -98,6 +106,9 @@ class Settings(BaseSettings):
             app=AppConfig(**data.get("app", {})),
             logging=LoggingConfig(**data.get("logging", {})),
             ai=AIConfig(**data.get("ai", {})),
+            openeuler_repos=data.get("openeuler_repos", []) or [],
+            personal_repos=data.get("personal_repos", []) or [],
+            enterprise_repos=data.get("enterprise_repos", []) or [],
         )
 
 

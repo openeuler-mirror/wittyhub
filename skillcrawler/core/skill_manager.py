@@ -35,6 +35,7 @@ settings = get_settings()
 class SkillRepositoryRequest(BaseModel):
     branch: str | None = None
     url: str | None = None
+    platform: str | None = None
 
 
 class SkillDiscoverStatus:
@@ -93,6 +94,7 @@ class SkillManager:
             url=normalized.url,
             local_path=None,
             skill_discover_status=SkillDiscoverStatus.INIT,
+            platform=normalized.platform,
         )
 
     async def delete_skill_repository(self, repository_id: str) -> None:
@@ -313,7 +315,8 @@ class SkillManager:
         )
         if not url:
             raise ValueError('git skill repos require url')
-        return SkillRepositoryRequest(branch=branch, url=url)
+        platform = request.platform.strip() if request.platform is not None else None
+        return SkillRepositoryRequest(branch=branch, url=url, platform=platform)
 
     @staticmethod
     def _derive_git_repository_name(request: SkillRepositoryRequest) -> str:

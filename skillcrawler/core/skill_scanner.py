@@ -7,8 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.models.orm import SkillVersion
-from src.models.repository import SkillRepository
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.skill_parser import (
@@ -24,6 +22,8 @@ from skillcrawler.core.skill_parser import (
     should_skip_relative_path,
     to_repository_relative_path,
 )
+from src.models.orm import SkillVersion
+from src.models.repository import SkillRepository
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
@@ -228,7 +228,7 @@ class SkillScanner:
             source_url=source_url,
             category=category,
             tags=as_optional_str_list(metadata.get('tags')),
-            platform=as_optional_str(metadata.get('platform')),
+            platform=as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),
             extra_metadata=merged_metadata,
             content=content or None,
             created_at=datetime.now(timezone.utc),

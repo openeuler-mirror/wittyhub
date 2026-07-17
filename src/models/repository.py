@@ -41,10 +41,12 @@ class SkillRepoRepository:
         url: str | None,
         local_path: str | None,
         skill_discover_status: str,
+        platform: str | None = None,
     ) -> SkillRepoModel:
         repository = SkillRepoModel(
             repo_name=repo_name,
             source=source,
+            platform=platform,
             branch=branch,
             url=url,
             local_path=local_path,
@@ -62,6 +64,7 @@ class SkillRepoRepository:
         repository_id: str | uuid.UUID,
         *,
         source: str | None = None,
+        platform: str | None = None,
         branch: str | None = None,
         url: str | None = None,
         local_path: str | None = None,
@@ -71,6 +74,8 @@ class SkillRepoRepository:
         values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if source is not None:
             values["source"] = source
+        if platform is not None:
+            values["platform"] = platform
         if branch is not None:
             values["branch"] = branch
         if url is not None:

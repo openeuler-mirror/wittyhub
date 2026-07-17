@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.repository import SkillRepository, DownloadHistoryRepository, SkillRepoRepository
 from src.api.schemas.skill import (
     ErrorResponse,
     SecurityAuditResponse,
@@ -16,7 +15,7 @@ from src.api.schemas.skill import (
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
 from src.core.database import get_db
-from src.models.repository import DownloadHistoryRepository, SkillRepository
+from src.models.repository import DownloadHistoryRepository, SkillRepoRepository, SkillRepository
 from src.storage.downloader import (
     DownloadManager,
     SkillArchiveConflictError,
@@ -308,6 +307,7 @@ async def create_skill(
                 url=source_url,
                 local_path=None,
                 skill_discover_status="init",
+                platform=skill_data.platform,
             )
             skill_dict["skill_repo_id"] = new_repo.id
 
@@ -317,7 +317,7 @@ async def create_skill(
     security_service = SecurityService(db)
     if security_service.detector.enable_audit:
         try:
-            audit_result = await security_service.audit_skill(
+            await security_service.audit_skill(
                 skill.skill_id,
                 skill.source,
                 skill.source_url,

@@ -27,9 +27,20 @@ def configure_logging() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    structlog.get_logger().info("wittyhub starting up")
+    logger = structlog.get_logger()
+    logger.info("wittyhub starting up")
+
+    collector = None
+    if settings.security.enable_audit:
+        from src.security.detector import start_skillspector_collector
+
+        collector = await start_skillspector_collector()
+
     yield
-    structlog.get_logger().info("wittyhub shutting down")
+
+    if collector is not None:
+        await collector.stop()
+    logger.info("wittyhub shutting down")
 
 
 def create_app() -> FastAPI:

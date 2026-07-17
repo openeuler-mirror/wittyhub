@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.repository import SkillRepository, DownloadHistoryRepository, SkillRepoRepository
 from src.api.schemas.skill import (
     ErrorResponse,
     SecurityAuditResponse,
@@ -132,6 +133,57 @@ async def audit_skill(
     return {"error": "No audit found"}
 
 
+@router.post("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
+async def trigger_skill_audit(
+    skill_id: str,
+    scanners: str | None = Query(None, description="Comma-separated: skillspector"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger a fresh security audit for a skill and return the result."""
+    repo = SkillRepository(db)
+    skill = await repo.get_by_skill_id(skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    scanner_list = None
+    if scanners:
+        scanner_list = [s.strip() for s in scanners.split(",") if s.strip()]
+
+    security_service = SecurityService(db)
+    audit_result = await security_service.audit_skill(
+        skill_id=skill.skill_id,
+        source=skill.source,
+        source_url=skill.source_url,
+        metadata={
+            "version": skill.version,
+            "content": skill.content,
+        },
+        scanners=scanner_list,
+    )
+
+    if "error" in audit_result:
+        return {"error": audit_result["error"]}
+
+    # Fetch the newly created audit record
+    audit_repo = security_service.audit_repo
+    latest_audit = await audit_repo.get_latest_by_resource("skill", skill.id)
+
+    if not latest_audit:
+        return {"error": "Audit completed but no record found"}
+
+    return SecurityAuditResponse(
+        id=str(latest_audit.id),
+        resource_type=latest_audit.resource_type,
+        resource_id=str(latest_audit.resource_id),
+        audit_type=latest_audit.audit_type,
+        risk_level=latest_audit.risk_level,
+        risk_signals=latest_audit.risk_signals,
+        details=latest_audit.details,
+        audited_at=latest_audit.audited_at,
+    )
+
+
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
 async def get_skill_versions(
     skill_id: str,
@@ -233,19 +285,48 @@ async def create_skill(
     if existing:
         raise HTTPException(status_code=409, detail="Skill already exists")
 
-    security_service = SecurityService(db)
-
     skill_dict = skill_data.model_dump()
-    if security_service.detector.enable_audit:
-        audit_result = await security_service.audit_skill(
-            skill_data.skill_id,
-            skill_data.source,
-            skill_data.source_url,
-            skill_dict,
-        )
-        skill_dict["security_score"] = audit_result.get("security_score")
+
+    # Resolve skill_repo_id: look up or create the source repository
+    if not skill_dict.get("skill_repo_id"):
+        repo_repo = SkillRepoRepository(db)
+        source = skill_data.source
+        source_url = skill_data.source_url
+        repo_name = source_url
+        for prefix in ("https://", "http://"):
+            if repo_name.startswith(prefix):
+                repo_name = repo_name[len(prefix):]
+        repo_name = repo_name.removesuffix(".git").replace("/", "_")
+        existing_repo = await repo_repo.get_skill_repository_by_repo_name(repo_name)
+        if existing_repo:
+            skill_dict["skill_repo_id"] = existing_repo.id
+        else:
+            new_repo = await repo_repo.create_skill_repository(
+                repo_name=repo_name,
+                source=source,
+                branch=skill_data.version or "main",
+                url=source_url,
+                local_path=None,
+                skill_discover_status="init",
+            )
+            skill_dict["skill_repo_id"] = new_repo.id
 
     skill = await repo.create(skill_dict)
+
+    # Run security audit after skill is persisted, then write back the score
+    security_service = SecurityService(db)
+    if security_service.detector.enable_audit:
+        try:
+            audit_result = await security_service.audit_skill(
+                skill.skill_id,
+                skill.source,
+                skill.source_url,
+                {"version": skill.version, "content": skill.content or ""},
+            )
+            # security_score is already persisted by audit_skill internally
+        except Exception:
+            pass  # audit failure must not block skill creation
+
     return skill_to_response(skill)
 
 

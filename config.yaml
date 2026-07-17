@@ -21,8 +21,9 @@ crawler:
   github_token: 
 
 security:
-  socket_api_key: ""
+  # Skillspector (Jenkins-based scanner) — sensitive fields via env vars
   enable_audit: true
+  skillspector_jenkins_url: ""  # 通过环境变量 SKILLSPECTOR_JENKINS_URL 配置
 
 ai:
   embedding_model: "bge-base-zh-v1.5"

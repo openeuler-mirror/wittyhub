@@ -21,7 +21,6 @@ crawler:
   github_token: ""
 
 security:
-  socket_api_key: ""
   enable_audit: false
 
 ai:

@@ -7,11 +7,13 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from pydantic import BaseModel
 
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
+from skillcrawler.core.openeuler_sig import build_openeuler_repo_sig_mapping
 from skillcrawler.core.skill_parser import (
     as_optional_str,
     as_optional_str_list,
@@ -52,6 +54,11 @@ class SkillManager:
     workspace_base: Path | None = None
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
+    _openeuler_sig_by_repo_name: dict[str, str] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.workspace_base is None:
@@ -78,8 +85,8 @@ class SkillManager:
     async def create_skill_repository(
         self, request: SkillRepositoryRequest
     ) -> SkillRepoModel | None:
-        normalized = self._normalize_create_request(request)
-        repo_name = self._derive_git_repository_name(normalized)
+        normalized = self._normalize_repository_request(request)
+        repo_name = self._derive_repo_name(normalized)
         existing = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
         if existing is not None:
             _logger.warning(
@@ -108,7 +115,7 @@ class SkillManager:
                     _logger.warning(f'Failed to clean up directory {local_path}: {exc}')
         await self.skill_repo_repository.delete_skill_repository(stored.id)
 
-    async def discover_one_skill_repository(
+    async def discover_skills_from_single_existing_repository(
         self,
         repository_id: str,
         *,
@@ -120,15 +127,23 @@ class SkillManager:
 
         await self._set_discovery_status(repository, SkillDiscoverStatus.DISCOVERING)
         try:
-            latest_skills, tagged_skills = await self._discover_git_skill_repository_skills(repository)
-            unique_skill_count = self._count_unique_skills(latest_skills)
-            await self.skill_repository.replace_for_skill_repo(
-                repository.id, latest_skills, tagged_skills,
+            request = SkillRepositoryRequest(
+                url=repository.url,
+                branch=repository.branch,
+                platform=repository.platform,
             )
-            return await self.skill_repo_repository.update_skill_repository(
-                repository.id,
-                skill_discover_status=SkillDiscoverStatus.DONE,
-                skill_num=unique_skill_count,
+            repo_name = self._derive_repo_name(request)
+            clone_dir = self._local_repository_path(repo_name)
+            self._sync_git_repository(
+                clone_dir=clone_dir,
+                clone_url=normalize_clone_url_for_git(repository.url),
+                branch=repository.branch,
+                repo_url=repository.url,
+            )
+            return await self._discover_and_store_skills(
+                repository,
+                clone_dir=clone_dir,
+                repo_name=repo_name,
             )
         except Exception as exc:
             error_summary = self._git_ops.summarize_exception(exc)
@@ -151,16 +166,18 @@ class SkillManager:
             raise KeyError(f'Skill repo {repository_id} not found')
         return repository
 
-    # ── Scan: probe repo for SKILL.md, only persist if found ──────
+    # ── Discover from configured repo list ────────────────────────
 
     @staticmethod
     def _has_skill_md(clone_dir: Path) -> bool:
         """Check whether a cloned repo contains at least one scannable skill."""
         return bool(find_scannable_skill_files(clone_dir))
 
-    async def scan_one_skill_repository(
+    async def discover_configured_skill_repository(
         self,
         request: SkillRepositoryRequest,
+        *,
+        force: bool = False,
     ) -> SkillRepoModel | None:
         """Clone a repo and persist it only when a scannable skill is present.
 
@@ -171,34 +188,19 @@ class SkillManager:
         Clone and discovery errors propagate to the caller. The clone directory is
         retained for troubleshooting and reuse by a later scan.
         """
-        normalized = self._normalize_create_request(request)
-        repo_name = self._derive_git_repository_name(normalized)
-        clone_dir = self.workspace_base / 'skill-repositories' / repo_name
+        normalized = self._normalize_repository_request(request)
+        repo_name = self._derive_repo_name(normalized)
+        clone_dir = self._local_repository_path(repo_name)
+        self._sync_git_repository(
+            clone_dir=clone_dir,
+            clone_url=normalize_clone_url_for_git(normalized.url),
+            branch=normalized.branch,
+            repo_url=normalized.url,
+        )
 
-        # Clone directly to the standard directory
-        clone_url = normalize_clone_url_for_git(normalized.url)
-
-        if clone_dir.is_dir() and (clone_dir / '.git').exists():
-            _logger.info('Crawl: existing clone found, pulling updates: %s', clone_dir)
-            self._git_ops.update_existing_repository(
-                clone_dir, clone_url,
-                branch=normalized.branch, repo_url=normalized.url,
-            )
-        else:
-            if clone_dir.exists():
-                _logger.info('Crawl: removing non-git directory before clone: %s', clone_dir)
-                shutil.rmtree(clone_dir)
-            _logger.info('Crawl: cloning skill repo: %s', clone_dir)
-            clone_dir.mkdir(parents=True, exist_ok=True)
-            self._git_ops.clone_repository(
-                clone_dir, clone_url,
-                branch=normalized.branch, repo_url=normalized.url,
-            )
-
-        # Check for SKILL.md
         if not self._has_skill_md(clone_dir):
             _logger.info(
-                'Crawl: no scannable SKILL.md found in %s; retaining clone at %s',
+                'Discover: no scannable SKILL.md found in %s; retaining clone at %s',
                 repo_name,
                 clone_dir,
             )
@@ -209,53 +211,79 @@ class SkillManager:
                 return repository
             return None
 
-        # Has skill — create in DB if needed, then always discover so skills tables stay in sync.
-        created_new = False
-        repository = await self.create_skill_repository(normalized)
-        if repository is None:
-            _logger.info('Crawl: skill repo already exists in DB: %s', repo_name)
-            repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
-            if repository is None:
-                raise ValueError(f'Skill repo {repo_name} was expected in DB but not found')
-            current_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
-            existing_commit_ids = await self.skill_repository.get_commit_ids_for_skill_repo(repository.id)
-            if current_commit_id and existing_commit_ids == {current_commit_id}:
-                setattr(repository, "_unchanged", True)
-                return repository
-        else:
-            created_new = True
+        repository, created_new = await self._get_or_create_skill_repository(
+            normalized,
+            repo_name,
+        )
+        if (
+            not force
+            and not created_new
+            and await self._is_commit_unchanged(repository.id, clone_dir)
+        ):
+            setattr(repository, "_unchanged", True)
+            return repository
 
-        # Discover skills (reuse the clone we already have)
-        await self.discover_one_skill_repository(str(repository.id))
-        refreshed = await self.get_repository_by_id(repository.id)
+        await self._set_discovery_status(repository, SkillDiscoverStatus.DISCOVERING)
+        try:
+            refreshed = await self._discover_and_store_skills(
+                repository,
+                clone_dir=clone_dir,
+                repo_name=repo_name,
+            )
+        except Exception as exc:
+            error_summary = self._git_ops.summarize_exception(exc)
+            _logger.warning(
+                'Failed to discover skills from skill repo %s (%s): %s',
+                repository.id, repository.repo_name, error_summary,
+            )
+            await self.skill_repo_repository.update_skill_repository(
+                repository.id,
+                skill_discover_status=SkillDiscoverStatus.FAILED,
+                skill_num=repository.skill_num,
+            )
+            raise ValueError(
+                f'Failed to discover skills from skill repo {repository.id}: {error_summary}'
+            ) from exc
         setattr(refreshed, "_created_new", created_new)
         return refreshed
 
     # ── Internal: discovery orchestration ──────────────────────────
 
-    async def _discover_git_skill_repository_skills(
+    async def _discover_and_store_skills(
         self,
         repo: SkillRepoModel,
-    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
-        clone_url = normalize_clone_url_for_git(repo.url)
-        repo_name = self._derive_git_repository_name(
-            SkillRepositoryRequest(url=repo.url, branch=repo.branch)
+        *,
+        clone_dir: Path,
+        repo_name: str,
+    ) -> SkillRepoModel:
+        author = self._resolve_skill_author(repo.platform, repo_name)
+        print(f"Author: {author}")
+        latest_skills, tagged_skills = await self._scan_local_repository(
+            repo,
+            clone_dir=clone_dir,
+            author=author,
+        )
+        unique_skill_count = self._count_unique_skills(latest_skills)
+        await self.skill_repository.replace_for_skill_repo(
+            repo.id, latest_skills, tagged_skills,
+        )
+        return await self.skill_repo_repository.update_skill_repository(
+            repo.id,
+            skill_discover_status=SkillDiscoverStatus.DONE,
+            skill_num=unique_skill_count,
         )
 
-        clone_dir = self.workspace_base / 'skill-repositories' / f'{repo_name}'
-        if clone_dir.is_dir() and (clone_dir / '.git').exists():
-            _logger.info('Using existing skill repo, fetching updates: %s', clone_dir)
-            self._git_ops.update_existing_repository(clone_dir, clone_url, branch=repo.branch, repo_url=repo.url)
-        else:
-            if clone_dir.exists():
-                _logger.info('Removing non-git skill repo directory before clone: %s', clone_dir)
-                shutil.rmtree(clone_dir)
-            _logger.info('Repository not found locally, cloning: %s', clone_dir)
-            clone_dir.mkdir(parents=True, exist_ok=True)
-            self._git_ops.clone_repository(clone_dir, clone_url, branch=repo.branch, repo_url=repo.url)
-
+    async def _scan_local_repository(
+        self,
+        repo: SkillRepoModel,
+        *,
+        clone_dir: Path,
+        author: str | None,
+    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
-            clone_dir, clone_url, repo.url,
+            clone_dir,
+            normalize_clone_url_for_git(repo.url),
+            repo.url,
         )
         version_snapshots = GitOperations.build_repository_version_snapshots(
             repository_git_metadata, as_optional_str, as_optional_str_list,
@@ -280,9 +308,68 @@ class SkillManager:
             repo_root=clone_dir,
             repository_git_metadata=repository_git_metadata,
             version_snapshots=tag_snapshots or None,
+            author=author,
         )
 
     # ── Internal: helpers ──────────────────────────────────────────
+
+    def _local_repository_path(self, repo_name: str) -> Path:
+        return self.workspace_base / 'skill-repositories' / repo_name
+
+    def _sync_git_repository(
+        self,
+        *,
+        clone_dir: Path,
+        clone_url: str,
+        branch: str | None,
+        repo_url: str | None,
+    ) -> None:
+        if clone_dir.is_dir() and (clone_dir / '.git').exists():
+            _logger.info('Discover: existing clone found, pulling updates: %s', clone_dir)
+            self._git_ops.update_existing_repository(
+                clone_dir, clone_url,
+                branch=branch, repo_url=repo_url,
+            )
+            return
+
+        if clone_dir.exists():
+            _logger.info('Discover: removing non-git directory before clone: %s', clone_dir)
+            shutil.rmtree(clone_dir)
+        _logger.info('Discover: cloning skill repo: %s', clone_dir)
+        clone_dir.mkdir(parents=True, exist_ok=True)
+        self._git_ops.clone_repository(
+            clone_dir, clone_url,
+            branch=branch, repo_url=repo_url,
+        )
+
+    async def _get_or_create_skill_repository(
+        self,
+        request: SkillRepositoryRequest,
+        repo_name: str,
+    ) -> tuple[SkillRepoModel, bool]:
+        repository = await self.create_skill_repository(request)
+        if repository is not None:
+            return repository, True
+
+        _logger.info('Discover: skill repo already exists in DB: %s', repo_name)
+        repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
+        if repository is None:
+            raise ValueError(f'Skill repo {repo_name} was expected in DB but not found')
+        return repository, False
+
+    async def _is_commit_unchanged(
+        self,
+        repository_id: str | UUID,
+        clone_dir: Path,
+    ) -> bool:
+        current_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
+        existing_commit_ids = await self.skill_repository.get_commit_ids_for_skill_repo(repository_id)
+        return bool(current_commit_id and existing_commit_ids == {current_commit_id})
+
+    def _resolve_skill_author(self, platform: str | None, repo_name: str) -> str | None:
+        if platform == 'openeuler':
+            return self._get_openeuler_sig_name(repo_name)
+        return None
 
     @staticmethod
     def _count_unique_skills(skills: list[SkillVersion]) -> int:
@@ -304,7 +391,7 @@ class SkillManager:
         )
 
     @staticmethod
-    def _normalize_create_request(
+    def _normalize_repository_request(
         request: SkillRepositoryRequest,
     ) -> SkillRepositoryRequest:
         branch = request.branch.strip() if request.branch is not None else None
@@ -319,7 +406,7 @@ class SkillManager:
         return SkillRepositoryRequest(branch=branch, url=url, platform=platform)
 
     @staticmethod
-    def _derive_git_repository_name(request: SkillRepositoryRequest) -> str:
+    def _derive_repo_name(request: SkillRepositoryRequest) -> str:
         name = request.url
         for prefix in ('https://', 'http://'):
             if name.startswith(prefix):
@@ -327,3 +414,19 @@ class SkillManager:
         name = name.removesuffix('.git')
         name = name.replace('/', '_')
         return name
+
+    def _get_openeuler_sig_name(self, repo_name: str) -> str | None:
+        if self._openeuler_sig_by_repo_name is None:
+            try:
+                self._openeuler_sig_by_repo_name = build_openeuler_repo_sig_mapping()
+                _logger.info(
+                    "Loaded openEuler SIG mapping: repos=%s",
+                    len(self._openeuler_sig_by_repo_name),
+                )
+            except Exception as exc:
+                _logger.warning(
+                    "Failed to load openEuler SIG mapping; continuing without SIG author: %s",
+                    self._git_ops.summarize_exception(exc),
+                )
+                self._openeuler_sig_by_repo_name = {}
+        return self._openeuler_sig_by_repo_name.get(repo_name)

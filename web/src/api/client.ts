@@ -59,8 +59,10 @@ export const api = {
     return data
   },
 
-  async getSkillDownload(skillId: string): Promise<DownloadResponse> {
-    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/download`)
+  async getSkillDownload(skillId: string): Promise<Blob> {
+    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
+      responseType: 'blob',
+    })
     return data
   },
 

@@ -1,121 +1,231 @@
 import asyncio
+import hashlib
 import os
 import re
-import tempfile
-from pathlib import Path
-from typing import Any
+import shutil
+import uuid
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlparse
 
 import aiofiles
-import httpx
 
 from src.core.config import get_settings
+from src.models.orm import Skill, SkillRepoModel
 
 settings = get_settings()
 
 
+class SkillArchiveError(Exception):
+    """Base error raised while resolving or packaging a Skill archive."""
+
+
+class SkillArchiveConflictError(SkillArchiveError):
+    """Raised when indexed Skill data cannot be resolved from the local clone."""
+
+
+class SkillArchiveNotFoundError(SkillArchiveError):
+    """Raised when the indexed Skill tree is absent from the requested commit."""
+
+
+@dataclass(frozen=True)
+class SkillArchive:
+    path: Path
+    filename: str
+    media_type: str = "application/zip"
+
+
 class DownloadManager:
-    def __init__(self):
-        self.storage_path = Path(settings.storage.local_path)
+    def __init__(self, storage_path: Path | None = None):
+        self.storage_path = Path(storage_path or settings.storage.local_path).resolve()
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        self.github_token = settings.storage.github_token
 
-    async def get_download_url(
-        self, source: str, source_url: str, skill_id: str = None, version: str = None, commit_id: str = None
+    async def create_skill_archive(
+        self,
+        *,
+        skill: Skill,
+        repository: SkillRepoModel,
+    ) -> SkillArchive:
+        repository_path = self._validate_repository_path(repository.local_path)
+        relative_path = self.resolve_skill_relative_path(
+            skill_id=skill.skill_id,
+            source=repository.source,
+            repository_url=repository.url,
+        )
+        commit_id = self._validate_commit_id(skill.commit_id)
+
+        await self._ensure_git_object_exists(
+            repository_path,
+            f"{commit_id}^{{commit}}",
+            "Skill commit is not available in local repository",
+        )
+        await self._ensure_git_object_exists(
+            repository_path,
+            f"{commit_id}:{relative_path}/SKILL.md",
+            "Skill files are not available at the indexed commit",
+            not_found=True,
+        )
+
+        archive_path = await self._build_skill_archive(
+            repository_path=repository_path,
+            commit_id=commit_id,
+            relative_path=relative_path,
+            skill_name=skill.name,
+            skill_id=skill.skill_id,
+        )
+        return SkillArchive(
+            path=archive_path,
+            filename=self._build_archive_filename(skill),
+        )
+
+    @staticmethod
+    def resolve_skill_relative_path(
+        *,
+        skill_id: str,
+        source: str,
+        repository_url: str | None,
     ) -> str:
-        if source == "github":
-            return self._format_github_download_url(source_url, skill_id, version, commit_id)
-        elif source == "gitcode":
-            return self._format_gitcode_download_url(source_url, skill_id, version, commit_id)
-        elif source == "gitee":
-            return self._format_gitee_download_url(source_url, skill_id, version, commit_id)
+        owner_repo = DownloadManager._extract_owner_repo(repository_url)
+        prefix = f"{source}/{owner_repo}/"
+        if not skill_id.startswith(prefix):
+            raise SkillArchiveConflictError(f"Skill ID does not belong to repository: {skill_id}")
+
+        relative_path = skill_id.removeprefix(prefix).rstrip("/")
+        path = PurePosixPath(relative_path)
+        if not relative_path or path.is_absolute() or ".." in path.parts:
+            raise SkillArchiveConflictError("Invalid Skill repository path")
+        return path.as_posix()
+
+    @staticmethod
+    def _extract_owner_repo(repository_url: str | None) -> str:
+        if not repository_url:
+            raise SkillArchiveConflictError("Skill repository URL is missing")
+
+        normalized_url = repository_url.strip()
+        ssh_match = re.match(r"git@[^:]+:(.+)", normalized_url)
+        if ssh_match:
+            repository_path = ssh_match.group(1).strip("/")
         else:
-            return source_url
+            parsed = urlparse(normalized_url)
+            if not parsed.netloc:
+                raise SkillArchiveConflictError("Invalid Skill repository URL")
+            repository_path = parsed.path.strip("/")
 
-    def _format_github_download_url(
-        self, source_url: str, skill_id: str = None, version: str = None, commit_id: str = None
-    ) -> str:
-        match = re.match(r"https?://github\.com/([^/]+)/([^/]+)(?:\.git)?$", source_url)
-        if match:
-            owner, repo = match.groups()
-            version = version or "main"
+        repository_path = repository_path.removesuffix(".git")
+        segments = [unquote(segment) for segment in repository_path.split("/") if segment]
+        if len(segments) < 2:
+            raise SkillArchiveConflictError("Invalid Skill repository URL")
 
-            if commit_id:
-                return f"https://github.com/{owner}/{repo}/archive/{commit_id}.zip"
+        owner = DownloadManager._slugify_identifier(segments[-2])
+        repository_name = DownloadManager._slugify_identifier(segments[-1])
+        if not owner or not repository_name:
+            raise SkillArchiveConflictError("Invalid Skill repository URL")
+        return f"{owner}/{repository_name}"
 
-            return f"https://github.com/{owner}/{repo}/archive/refs/heads/{version}.zip"
-        return source_url
+    @staticmethod
+    def _slugify_identifier(value: str) -> str:
+        normalized = re.sub(r"[^a-z0-9._-]+", "-", value.strip().lower())
+        normalized = re.sub(r"-{2,}", "-", normalized)
+        return normalized.strip("-")
 
-    def _format_gitcode_download_url(
-        self, source_url: str, skill_id: str = None, version: str = None, commit_id: str = None
-    ) -> str:
-        match = re.match(r"https?://gitcode\.com/([^/]+)/([^/]+)(?:\.git)?$", source_url)
-        if match:
-            owner, repo = match.groups()
-            version = version or "main"
+    @staticmethod
+    def _validate_repository_path(local_path: str | None) -> Path:
+        if not local_path:
+            raise SkillArchiveConflictError("Skill repository local path is missing")
 
-            if commit_id:
-                return f"https://gitcode.com/{owner}/{repo}/archive/{commit_id}.zip"
+        repository_path = Path(local_path).expanduser().resolve()
+        if not repository_path.is_dir():
+            raise SkillArchiveConflictError("Local Skill repository does not exist")
+        if not (repository_path / ".git").exists():
+            raise SkillArchiveConflictError("Local Skill repository is not a Git repository")
+        return repository_path
 
-            if skill_id:
-                skill_name = skill_id.split(":")[0].split("/")[-1]
-                return f"https://gitcode.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
+    @staticmethod
+    def _validate_commit_id(commit_id: str | None) -> str:
+        if not commit_id:
+            raise SkillArchiveConflictError("Skill commit ID is missing")
+        if not re.fullmatch(r"[0-9a-fA-F]{7,64}", commit_id):
+            raise SkillArchiveConflictError("Invalid Skill commit ID")
+        return commit_id
 
-            return f"https://gitcode.com/{owner}/{repo}/archive/{version}.zip"
-        return source_url
+    async def _ensure_git_object_exists(
+        self,
+        repository_path: Path,
+        object_name: str,
+        error_message: str,
+        *,
+        not_found: bool = False,
+    ) -> None:
+        return_code, _, _ = await self._run_git(
+            repository_path,
+            "cat-file",
+            "-e",
+            object_name,
+        )
+        if return_code == 0:
+            return
+        error_type = SkillArchiveNotFoundError if not_found else SkillArchiveConflictError
+        raise error_type(error_message)
 
-    def _format_gitee_download_url(
-        self, source_url: str, skill_id: str = None, version: str = None, commit_id: str = None
-    ) -> str:
-        match = re.match(r"https?://gitee\.com/([^/]+)/([^/]+)(?:\.git)?$", source_url)
-        if match:
-            owner, repo = match.groups()
-            version = version or "main"
-
-            if commit_id:
-                return f"https://gitee.com/{owner}/{repo}/archive/{commit_id}.zip"
-
-            if skill_id:
-                skill_name = skill_id.split(":")[0].split("/")[-1]
-                return f"https://gitee.com/{owner}/{repo}/tree/{version}/skills/{skill_name}"
-
-            return f"https://gitee.com/{owner}/{repo}/archive/{version}.zip"
-        return source_url
-
-    async def download_to_local(
-        self, source: str, source_url: str, skill_id: str
+    async def _build_skill_archive(
+        self,
+        *,
+        repository_path: Path,
+        commit_id: str,
+        relative_path: str,
+        skill_name: str,
+        skill_id: str,
     ) -> Path:
-        download_url = await self.get_download_url(source, source_url)
-        local_path = self.storage_path / f"{skill_id}"
+        cache_directory = self.storage_path / "download-cache"
+        cache_directory.mkdir(parents=True, exist_ok=True)
 
-        headers = {}
-        if self.github_token:
-            headers["Authorization"] = f"token {self.github_token}"
+        archive_key = hashlib.sha256(f"{skill_id}:{commit_id}:{relative_path}".encode()).hexdigest()
+        archive_path = cache_directory / f"{archive_key}.zip"
+        if archive_path.is_file() and archive_path.stat().st_size > 0:
+            return archive_path
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(download_url, headers=headers)
-            response.raise_for_status()
+        temporary_path = cache_directory / f".{archive_key}.{uuid.uuid4().hex}.tmp"
+        archive_root = self._sanitize_filename(skill_name)
+        try:
+            return_code, _, _ = await self._run_git(
+                repository_path,
+                "archive",
+                "--format=zip",
+                f"--prefix={archive_root}/",
+                f"--output={temporary_path}",
+                f"{commit_id}:{relative_path}",
+            )
+            if return_code != 0 or not temporary_path.is_file():
+                raise SkillArchiveError("Failed to package Skill")
+            os.replace(temporary_path, archive_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return archive_path
 
-            local_path.mkdir(parents=True, exist_ok=True)
+    @staticmethod
+    async def _run_git(repository_path: Path, *args: str) -> tuple[int, bytes, bytes]:
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(repository_path),
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return process.returncode or 0, stdout, stderr
 
-            if source == "github" and "/archive/" in download_url:
-                file_path = local_path / "archive.zip"
-                async with aiofiles.open(file_path, "wb") as f:
-                    await f.write(response.content)
-                return file_path
+    @staticmethod
+    def _sanitize_filename(value: str) -> str:
+        cleaned = re.sub(r"[^0-9A-Za-z._-]+", "-", value).strip(".-_")
+        return cleaned or "skill"
 
-            return local_path
-
-    async def get_file_content(self, source: str, source_url: str) -> str:
-        download_url = await self.get_download_url(source, source_url)
-
-        headers = {}
-        if self.github_token:
-            headers["Authorization"] = f"token {self.github_token}"
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(download_url, headers=headers)
-            response.raise_for_status()
-            return response.text
+    def _build_archive_filename(self, skill: Skill) -> str:
+        name = self._sanitize_filename(skill.name)
+        if skill.version:
+            version = self._sanitize_filename(skill.version)
+            return f"{name}-{version}.zip"
+        return f"{name}.zip"
 
 
 class LocalStorage:
@@ -148,7 +258,6 @@ class LocalStorage:
             return await f.read()
 
     async def delete(self, skill_id: str) -> bool:
-        import shutil
         skill_dir = self.base_path / skill_id
 
         if skill_dir.exists():

@@ -1,22 +1,28 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.repository import SkillRepository, DownloadHistoryRepository, SkillRepoRepository
 from src.api.schemas.skill import (
+    ErrorResponse,
+    SecurityAuditResponse,
     SkillCreate,
     SkillListResponse,
     SkillResponse,
     SkillVersionsResponse,
-    SecurityAuditResponse,
-    ErrorResponse,
-    DownloadResponse,
 )
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
 from src.core.database import get_db
-from src.storage.downloader import DownloadManager
+from src.models.repository import DownloadHistoryRepository, SkillRepository
+from src.storage.downloader import (
+    DownloadManager,
+    SkillArchiveConflictError,
+    SkillArchiveError,
+    SkillArchiveNotFoundError,
+)
 
 router = APIRouter()
 
@@ -201,22 +207,43 @@ async def get_skill_versions(
     )
 
 
-@router.get("/{skill_id:path}/download", response_model=DownloadResponse)
+@router.get(
+    "/{skill_id:path}/download",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Packaged Skill ZIP",
+            "content": {"application/zip": {}},
+        },
+        404: {"description": "Skill not found"},
+        409: {"description": "Local Skill repository is unavailable"},
+    },
+)
 async def download_skill(
     skill_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     repo = SkillRepository(db)
-    skill = await repo.get_by_skill_id(skill_id)
+    skill = await repo.get_with_repository_by_skill_id(skill_id)
 
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+    if not skill.skill_repo:
+        raise HTTPException(status_code=409, detail="Skill repository metadata is missing")
 
     download_manager = DownloadManager()
-    download_url = await download_manager.get_download_url(
-        skill.source, skill.source_url, skill.skill_id, skill.version, skill.commit_id
-    )
+    try:
+        archive = await download_manager.create_skill_archive(
+            skill=skill,
+            repository=skill.skill_repo,
+        )
+    except SkillArchiveNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SkillArchiveConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SkillArchiveError as exc:
+        raise HTTPException(status_code=500, detail="Failed to package Skill") from exc
 
     dl_history = DownloadHistoryRepository(db)
     await dl_history.create({
@@ -226,11 +253,12 @@ async def download_skill(
         "user_agent": request.headers.get("user-agent"),
     })
     await repo.increment_download(skill_id)
+    await db.commit()
 
-    return DownloadResponse(
-        download_url=download_url,
-        file_path=None,
-        security_audit=None,
+    return FileResponse(
+        path=archive.path,
+        filename=archive.filename,
+        media_type=archive.media_type,
     )
 
 

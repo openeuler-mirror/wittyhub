@@ -8,8 +8,17 @@ database:
 
 storage:
   type: "local"
-  local_path: "./data/skills"
+  local_path: "/opt/wittyhub/skill-data"
   github_token: ""
+
+model:
+  name: deepseek-chat
+  base_url: https://api.deepseek.com
+  api_key: 
+  timeout: 30
+
+crawler:
+  github_token: 
 
 security:
   # Skillspector (Jenkins-based scanner) — sensitive fields via env vars

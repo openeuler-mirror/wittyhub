@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,8 +10,6 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from src.models.orm import SkillVersion
-from src.models.repository import SkillRepository, SkillRepoRepository
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.skill_parser import (
@@ -24,11 +21,15 @@ from skillcrawler.core.skill_parser import (
     normalize_git_clone_url,
 )
 from skillcrawler.core.skill_scanner import SkillScanner
+from src.core.config import get_settings
+from src.models.orm import SkillVersion
+from src.models.repository import SkillRepoRepository, SkillRepository
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
 
 _logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class SkillRepositoryRequest(BaseModel):
@@ -47,13 +48,14 @@ class SkillDiscoverStatus:
 class SkillManager:
     skill_repository: SkillRepository
     skill_repo_repository: SkillRepoRepository
-    workspace_base: Path = Path(
-        os.getenv('WITTY_WORKSPACE_BASE', '~/witty-service/')
-    ).expanduser()
+    workspace_base: Path | None = None
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.workspace_base is None:
+            self.workspace_base = Path(settings.storage.local_path).expanduser().resolve()
+
         category_classifier: DeepSeekCategoryClassifier | None = None
         try:
             category_classifier = DeepSeekCategoryClassifier()
@@ -178,7 +180,7 @@ class SkillManager:
             _logger.info('Crawl: existing clone found, pulling updates: %s', clone_dir)
             self._git_ops.update_existing_repository(
                 clone_dir, clone_url,
-                type('R', (), {'branch': normalized.branch, 'url': normalized.url})(),
+                branch=normalized.branch, repo_url=normalized.url,
             )
         else:
             if clone_dir.exists():
@@ -188,7 +190,7 @@ class SkillManager:
             clone_dir.mkdir(parents=True, exist_ok=True)
             self._git_ops.clone_repository(
                 clone_dir, clone_url,
-                type('R', (), {'branch': normalized.branch, 'url': normalized.url})(),
+                branch=normalized.branch, repo_url=normalized.url,
             )
 
         # Check for SKILL.md
@@ -241,14 +243,14 @@ class SkillManager:
         clone_dir = self.workspace_base / 'skill-repositories' / f'{repo_name}'
         if clone_dir.is_dir() and (clone_dir / '.git').exists():
             _logger.info('Using existing skill repo, fetching updates: %s', clone_dir)
-            self._git_ops.update_existing_repository(clone_dir, clone_url, repo)
+            self._git_ops.update_existing_repository(clone_dir, clone_url, branch=repo.branch, repo_url=repo.url)
         else:
             if clone_dir.exists():
                 _logger.info('Removing non-git skill repo directory before clone: %s', clone_dir)
                 shutil.rmtree(clone_dir)
             _logger.info('Repository not found locally, cloning: %s', clone_dir)
             clone_dir.mkdir(parents=True, exist_ok=True)
-            self._git_ops.clone_repository(clone_dir, clone_url, repo)
+            self._git_ops.clone_repository(clone_dir, clone_url, branch=repo.branch, repo_url=repo.url)
 
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
             clone_dir, clone_url, repo.url,

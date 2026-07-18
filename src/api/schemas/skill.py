@@ -95,12 +95,6 @@ class SecurityAuditResponse(BaseModel):
     audited_at: datetime
 
 
-class DownloadResponse(BaseModel):
-    download_url: str
-    file_path: str | None = None
-    security_audit: SecurityAuditResponse | None = None
-
-
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None

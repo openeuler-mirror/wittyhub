@@ -81,18 +81,24 @@ async def list_skills(
     category: str | None = None,
     platform: str | None = None,
     tags: str | None = None,
+    security_level: str | None = None,
     sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "updated_at",
+    sort_period: Annotated[str | None, Query(pattern="^(week|month)$")] = None,
     db: AsyncSession = Depends(get_db),
 ):
     tag_list = tags.split(",") if tags else None
+    category_list = category.split(",") if category else None
+    security_level_list = security_level.split(",") if security_level else None
     repo = SkillRepository(db)
     skills, total = await repo.list(
         skip=skip,
         limit=limit,
-        category=category,
+        category=category_list,
         platform=platform,
         tags=tag_list,
+        security_level=security_level_list,
         sort_by=sort_by,
+        sort_period=sort_period,
     )
 
     return SkillListResponse(

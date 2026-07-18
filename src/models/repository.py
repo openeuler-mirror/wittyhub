@@ -1,18 +1,19 @@
+import re
 import uuid
 from datetime import datetime, timezone
-import re
 from typing import Any, List
 
-from sqlalchemy import func, select, update, delete, desc, case
+from sqlalchemy import case, delete, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.models.orm import (
-    Skill,
-    SkillVersion,
     Agent,
-    SecurityAudit,
     DownloadHistory,
+    SecurityAudit,
+    Skill,
     SkillRepoModel,
+    SkillVersion,
 )
 
 
@@ -260,6 +261,14 @@ class SkillRepository:
     async def get_by_skill_id(self, skill_id: str) -> Skill | None:
         result = await self.session.execute(
             select(Skill).where(Skill.skill_id == skill_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_with_repository_by_skill_id(self, skill_id: str) -> Skill | None:
+        result = await self.session.execute(
+            select(Skill)
+            .options(selectinload(Skill.skill_repo))
+            .where(Skill.skill_id == skill_id)
         )
         return result.scalar_one_or_none()
 

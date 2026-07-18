@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Skill, SkillListResponse, SearchResponse, SecurityAudit, DownloadResponse } from './types'
+import type { Skill, SkillListResponse, SearchResponse, SecurityAudit } from './types'
 
 export interface SkillVersionsResponse {
   source_url: string
@@ -59,8 +59,10 @@ export const api = {
     return data
   },
 
-  async getSkillDownload(skillId: string): Promise<DownloadResponse> {
-    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/download`)
+  async getSkillDownload(skillId: string): Promise<Blob> {
+    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
+      responseType: 'blob',
+    })
     return data
   },
 

@@ -116,6 +116,8 @@ async def get_stats(
         "total_skills": stats["total_skills"],
         "total_categories": stats["total_categories"],
         "categories": stats["categories"][:10],
+        "platforms": stats.get("platforms", []),
+        "security_levels": stats.get("security_levels", []),
     }
 
 

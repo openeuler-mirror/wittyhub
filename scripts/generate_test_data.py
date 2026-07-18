@@ -432,6 +432,12 @@ def insert_skills(conn, skills):
         source_url = skill["source_url"]
         if source_url not in repositories_by_url:
             repo_name = source_url.rstrip("/").split("/")[-1]
+            # Deduplicate repo_name to avoid unique constraint violation
+            original_name = repo_name
+            suffix = 0
+            while any(r["repo_name"] == repo_name for r in repositories_by_url.values()):
+                suffix += 1
+                repo_name = f"{original_name}-{suffix}"
             repositories_by_url[source_url] = {
                 "id": str(uuid.uuid4()),
                 "repo_name": repo_name,

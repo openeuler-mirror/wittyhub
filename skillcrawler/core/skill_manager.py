@@ -264,11 +264,13 @@ class SkillManager:
             author=author,
         )
         unique_skill_count = self._count_unique_skills(latest_skills)
-        await self.skill_repository.replace_for_skill_repo(
+        repository_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
+        await self.skill_repository.sync_for_skill_repo(
             repo.id, latest_skills, tagged_skills,
         )
         return await self.skill_repo_repository.update_skill_repository(
             repo.id,
+            repository_commit_id=repository_commit_id,
             skill_discover_status=SkillDiscoverStatus.DONE,
             skill_num=unique_skill_count,
         )
@@ -363,8 +365,8 @@ class SkillManager:
         clone_dir: Path,
     ) -> bool:
         current_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
-        existing_commit_ids = await self.skill_repository.get_commit_ids_for_skill_repo(repository_id)
-        return bool(current_commit_id and existing_commit_ids == {current_commit_id})
+        stored_commit_id = as_optional_str(getattr(repo, 'repository_commit_id', None))
+        return bool(current_commit_id and stored_commit_id == current_commit_id)
 
     def _resolve_skill_author(self, platform: str | None, repo_name: str) -> str | None:
         if platform == 'openeuler':

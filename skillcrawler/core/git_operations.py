@@ -105,6 +105,61 @@ class GitOperations:
     def get_repository_head_commit_id(self, clone_dir: Path) -> str | None:
         return self._get_git_ref_commit_id(clone_dir, 'HEAD')
 
+    def ensure_full_history(
+        self,
+        clone_dir: Path,
+        clone_url: str,
+        repo_url: str | None,
+    ) -> None:
+        if not (clone_dir / '.git' / 'shallow').exists():
+            return
+        try:
+            self._run_git_command_with_auth_retry(
+                ['git', '-C', str(clone_dir), 'fetch', '--unshallow', 'origin'],
+                clone_url,
+                repo_url,
+                'fetch full history',
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to unshallow skill repo %s; skill directory commits may use HEAD: %s',
+                clone_dir,
+                exc,
+            )
+
+    def get_latest_commit_id_for_path(
+        self,
+        repo_root: Path,
+        relative_path: str,
+        *,
+        ref: str = 'HEAD',
+    ) -> str | None:
+        normalized_path = relative_path.strip('/') or '.'
+        try:
+            commit_id = self._run_git_command(
+                [
+                    'git',
+                    '-C',
+                    str(repo_root),
+                    'log',
+                    '-1',
+                    '--format=%H',
+                    ref,
+                    '--',
+                    normalized_path,
+                ]
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to read latest commit for %s (%s:%s): %s',
+                repo_root,
+                ref,
+                normalized_path,
+                exc,
+            )
+            return None
+        return commit_id.strip() or None
+
     def get_cloned_repo_branch(self, clone_dir: Path) -> str | None:
         return self._get_cloned_repo_branch(clone_dir)
 

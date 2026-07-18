@@ -43,6 +43,7 @@ class SkillRepoRepository:
         url: str | None,
         local_path: str | None,
         skill_discover_status: str,
+        repository_commit_id: str | None = None,
         platform: str | None = None,
     ) -> SkillRepoModel:
         repository = SkillRepoModel(
@@ -52,6 +53,7 @@ class SkillRepoRepository:
             branch=branch,
             url=url,
             local_path=local_path,
+            repository_commit_id=repository_commit_id,
             skill_discover_status=skill_discover_status,
             skill_num=0,
         )
@@ -70,6 +72,7 @@ class SkillRepoRepository:
         branch: str | None = None,
         url: str | None = None,
         local_path: str | None = None,
+        repository_commit_id: str | None = None,
         skill_discover_status: str | None = None,
         skill_num: int | None = None,
     ) -> SkillRepoModel:
@@ -84,6 +87,8 @@ class SkillRepoRepository:
             values["url"] = url
         if local_path is not None:
             values["local_path"] = local_path
+        if repository_commit_id is not None:
+            values["repository_commit_id"] = repository_commit_id
         if skill_discover_status is not None:
             values["skill_discover_status"] = skill_discover_status
         if skill_num is not None:

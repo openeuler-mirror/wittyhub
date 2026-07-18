@@ -15,7 +15,7 @@ from src.core.config import get_settings
 _logger = logging.getLogger(__name__)
 settings = get_settings()
 
-COMMUNITY_REPO_URL = "https://gitee.com/openeuler/community.git"
+COMMUNITY_REPO_URL = "https://gitcode.com/openeuler/community.git"
 COMMUNITY_CACHE_DIRNAME = "openeuler-community"
 
 

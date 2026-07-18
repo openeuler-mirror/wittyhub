@@ -1,6 +1,6 @@
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 from sqlalchemy import case, delete, desc, func, select, update
@@ -9,6 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from src.models.orm import (
     Agent,
+    AgentVersion,
+    SecurityAudit,
     DownloadHistory,
     SecurityAudit,
     Skill,
@@ -187,19 +189,34 @@ class SkillRepository:
         query,
         skill_model,
         *,
-        category: str | None = None,
+        category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
+        security_level: list[str] | None = None,
     ):
         if category:
-            query = query.where(skill_model.category == category)
+            query = query.where(skill_model.category.in_(category))
         if platform:
             query = query.where(skill_model.platform == platform)
         if tags:
             query = query.where(skill_model.tags.contains(tags))
         if source:
             query = query.where(skill_model.source == source)
+        if security_level:
+            conditions = []
+            for level in security_level:
+                if level == "安全":
+                    conditions.append(skill_model.security_score >= 80)
+                elif level == "低风险":
+                    conditions.append(skill_model.security_score.between(60, 79))
+                elif level == "中风险":
+                    conditions.append(skill_model.security_score.between(40, 59))
+                elif level == "高风险":
+                    conditions.append(skill_model.security_score < 40)
+            if conditions:
+                from sqlalchemy import or_
+                query = query.where(or_(*conditions))
         return query
 
     def _latest_unique_skills_subquery(self):
@@ -382,11 +399,13 @@ class SkillRepository:
         self,
         skip: int = 0,
         limit: int = 20,
-        category: str | None = None,
+        category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
         sort_by: str = "updated_at",
+        sort_period: str | None = None,
+        security_level: list[str] | None = None,
     ) -> tuple[list[Skill], int]:
         filtered_query = self._apply_skill_filters(
             select(Skill),
@@ -395,29 +414,55 @@ class SkillRepository:
             platform=platform,
             tags=tags,
             source=source,
+            security_level=security_level,
         )
 
         count_query = self._apply_skill_filters(
-            select(func.count()),
+            select(func.count(Skill.id)),
             Skill,
             category=category,
             platform=platform,
             tags=tags,
             source=source,
+            security_level=security_level,
         )
         total = await self.session.scalar(count_query)
 
-        if sort_by == "download_count":
+        if sort_by == "download_count" and sort_period in ("week", "month"):
+            if sort_period == "week":
+                cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+            else:
+                cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+            dl_subquery = (
+                select(
+                    DownloadHistory.resource_id,
+                    func.count(DownloadHistory.id).label("period_downloads"),
+                )
+                .where(DownloadHistory.resource_type == "skill")
+                .where(DownloadHistory.downloaded_at >= cutoff)
+                .group_by(DownloadHistory.resource_id)
+                .subquery()
+            )
+
+            query = (
+                filtered_query
+                .outerjoin(dl_subquery, Skill.id == dl_subquery.c.resource_id)
+                .order_by(
+                    desc(func.coalesce(dl_subquery.c.period_downloads, 0)),
+                    desc(Skill.updated_at),
+                    desc(Skill.created_at),
+                )
+                .offset(skip)
+                .limit(limit)
+            )
+        elif sort_by == "download_count":
             order_by = [desc(Skill.download_count), desc(Skill.updated_at), desc(Skill.created_at)]
+            query = filtered_query.order_by(*order_by).offset(skip).limit(limit)
         else:
             order_by = [desc(Skill.updated_at), desc(Skill.created_at)]
+            query = filtered_query.order_by(*order_by).offset(skip).limit(limit)
 
-        query = (
-            filtered_query
-            .order_by(*order_by)
-            .offset(skip)
-            .limit(limit)
-        )
         result = await self.session.execute(query)
         skills = list(result.scalars().all())
 
@@ -522,10 +567,45 @@ class SkillRepository:
         )
         total_categories = len(categories)
 
+        # Platform counts
+        platform_result = await self.session.execute(
+            select(
+                latest_skills.c.platform,
+                func.count().label("count"),
+            )
+            .select_from(latest_skills)
+            .where(latest_skills.c.platform.is_not(None))
+            .where(latest_skills.c.platform != "")
+            .group_by(latest_skills.c.platform)
+            .order_by(func.count().desc())
+        )
+        platforms = [{"name": row.platform, "count": row.count} for row in platform_result.fetchall()]
+
+        # Security level counts
+        level_expr = case(
+            (latest_skills.c.security_score >= 80, "安全"),
+            (latest_skills.c.security_score.between(60, 79), "低风险"),
+            (latest_skills.c.security_score.between(40, 59), "中风险"),
+            (latest_skills.c.security_score < 40, "高风险"),
+            else_="未检测",
+        )
+        security_result = await self.session.execute(
+            select(
+                level_expr.label("level"),
+                func.count().label("count"),
+            )
+            .select_from(latest_skills)
+            .group_by(level_expr)
+            .order_by(func.count().desc())
+        )
+        security_levels = [{"name": row.level, "count": row.count} for row in security_result.fetchall()]
+
         return {
             "total_skills": total_skills,
             "total_categories": total_categories,
             "categories": categories,
+            "platforms": platforms,
+            "security_levels": security_levels,
         }
 
 
@@ -557,11 +637,14 @@ class AgentRepository:
         skip: int = 0,
         limit: int = 20,
         category: str | None = None,
+        tags: list[str] | None = None,
     ) -> tuple[list[Agent], int]:
         query = select(Agent)
 
         if category:
             query = query.where(Agent.category == category)
+        if tags:
+            query = query.where(Agent.tags.contains(tags))
 
         count_query = select(func.count()).select_from(query.subquery())
         total = await self.session.scalar(count_query)
@@ -571,6 +654,29 @@ class AgentRepository:
         agents = list(result.scalars().all())
 
         return agents, total or 0
+
+    async def get_versions(self, agent_id: uuid.UUID) -> List[AgentVersion]:
+        result = await self.session.execute(
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent_id)
+            .order_by(AgentVersion.released_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def create_version(self, version_data: dict[str, Any]) -> AgentVersion:
+        version = AgentVersion(**version_data)
+        self.session.add(version)
+        await self.session.flush()
+        await self.session.refresh(version)
+        return version
+
+    async def increment_download(self, agent_id: uuid.UUID) -> None:
+        await self.session.execute(
+            update(Agent)
+            .where(Agent.id == agent_id)
+            .values(download_count=Agent.download_count + 1)
+        )
+        await self.session.flush()
 
     async def delete(self, agent_id: str) -> bool:
         result = await self.session.execute(

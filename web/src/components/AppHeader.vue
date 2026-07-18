@@ -39,6 +39,7 @@ onMounted(() => {
           <RouterLink to="/" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">首页</RouterLink>
           <RouterLink to="/skills/search" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">探索</RouterLink>
           <RouterLink to="/skills/leaderboard" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">排行榜</RouterLink>
+          <RouterLink v-if="false" to="/agents" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">Agents</RouterLink>
         </nav>
 
         <div class="flex items-center gap-4">

@@ -7,7 +7,6 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -176,8 +175,6 @@ class SkillManager:
     async def discover_configured_skill_repository(
         self,
         request: SkillRepositoryRequest,
-        *,
-        force: bool = False,
     ) -> SkillRepoModel | None:
         """Clone a repo and persist it only when a scannable skill is present.
 
@@ -215,11 +212,7 @@ class SkillManager:
             normalized,
             repo_name,
         )
-        if (
-            not force
-            and not created_new
-            and await self._is_commit_unchanged(repository.id, clone_dir)
-        ):
+        if not created_new and self._is_commit_unchanged(repository, clone_dir):
             setattr(repository, "_unchanged", True)
             return repository
 
@@ -257,7 +250,6 @@ class SkillManager:
         repo_name: str,
     ) -> SkillRepoModel:
         author = self._resolve_skill_author(repo.platform, repo_name)
-        print(f"Author: {author}")
         latest_skills, tagged_skills = await self._scan_local_repository(
             repo,
             clone_dir=clone_dir,
@@ -282,9 +274,11 @@ class SkillManager:
         clone_dir: Path,
         author: str | None,
     ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+        clone_url = normalize_clone_url_for_git(repo.url)
+        self._git_ops.ensure_full_history(clone_dir, clone_url, repo.url)
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
             clone_dir,
-            normalize_clone_url_for_git(repo.url),
+            clone_url,
             repo.url,
         )
         version_snapshots = GitOperations.build_repository_version_snapshots(
@@ -359,9 +353,9 @@ class SkillManager:
             raise ValueError(f'Skill repo {repo_name} was expected in DB but not found')
         return repository, False
 
-    async def _is_commit_unchanged(
+    def _is_commit_unchanged(
         self,
-        repository_id: str | UUID,
+        repo: SkillRepoModel,
         clone_dir: Path,
     ) -> bool:
         current_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)

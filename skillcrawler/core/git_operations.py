@@ -100,10 +100,20 @@ class GitOperations:
             'commit_id': commit_id,
             'latest_tags': latest_tags,
             'latest_tag_commits': latest_tag_commits,
+            'is_shallow_repository': self.is_shallow_repository(clone_dir),
         }
 
     def get_repository_head_commit_id(self, clone_dir: Path) -> str | None:
         return self._get_git_ref_commit_id(clone_dir, 'HEAD')
+
+    def is_shallow_repository(self, clone_dir: Path) -> bool:
+        try:
+            is_shallow = self._run_git_command(
+                ['git', '-C', str(clone_dir), 'rev-parse', '--is-shallow-repository']
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return (clone_dir / '.git' / 'shallow').exists()
+        return is_shallow.strip().lower() == 'true'
 
     def ensure_full_history(
         self,
@@ -111,9 +121,10 @@ class GitOperations:
         clone_url: str,
         repo_url: str | None,
     ) -> None:
-        if not (clone_dir / '.git' / 'shallow').exists():
+        if not self.is_shallow_repository(clone_dir):
             return
         try:
+            _logger.info('Discover: fetching full git history for path-level commits: %s', clone_dir)
             self._run_git_command_with_auth_retry(
                 ['git', '-C', str(clone_dir), 'fetch', '--unshallow', 'origin'],
                 clone_url,
@@ -352,7 +363,7 @@ class GitOperations:
     ) -> list[str]:
         fetch_tags_command = [
             'git', '-C', str(clone_dir), 'fetch',
-            '--tags', '--force', '--depth', '1', 'origin',
+            '--tags', '--force', 'origin',
         ]
         try:
             self._run_git_command_with_auth_retry(fetch_tags_command, clone_url, repo_url, 'fetch tags')

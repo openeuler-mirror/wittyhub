@@ -30,6 +30,7 @@ def upgrade() -> None:
         sa.Column("branch", sa.String(length=255), nullable=True),
         sa.Column("url", sa.Text(), nullable=True),
         sa.Column("local_path", sa.Text(), nullable=True),
+        sa.Column("repository_commit_id", sa.String(length=40), nullable=True),
         sa.Column("skill_discover_status", sa.String(length=50), nullable=False, server_default=sa.text("'init'")),
         sa.Column("skill_num", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),

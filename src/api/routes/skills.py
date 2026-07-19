@@ -1,4 +1,5 @@
 from typing import Annotated
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -24,6 +25,7 @@ from src.storage.downloader import (
 )
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 @router.get("/telemetry")
@@ -64,7 +66,7 @@ def skill_to_response(skill) -> SkillResponse:
         platform=skill.platform,
         metadata=skill.extra_metadata,
         content=skill.content,
-        security_score=skill.security_score,
+        risk_score=skill.risk_score,
         download_count=skill.download_count,
         rating=skill.rating,
         created_at=skill.created_at,
@@ -128,6 +130,8 @@ async def audit_skill(
             id=str(latest_audit.id),
             resource_type=latest_audit.resource_type,
             resource_id=str(latest_audit.resource_id),
+            version=latest_audit.version,
+            commit_id=latest_audit.commit_id,
             audit_type=latest_audit.audit_type,
             risk_level=latest_audit.risk_level,
             risk_signals=latest_audit.risk_signals,
@@ -162,6 +166,7 @@ async def trigger_skill_audit(
         source_url=skill.source_url,
         metadata={
             "version": skill.version,
+            "commit_id": skill.commit_id,
             "content": skill.content,
         },
         scanners=scanner_list,
@@ -181,6 +186,8 @@ async def trigger_skill_audit(
         id=str(latest_audit.id),
         resource_type=latest_audit.resource_type,
         resource_id=str(latest_audit.resource_id),
+        version=latest_audit.version,
+        commit_id=latest_audit.commit_id,
         audit_type=latest_audit.audit_type,
         risk_level=latest_audit.risk_level,
         risk_signals=latest_audit.risk_signals,
@@ -327,11 +334,11 @@ async def create_skill(
                 skill.skill_id,
                 skill.source,
                 skill.source_url,
-                {"version": skill.version, "content": skill.content or ""},
+                {"version": skill.version, "commit_id": skill.commit_id, "content": skill.content or ""},
             )
-            # security_score is already persisted by audit_skill internally
+            # risk_score is already persisted by audit_skill internally
         except Exception:
-            pass  # audit failure must not block skill creation
+            _logger.warning("Audit failed for skill %s", skill.skill_id, exc_info=True)
 
     return skill_to_response(skill)
 

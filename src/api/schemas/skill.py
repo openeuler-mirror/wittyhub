@@ -54,7 +54,7 @@ class SkillResponse(SkillBase):
 
     id: str
     content: str | None = None
-    security_score: int | None = None
+    risk_score: int | None = None
     download_count: int = 0
     rating: str | None = None
     created_at: datetime

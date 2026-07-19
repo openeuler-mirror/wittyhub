@@ -251,7 +251,7 @@ class SkillRepository:
             platform=representative.platform,
             extra_metadata=representative.extra_metadata,
             content=representative.content,
-            security_score=representative.security_score,
+            risk_score=representative.risk_score,
             download_count=download_count,
             rating=representative.rating,
             created_at=representative.created_at,

@@ -10,7 +10,6 @@ from sqlalchemy.orm import selectinload
 from src.models.orm import (
     Agent,
     AgentVersion,
-    SecurityAudit,
     DownloadHistory,
     SecurityAudit,
     Skill,
@@ -43,13 +42,17 @@ class SkillRepoRepository:
         url: str | None,
         local_path: str | None,
         skill_discover_status: str,
+        repository_commit_id: str | None = None,
+        platform: str | None = None,
     ) -> SkillRepoModel:
         repository = SkillRepoModel(
             repo_name=repo_name,
             source=source,
+            platform=platform,
             branch=branch,
             url=url,
             local_path=local_path,
+            repository_commit_id=repository_commit_id,
             skill_discover_status=skill_discover_status,
             skill_num=0,
         )
@@ -64,21 +67,27 @@ class SkillRepoRepository:
         repository_id: str | uuid.UUID,
         *,
         source: str | None = None,
+        platform: str | None = None,
         branch: str | None = None,
         url: str | None = None,
         local_path: str | None = None,
+        repository_commit_id: str | None = None,
         skill_discover_status: str | None = None,
         skill_num: int | None = None,
     ) -> SkillRepoModel:
         values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if source is not None:
             values["source"] = source
+        if platform is not None:
+            values["platform"] = platform
         if branch is not None:
             values["branch"] = branch
         if url is not None:
             values["url"] = url
         if local_path is not None:
             values["local_path"] = local_path
+        if repository_commit_id is not None:
+            values["repository_commit_id"] = repository_commit_id
         if skill_discover_status is not None:
             values["skill_discover_status"] = skill_discover_status
         if skill_num is not None:
@@ -326,44 +335,101 @@ class SkillRepository:
         )
         return {commit_id for commit_id in result.scalars().all() if commit_id}
 
-    async def replace_for_skill_repo(
+    async def sync_for_skill_repo(
         self,
         skill_repo_id: uuid.UUID,
         latest_skills: list[SkillVersion],
         tagged_skills: list[SkillVersion],
     ) -> tuple[list[SkillVersion], list[SkillVersion]]:
         existing_result = await self.session.execute(
-            select(Skill.skill_id, Skill.download_count)
+            select(Skill)
             .where(Skill.skill_repo_id == skill_repo_id)
         )
-        existing_download_counts = {
-            skill_id: download_count
-            for skill_id, download_count in existing_result.all()
+        existing_skills = {
+            skill.skill_id: skill
+            for skill in existing_result.scalars().all()
+            if skill.skill_id
         }
 
-        summary_skills: list[Skill] = []
-        for skill in latest_skills:
-            skill.skill_repo_id = skill_repo_id
-            summary_skills.append(
-                self._build_summary_skill(
-                    skill,
-                    download_count=existing_download_counts.get(skill.skill_id, 0),
+        scanned_skills = {
+            skill.skill_id: skill
+            for skill in latest_skills
+            if skill.skill_id
+        }
+
+        scanned_ids = set(scanned_skills)
+        existing_ids = set(existing_skills)
+
+        removed_ids = existing_ids - scanned_ids
+        if removed_ids:
+            await self.session.execute(
+                delete(Skill).where(
+                    Skill.skill_repo_id == skill_repo_id,
+                    Skill.skill_id.in_(removed_ids),
                 )
             )
+
+        for skill_id in scanned_ids - existing_ids:
+            skill = scanned_skills[skill_id]
+            skill.skill_repo_id = skill_repo_id
+            self.session.add(self._build_summary_skill(skill))
+
+        for skill_id in scanned_ids & existing_ids:
+            scanned_skill = scanned_skills[skill_id]
+            existing_skill = existing_skills[skill_id]
+            scanned_skill.skill_repo_id = skill_repo_id
+            if scanned_skill.commit_id == existing_skill.commit_id:
+                continue
+            await self.session.execute(
+                update(Skill)
+                .where(Skill.id == existing_skill.id)
+                .values(
+                    **self._build_summary_update_values(
+                        scanned_skill,
+                        download_count=existing_skill.download_count,
+                    )
+                )
+            )
+
         for skill in tagged_skills:
             skill.skill_repo_id = skill_repo_id
 
         await self.session.execute(
             delete(SkillVersion).where(SkillVersion.skill_repo_id == skill_repo_id)
         )
-        await self.session.execute(
-            delete(Skill).where(Skill.skill_repo_id == skill_repo_id)
-        )
-        self.session.add_all(summary_skills)
         self.session.add_all(tagged_skills)
         await self.session.flush()
         await self.session.commit()
         return latest_skills, tagged_skills
+
+    def _build_summary_update_values(
+        self,
+        representative: SkillVersion,
+        *,
+        download_count: int,
+    ) -> dict[str, Any]:
+        return {
+            "skill_repo_id": representative.skill_repo_id,
+            "skill_id": representative.skill_id,
+            "name": representative.name,
+            "description": representative.description,
+            "version": representative.version,
+            "commit_id": representative.commit_id,
+            "author": representative.author,
+            "source": representative.source,
+            "source_url": representative.source_url,
+            "category": representative.category,
+            "tags": representative.tags,
+            "platform": representative.platform,
+            "extra_metadata": representative.extra_metadata,
+            "content": representative.content,
+            "security_score": representative.security_score,
+            "download_count": download_count,
+            "rating": representative.rating,
+            "updated_at": datetime.now(timezone.utc),
+            "last_indexed_at": None,
+            "embedding": None,
+        }
 
     async def get_versions_by_base_skill(self, source_url: str | None, skill_id: str) -> list[SkillVersion]:
         query = select(SkillVersion)

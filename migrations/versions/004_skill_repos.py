@@ -7,10 +7,9 @@ Create Date: 2026-06-06 00:00:00
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 revision: str = "004_skill_repos"
 down_revision: Union[str, None] = "003_add_embedding_column"
@@ -27,9 +26,11 @@ def upgrade() -> None:
         sa.Column("id", UUID, primary_key=True, nullable=False, server_default=sa.text("uuid_generate_v4()")),
         sa.Column("repo_name", sa.String(length=255), nullable=False),
         sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("platform", sa.String(length=100), nullable=True),
         sa.Column("branch", sa.String(length=255), nullable=True),
         sa.Column("url", sa.Text(), nullable=True),
         sa.Column("local_path", sa.Text(), nullable=True),
+        sa.Column("repository_commit_id", sa.String(length=40), nullable=True),
         sa.Column("skill_discover_status", sa.String(length=50), nullable=False, server_default=sa.text("'init'")),
         sa.Column("skill_num", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -41,6 +42,11 @@ def upgrade() -> None:
         "idx_skill_repos_source",
         "skill_repos",
         ["source"],
+    )
+    op.create_index(
+        "idx_skill_repos_platform",
+        "skill_repos",
+        ["platform"],
     )
     op.create_index(
         "idx_skill_repos_status",
@@ -107,6 +113,10 @@ def downgrade() -> None:
     )
     op.drop_index(
         "idx_skill_repos_source",
+        table_name="skill_repos",
+    )
+    op.drop_index(
+        "idx_skill_repos_platform",
         table_name="skill_repos",
     )
     op.drop_table("skill_repos")

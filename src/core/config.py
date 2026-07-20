@@ -44,6 +44,11 @@ class CrawlerConfig(BaseSettings):
     max_tags_per_repo: int = 3
 
 
+class SkillRepoEntry(BaseSettings):
+    url: str
+    branch: str | None = None
+
+
 class SecurityConfig(BaseSettings):
     # Skillspector (Jenkins-based scanner)
     enable_audit: bool = False
@@ -79,15 +84,18 @@ class Settings(BaseSettings):
     app: AppConfig = Field(default_factory=AppConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
+    openeuler_repos: list[SkillRepoEntry] = Field(default_factory=list)
+    personal_repos: list[SkillRepoEntry] = Field(default_factory=list)
+    enterprise_repos: list[SkillRepoEntry] = Field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Settings":
         path = Path(path)
-        if not path.exists():
-            return cls()
-
-        with open(path) as f:
-            data: dict[str, Any] = yaml.safe_load(f) or {}
+        data: dict[str, Any] = {}
+        if path.exists():
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+        _apply_env_overrides(data)
 
         return cls(
             database=DatabaseConfig(**data.get("database", {})),
@@ -98,7 +106,33 @@ class Settings(BaseSettings):
             app=AppConfig(**data.get("app", {})),
             logging=LoggingConfig(**data.get("logging", {})),
             ai=AIConfig(**data.get("ai", {})),
+            openeuler_repos=data.get("openeuler_repos", []) or [],
+            personal_repos=data.get("personal_repos", []) or [],
+            enterprise_repos=data.get("enterprise_repos", []) or [],
         )
+
+
+def _apply_env_overrides(data: dict[str, Any]) -> None:
+    for key, value in os.environ.items():
+        if "__" not in key:
+            continue
+        section, field = key.split("__", 1)
+        section = section.strip().lower()
+        field = field.strip().lower()
+        if not section or not field:
+            continue
+        section_data = data.setdefault(section, {})
+        if isinstance(section_data, dict):
+            section_data[field] = _parse_env_value(value)
+
+
+def _parse_env_value(value: str) -> Any:
+    if value == "":
+        return ""
+    try:
+        return yaml.safe_load(value)
+    except yaml.YAMLError:
+        return value
 
 
 @lru_cache

@@ -56,8 +56,10 @@ services:
       - DATABASE__USER=wittyhub
       - DATABASE__PASSWORD=wittyhub_secret
       - DATABASE__DBNAME=wittyhub
+      - AI__EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
+      - AI__EMBEDDING_HOST=http://embedding:8081
     volumes:
-      - ./config.docker.yaml:/app/config.yaml:ro
+      - ../../config.yaml:/app/config.yaml:ro
       - ../../src:/app/src:ro
       - ../../scripts:/app/scripts:ro
       - ../../migrations:/app/migrations:ro

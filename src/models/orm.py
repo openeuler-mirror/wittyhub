@@ -3,7 +3,17 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, desc, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    desc,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -18,9 +28,11 @@ class SkillRepoModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     repo_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     source: Mapped[str] = mapped_column(String(50), nullable=False)
+    platform: Mapped[str | None] = mapped_column(String(100), nullable=True)
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    repository_commit_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     skill_discover_status: Mapped[str] = mapped_column(String(50), nullable=False, default="init")
     skill_num: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -39,6 +51,7 @@ class SkillRepoModel(Base):
 
     __table_args__ = (
         Index("idx_skill_repos_source", "source"),
+        Index("idx_skill_repos_platform", "platform"),
         Index("idx_skill_repos_status", "skill_discover_status"),
         Index("idx_skill_repos_created_at", desc("created_at")),
     )

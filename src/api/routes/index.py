@@ -2,12 +2,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.models.repository import SkillRepository
+from src.ai.embedding import generate_embeddings, prepare_skill_text
 from src.core.database import get_db
+from src.core.config import  get_settings
 from src.indexer.search import SearchService
-from src.ai.embedding import generate_embeddings, prepare_skill_text, load_settings
-
+from src.models.repository import SkillRepository
 
 router = APIRouter()
 
@@ -26,7 +25,7 @@ async def search(
     tag_list = tags.split(",") if tags else None
     embedding = None
 
-    settings = load_settings()
+    settings = get_settings()
     semantic_enabled = settings.ai.enable_semantic_search
 
     if mode in ("semantic", "hybrid") and semantic_enabled:

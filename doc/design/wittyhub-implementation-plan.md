@@ -486,7 +486,7 @@ graph TB
 |------|-----------|------|------|------|
 | db | pgvector/pgvector:pg16 | 5432 | — | 初始化 Alembic 迁移（扩展 + 表结构） |
 | embedding | embedding.Dockerfile | 8082→8081 | — | BGE 模型，内存限制 4G，启动 ~120s |
-| api | deploy/docker/Dockerfile | 8081→8081 | db ✓ | FastAPI，挂载 config.docker.yaml |
+| api | deploy/docker/Dockerfile | 8081→8081 | db ✓ | FastAPI，挂载根目录 config.yaml，并通过环境变量覆盖 Docker 差异 |
 | web | nginx:alpine | 8080→80 | api | 静态 SPA + `/api/` 反向代理 |
 
 #### 4.3.4 Nginx 路由规则
@@ -512,31 +512,20 @@ db (pg_isready) ──► api (HTTP /api/v1/health) ──► web
 
 #### 4.3.6 配置管理
 
-Docker 环境使用 `deploy/docker/config.docker.yaml`：
+本地和 Docker 共用项目根目录 `config.yaml`。Docker 环境通过 `docker-compose.yaml` 的环境变量覆盖运行时差异：
 
 ```yaml
-database:
-  host: "db"                    # Docker 网络内服务名
-
-ai:
-  embedding_host: "http://embedding:8081"
-  embedding_model: "BAAI/bge-base-zh-v1.5"
-  embedding_dimension: 768
-  enable_semantic_search: true
-
-storage:
-  local_path: "/opt/wittyhub/skill-data"    # 挂载宿主机同路径目录
-
-model:
-  name: "deepseek-chat"                     # Skill 分类模型
-  base_url: "https://api.deepseek.com"
-  api_key: ""
-  timeout: 30
-
-crawler:
-  github_token: ""                          # GitHub clone 认证回退
-  max_tags_per_repo: 3
+environment:
+  - WITTYHUB_CONFIG=/app/config.yaml
+  - DATABASE__HOST=db
+  - AI__EMBEDDING_HOST=http://embedding:8081
+  - AI__EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
+  - SECURITY__ENABLE_AUDIT=false
+volumes:
+  - ../../config.yaml:/app/config.yaml:ro
 ```
+
+配置加载顺序为：`config.yaml` 提供默认值，`SECTION__FIELD` 形式的环境变量覆盖对应字段。
 
 `storage.local_path` 同时作为爬虫和下载接口的运行时数据根目录：
 
@@ -547,7 +536,7 @@ crawler:
 └── logs/                    # skillcrawler 日志
 ```
 
-环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；数据库连接亦可通过 `DATABASE__*` 环境变量覆盖。
+环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；数据库、AI、模型、爬虫等配置均可通过 `SECTION__FIELD` 形式覆盖，例如 `DATABASE__HOST=db`。
 
 #### 4.3.7 一键部署
 

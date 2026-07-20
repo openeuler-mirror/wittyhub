@@ -7,8 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.models.orm import SkillVersion
-from src.models.repository import SkillRepository
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.skill_parser import (
@@ -24,6 +22,8 @@ from skillcrawler.core.skill_parser import (
     should_skip_relative_path,
     to_repository_relative_path,
 )
+from src.models.orm import SkillVersion
+from src.models.repository import SkillRepository
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
@@ -50,6 +50,7 @@ class SkillScanner:
         repo_root: Path,
         repository_git_metadata: dict[str, Any] | None = None,
         version_snapshots: list[dict[str, str]] | None = None,
+        author: str | None = None,
     ) -> tuple[list[SkillVersion], list[SkillVersion]]:
         if not repo_root.exists():
             raise ValueError(
@@ -67,6 +68,7 @@ class SkillScanner:
             skill_files=skill_files,
             repository_commit_id=repository_commit_id,
             repository_latest_tags=repository_latest_tags,
+            author=author,
         )
 
         tagged_skills: list[SkillVersion] = []
@@ -78,6 +80,7 @@ class SkillScanner:
                 version_snapshots=version_snapshots,
                 repository_commit_id=repository_commit_id,
                 repository_latest_tags=repository_latest_tags,
+                author=author,
             )
 
         return latest_skills, tagged_skills
@@ -89,6 +92,7 @@ class SkillScanner:
         skill_files: list[Path],
         repository_commit_id: str | None,
         repository_latest_tags: list[str],
+        author: str | None,
     ) -> list[SkillVersion]:
         discovered: list[SkillVersion] = []
         category_cache: dict[str, str | None] = {}
@@ -106,6 +110,7 @@ class SkillScanner:
                 repository_latest_tags=repository_latest_tags,
                 category_cache=category_cache,
                 version_source='branch_head',
+                author=author,
             )
             _logger.info(
                 'Discovered skill: skill_id=%s version=%s source=%s',
@@ -122,6 +127,7 @@ class SkillScanner:
         version_snapshots: list[dict[str, str]],
         repository_commit_id: str | None,
         repository_latest_tags: list[str],
+        author: str | None,
     ) -> list[SkillVersion]:
         discovered: list[SkillVersion] = []
         seen_versions: set[tuple[str, str]] = set()
@@ -160,6 +166,7 @@ class SkillScanner:
                     repository_latest_tags=repository_latest_tags,
                     category_cache=category_cache,
                     version_source=version_source_val,
+                    author=author,
                 )
                 version_key = (skill.skill_id, skill.version) if skill.version else None
                 commit_key = (skill.skill_id, skill.commit_id) if skill.commit_id else None
@@ -192,11 +199,10 @@ class SkillScanner:
         repository_latest_tags: list[str],
         category_cache: dict[str, str | None],
         version_source: str | None,
+        author: str | None,
     ) -> SkillVersion:
         metadata, content = metadata_content
         merged_metadata = dict(metadata)
-        if commit_id and 'repository_commit_id' not in merged_metadata:
-            merged_metadata['repository_commit_id'] = commit_id
         if repository_latest_tags and 'repository_latest_tags' not in merged_metadata:
             merged_metadata['repository_latest_tags'] = repository_latest_tags
         if version_source and 'version_source' not in merged_metadata:
@@ -207,7 +213,15 @@ class SkillScanner:
                 f'Failed to build source_url for repository {repo.id}: {relative_path}'
             )
         skill_id = build_public_skill_id(repo, repo_root, skill_file)
-        host, author = derive_skill_source(repo.url)
+        skill_dir_commit_id = self._get_skill_directory_commit_id(
+            repo_root=repo_root,
+            relative_path=relative_path,
+            ref=ref,
+        )
+        if skill_dir_commit_id:
+            merged_metadata['skill_directory_commit_id'] = skill_dir_commit_id
+        host, source_author = derive_skill_source(repo.url)
+        author = author or source_author
         category = await self._classify_skill_category(
             skill_file=skill_file,
             metadata=merged_metadata,
@@ -222,17 +236,33 @@ class SkillScanner:
             name=derive_repository_skill_name(skill_file, metadata),
             description=as_optional_str(metadata.get('description')),
             version=as_optional_str(metadata.get('version')) or version,
-            commit_id=as_optional_str(metadata.get('commit_id')) or commit_id,
+            commit_id=skill_dir_commit_id or commit_id,
             author=author,
             source=host,
             source_url=source_url,
             category=category,
             tags=as_optional_str_list(metadata.get('tags')),
-            platform=as_optional_str(metadata.get('platform')),
+            platform=as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),
             extra_metadata=merged_metadata,
             content=content or None,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
+        )
+
+    def _get_skill_directory_commit_id(
+        self,
+        *,
+        repo_root: Path,
+        relative_path: str,
+        ref: str | None,
+    ) -> str | None:
+        skill_dir = Path(relative_path).parent.as_posix()
+        if skill_dir == '.':
+            skill_dir = ''
+        return self.git_ops.get_latest_commit_id_for_path(
+            repo_root,
+            skill_dir,
+            ref=ref or 'HEAD',
         )
 
     async def _classify_skill_category(

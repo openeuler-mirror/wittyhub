@@ -100,10 +100,76 @@ class GitOperations:
             'commit_id': commit_id,
             'latest_tags': latest_tags,
             'latest_tag_commits': latest_tag_commits,
+            'is_shallow_repository': self.is_shallow_repository(clone_dir),
         }
 
     def get_repository_head_commit_id(self, clone_dir: Path) -> str | None:
         return self._get_git_ref_commit_id(clone_dir, 'HEAD')
+
+    def is_shallow_repository(self, clone_dir: Path) -> bool:
+        try:
+            is_shallow = self._run_git_command(
+                ['git', '-C', str(clone_dir), 'rev-parse', '--is-shallow-repository']
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return (clone_dir / '.git' / 'shallow').exists()
+        return is_shallow.strip().lower() == 'true'
+
+    def ensure_full_history(
+        self,
+        clone_dir: Path,
+        clone_url: str,
+        repo_url: str | None,
+    ) -> None:
+        if not self.is_shallow_repository(clone_dir):
+            return
+        try:
+            _logger.info('Discover: fetching full git history for path-level commits: %s', clone_dir)
+            self._run_git_command_with_auth_retry(
+                ['git', '-C', str(clone_dir), 'fetch', '--unshallow', 'origin'],
+                clone_url,
+                repo_url,
+                'fetch full history',
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to unshallow skill repo %s; skill directory commits may use HEAD: %s',
+                clone_dir,
+                exc,
+            )
+
+    def get_latest_commit_id_for_path(
+        self,
+        repo_root: Path,
+        relative_path: str,
+        *,
+        ref: str = 'HEAD',
+    ) -> str | None:
+        normalized_path = relative_path.strip('/') or '.'
+        try:
+            commit_id = self._run_git_command(
+                [
+                    'git',
+                    '-C',
+                    str(repo_root),
+                    'log',
+                    '-1',
+                    '--format=%H',
+                    ref,
+                    '--',
+                    normalized_path,
+                ]
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to read latest commit for %s (%s:%s): %s',
+                repo_root,
+                ref,
+                normalized_path,
+                exc,
+            )
+            return None
+        return commit_id.strip() or None
 
     def get_cloned_repo_branch(self, clone_dir: Path) -> str | None:
         return self._get_cloned_repo_branch(clone_dir)
@@ -297,7 +363,7 @@ class GitOperations:
     ) -> list[str]:
         fetch_tags_command = [
             'git', '-C', str(clone_dir), 'fetch',
-            '--tags', '--force', '--depth', '1', 'origin',
+            '--tags', '--force', 'origin',
         ]
         try:
             self._run_git_command_with_auth_retry(fetch_tags_command, clone_url, repo_url, 'fetch tags')

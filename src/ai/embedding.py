@@ -1,31 +1,8 @@
-import os
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
-import yaml
-from pydantic import BaseModel, Field
-
-
-class AIConfig(BaseModel):
-    embedding_model: str = "bge-base-zh-v1.5"
-    embedding_host: str = "http://localhost:8081"
-    embedding_dimension: int = 768
-    enable_semantic_search: bool = True
-
-
-class Settings(BaseModel):
-    ai: AIConfig = Field(default_factory=AIConfig)
-
-
-def load_settings() -> Settings:
-    config_path = os.environ.get("WITTYHUB_CONFIG", "config.yaml")
-    try:
-        with open(config_path) as f:
-            data = yaml.safe_load(f) or {}
-        return Settings(ai=AIConfig(**data.get("ai", {})))
-    except Exception:
-        return Settings()
+from src.core.config import get_settings
 
 
 class EmbeddingProvider(ABC):
@@ -82,7 +59,7 @@ _embedding_service: EmbeddingProvider | None = None
 def get_embedding_service() -> EmbeddingProvider:
     global _embedding_service
     if _embedding_service is None:
-        settings = load_settings()
+        settings = get_settings()
         if settings.ai.enable_semantic_search:
             _embedding_service = LocalEmbeddingService(
                 host=settings.ai.embedding_host,

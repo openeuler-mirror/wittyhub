@@ -37,6 +37,8 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CONFIG_KEYS = ["openeuler_repos", "personal_repos", "enterprise_repos"]
 PLATFORM_CONFIG_KEYS = {
     "enterprise": "enterprise_repos",
@@ -206,16 +208,16 @@ def _print_failure_details(failures: list[dict[str, str]]) -> None:
     if not failures:
         return
     print()
-    print("Failure details:")
+    logger.error("Failure details:")
     for failure in failures:
-        print(f"[{failure['#']}] {failure['url']}")
-        print(failure["error"])
+        logger.error("[%s] %s", failure['#'], failure['url'])
+        logger.error("%s", failure["error"])
         print()
 
 
 def _print_failure_detail(index: str, url: str, error: str) -> None:
-    print(f"[{index}] failed: {url}")
-    print(error)
+    logger.error("[%s] failed: %s", index, url)
+    logger.error("%s", error)
     print()
 
 
@@ -316,7 +318,7 @@ def _print_repository_table(repositories: list[Any]) -> None:
 async def _run_query(manager: "SkillManager", args: argparse.Namespace) -> int:
     if args.id:
         repository = await manager.get_repository_by_id(args.id)
-        print(_format_skill_repo(repository))
+        logger.info("%s", _format_skill_repo(repository))
         return 0
 
     repositories = await manager.list_skill_repositories()
@@ -341,11 +343,11 @@ async def _discover_repositories_from_requests(
     result_rows: list[dict[str, str]] = []
     failure_details: list[dict[str, str]] = []
 
-    print(f"Preparing to discover {total} repos{source_label} for SKILL.md")
+    logger.info("Preparing to discover %d repos%s for SKILL.md", total, source_label)
 
     for index, request in enumerate(requests, start=1):
         label = request.url or "<missing-url>"
-        print(f"[{index}/{total}] scanning {label}")
+        logger.info("[%d/%d] scanning %s", index, total, label)
 
         try:
             result = await manager.discover_configured_skill_repository(request)
@@ -440,11 +442,10 @@ async def _discover_repositories_from_requests(
     )
     _print_failure_details(failure_details)
     print()
-    print(
-        f"Discover summary: total={total} created={created_count} "
-        f"rediscovered={rediscovered_count} unchanged={unchanged_count} "
-        f"removed={removed_count} "
-        f"no_skill={skipped_no_skill} failed={failed_count}"
+    logger.info(
+        "Discover summary: total=%d created=%d rediscovered=%d unchanged=%d removed=%d no_skill=%d failed=%d",
+        total, created_count, rediscovered_count, unchanged_count,
+        removed_count, skipped_no_skill, failed_count,
     )
 
     return 1 if fatal_error else 0
@@ -531,7 +532,7 @@ async def _discover_single_existing_repository(
         empty_message="No skill repos to discover.",
     )
     print()
-    print("Discover summary: total=1 success=1 failed=0 skipped=0")
+    logger.info("Discover summary: total=1 success=1 failed=0 skipped=0")
     return 0
 
 
@@ -550,10 +551,10 @@ async def _refresh_existing_repositories(
     result_rows: list[dict[str, str]] = []
     failure_details: list[dict[str, str]] = []
 
-    print(f"Preparing to refresh existing skill repos{source_label}: total={total}")
+    logger.info("Preparing to refresh existing skill repos%s: total=%d", source_label, total)
 
     for index, repository in enumerate(repositories, start=1):
-        print(f"[{index}/{total}] discover {_display_skill_repo_name(repository)}")
+        logger.info("[%d/%d] discover %s", index, total, _display_skill_repo_name(repository))
         if not force and repository.skill_discover_status == "discovering":
             skipped_count += 1
             result_rows.append(_skipped_existing_repository_row(str(index), repository))
@@ -592,9 +593,9 @@ async def _refresh_existing_repositories(
     )
     _print_failure_details(failure_details)
     print()
-    print(
-        f"Discover summary: total={total} success={success_count} "
-        f"failed={failed_count} skipped={skipped_count}"
+    logger.info(
+        "Discover summary: total=%d success=%d failed=%d skipped=%d",
+        total, success_count, failed_count, skipped_count,
     )
     return 1 if fatal_error else 0
 
@@ -752,7 +753,7 @@ async def _run_delete(manager: "SkillManager", args: argparse.Namespace) -> int:
             "python main.py delete --id <repo_id>",
         )
     await manager.delete_skill_repository(args.id)
-    print(f"Deleted skill repo: id={args.id}")
+    logger.info("Deleted skill repo: id=%s", args.id)
     return 0
 
 
@@ -843,10 +844,10 @@ def main() -> int:
     try:
         return asyncio.run(_main())
     except KeyboardInterrupt:
-        print("Canceled")
+        logger.warning("Canceled")
         return 130
     except Exception as exc:
-        print(_format_exception(exc))
+        logger.error("%s", _format_exception(exc))
         return 1
 
 

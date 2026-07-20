@@ -473,7 +473,7 @@ graph TB
 
     subgraph 持久化卷
         V1[(postgres-data)]
-        V2[(/opt/wittyhub/skill-data)]
+        V2[(/opt/wittyhub)]
     end
 
     DB --- V1
@@ -530,7 +530,7 @@ volumes:
 `storage.local_path` 同时作为爬虫和下载接口的运行时数据根目录：
 
 ```text
-/opt/wittyhub/skill-data/
+/opt/wittyhub/
 ├── skill-repositories/      # clone 后的 Git 仓库
 ├── download-cache/          # Skill ZIP 缓存
 └── logs/                    # skillcrawler 日志
@@ -796,7 +796,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  │                              └──────┬──────┘          └────────┘│  │
 │  │                                     │                            │  │
 │  │                              postgres-data                       │  │
-│  │                              /opt/wittyhub/skill-data            │  │
+│  │                              /opt/wittyhub            │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  External: GitHub / GitCode / Gitee / Socket.dev                        │
@@ -818,7 +818,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 |------|-----|------|------|
 | db | 1 核 | 512MB+ | postgres-data 卷 |
 | embedding | 2 核+ | 4GB（限制） | 模型镜像 ~1.5GB |
-| api | 1 核 | 256MB+ | `/opt/wittyhub/skill-data` |
+| api | 1 核 | 256MB+ | `/opt/wittyhub` |
 | web | — | 64MB | web/dist 静态文件 |
 
 ### 7.4 部署验证清单

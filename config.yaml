@@ -1,6 +1,6 @@
 storage:
   type: "local"
-  local_path: "/opt/wittyhub/skill-data"
+  local_path: "/opt/wittyhub"
 
 model:
   name: deepseek-chat

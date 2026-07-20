@@ -18,7 +18,7 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 COPY alembic.ini ./
 
-RUN mkdir -p /opt/wittyhub/skill-data
+RUN mkdir -p /opt/wittyhub
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8081

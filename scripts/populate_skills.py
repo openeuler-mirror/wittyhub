@@ -241,7 +241,7 @@ def populate_skills():
             platform=data.get("platform", "claude"),
             extra_metadata={},
             content=content,
-            security_score=random.randint(70, 100),
+            security_score=random.randint(0, 100),
             download_count=data.get("download_count", random.randint(1000, 100000)),
             rating=data.get("rating", f"{random.uniform(4.0, 5.0):.1f}"),
             created_at=datetime.utcnow() - timedelta(days=random.randint(1, 365)),

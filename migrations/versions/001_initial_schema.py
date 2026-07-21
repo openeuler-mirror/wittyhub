@@ -24,6 +24,38 @@ JSONB = postgresql.JSONB(astext_type=sa.Text())
 ARRAY_TEXT = postgresql.ARRAY(sa.String())
 
 
+def _skill_columns() -> list[sa.Column]:
+    """Shared column definitions for skills and skill_versions tables.
+
+    Both tables carry the same skill snapshot fields; only table name and
+    indexes/constraints differ. Keep new columns here to stay in sync.
+    """
+    return [
+        sa.Column("id", UUID, primary_key=True, nullable=False, server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("skill_id", sa.String(length=255), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("version", sa.String(length=50), nullable=True),
+        sa.Column("commit_id", sa.String(length=40), nullable=True),
+        sa.Column("author", sa.String(length=255), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("source_url", sa.Text(), nullable=False),
+        sa.Column("repo_url", sa.Text(), nullable=True),
+        sa.Column("category", sa.String(length=100), nullable=True),
+        sa.Column("tags", ARRAY_TEXT, nullable=True),
+        sa.Column("platform", sa.String(length=100), nullable=True),
+        sa.Column("extra_metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("content", sa.Text(), nullable=True),
+        sa.Column("risk_score", sa.Integer(), nullable=True),
+        sa.Column("embedding", Vector(dim=768), nullable=True),
+        sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("rating", sa.String(length=10), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("last_indexed_at", sa.DateTime(timezone=True), nullable=True),
+    ]
+
+
 def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
     op.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm";')
@@ -47,52 +79,12 @@ def upgrade() -> None:
 
     op.create_table(
         "skills",
-        sa.Column("id", UUID, primary_key=True, nullable=False, server_default=sa.text("uuid_generate_v4()")),
-        sa.Column("skill_id", sa.String(length=255), nullable=False),
-        sa.Column("name", sa.String(length=255), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("version", sa.String(length=50), nullable=True),
-        sa.Column("commit_id", sa.String(length=40), nullable=True),
-        sa.Column("author", sa.String(length=255), nullable=True),
-        sa.Column("source", sa.String(length=50), nullable=False),
-        sa.Column("source_url", sa.Text(), nullable=False),
-        sa.Column("category", sa.String(length=100), nullable=True),
-        sa.Column("tags", ARRAY_TEXT, nullable=True),
-        sa.Column("platform", sa.String(length=100), nullable=True),
-        sa.Column("extra_metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("content", sa.Text(), nullable=True),
-        sa.Column("risk_score", sa.Integer(), nullable=True),
-        sa.Column("embedding", Vector(dim=768), nullable=True),
-        sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("rating", sa.String(length=10), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("last_indexed_at", sa.DateTime(timezone=True), nullable=True),
+        *_skill_columns(),
     )
 
     op.create_table(
         "skill_versions",
-        sa.Column("id", UUID, primary_key=True, nullable=False, server_default=sa.text("uuid_generate_v4()")),
-        sa.Column("skill_id", sa.String(length=255), nullable=False),
-        sa.Column("name", sa.String(length=255), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("version", sa.String(length=50), nullable=True),
-        sa.Column("commit_id", sa.String(length=40), nullable=True),
-        sa.Column("author", sa.String(length=255), nullable=True),
-        sa.Column("source", sa.String(length=50), nullable=False),
-        sa.Column("source_url", sa.Text(), nullable=False),
-        sa.Column("category", sa.String(length=100), nullable=True),
-        sa.Column("tags", ARRAY_TEXT, nullable=True),
-        sa.Column("platform", sa.String(length=100), nullable=True),
-        sa.Column("extra_metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("content", sa.Text(), nullable=True),
-        sa.Column("risk_score", sa.Integer(), nullable=True),
-        sa.Column("embedding", Vector(dim=768), nullable=True),
-        sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("rating", sa.String(length=10), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("last_indexed_at", sa.DateTime(timezone=True), nullable=True),
+        *_skill_columns(),
     )
 
     op.create_table(

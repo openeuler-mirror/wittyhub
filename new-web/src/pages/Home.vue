@@ -145,10 +145,10 @@ function getPageNumbers(): (number | string)[] {
           探索、评价、贡献openEuler技能
         </p>
         <p class="text-sm leading-[22px] text-[var(--o-color-text3)] mb-8" style="font-family: HarmonyHeiTi">
-          <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}+</span>
+          <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
           Skills
           <span class="mx-2 text-[var(--o-color-text3)]">|</span>
-          <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.stats?.total_categories || '15' }}+</span>
+          <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.stats?.total_categories || '15' }}</span>
           领域分类
         </p>
 
@@ -181,7 +181,7 @@ function getPageNumbers(): (number | string)[] {
     <section class="container-wide py-6">
       <div class="flex gap-8">
         <!-- 左侧筛选侧栏 -->
-        <div class="w-60 flex-shrink-0 hidden lg:block sticky top-[88px] self-start">
+        <div class="w-60 flex-shrink-0 hidden lg:block sticky bottom-0 self-start">
           <FilterSidebar />
         </div>
 
@@ -382,7 +382,7 @@ function getPageNumbers(): (number | string)[] {
       <!-- 提交新Skill区 -->
       <div class="mt-16 text-center">
         <h2 class="text-2xl font-bold text-[var(--o-color-info1)] mb-3">提交新Skill</h2>
-        <p class="text-[var(--o-color-text3)]">在社区中贡献您的 Skill 文件，共建xxxx</p>
+        <p class="text-[var(--o-color-text3)]">参与社区贡献，与开发者共建SkillHub</p>
       </div>
 
       <div class="mt-8 overflow-hidden relative border border-[var(--o-color-control4)]">

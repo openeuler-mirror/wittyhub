@@ -244,7 +244,7 @@ def generate_skills(count=20):
             "platform": random.choice(PLATFORMS),
             "extra_metadata": {},
             "content": template["content"],
-            "security_score": random.randint(60, 100),
+            "risk_score": random.randint(60, 100),
             "download_count": random.randint(0, 500),
             "rating": round(random.uniform(3.5, 5.0), 1),
             "created_at": datetime.now(timezone.utc).isoformat(),

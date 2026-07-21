@@ -396,9 +396,13 @@ def generate_skills(count: int) -> list:
                                      min(random.randint(3, 7), len(template["tags"]) + 2)),
                 "platform": platform,
                 "content": generate_skill_content(name, platform),
-                "security_score": random.randint(65, 100),
+                "risk_score": random.choices(
+                    range(0, 101),
+                    weights=[3]*21 + [2]*30 + [1]*30 + [0.5]*20,  # bias toward safe/low risk
+                    k=1
+                )[0],
                 "download_count": random.randint(100, 50000),
-                "rating": round(random.uniform(3.5, 5.0), 2),
+                "rating": str(round(random.uniform(3.5, 5.0), 2)),
                 "created_at": datetime.now() - timedelta(days=random.randint(1, 365)),
                 "updated_at": datetime.now() - timedelta(days=random.randint(0, 30)),
                 "last_indexed_at": datetime.now() - timedelta(hours=random.randint(0, 48)),
@@ -480,7 +484,7 @@ def insert_skills(conn, skills):
     insert_query = """
         INSERT INTO skills (
             id, skill_repo_id, skill_id, name, description, version, commit_id, author, source,
-            source_url, category, tags, platform, content, security_score,
+            source_url, category, tags, platform, content, risk_score,
             download_count, rating, created_at, updated_at, last_indexed_at, extra_metadata
         ) VALUES %s
     """
@@ -489,7 +493,7 @@ def insert_skills(conn, skills):
         (
             s["id"], repositories_by_url[s["source_url"]]["id"], s["skill_id"], s["name"], s["description"], s["version"],
             s["commit_id"], s["author"], s["source"], s["source_url"], s["category"],
-            s["tags"], s["platform"], s["content"], s["security_score"],
+            s["tags"], s["platform"], s["content"], s["risk_score"],
             s["download_count"], s["rating"], s["created_at"], s["updated_at"],
             s["last_indexed_at"], psycopg2.extras.Json(s["extra_metadata"])
         )
@@ -501,7 +505,7 @@ def insert_skills(conn, skills):
 
     # Generate security audits for some skills
     print("Generating security audits...")
-    cursor.execute("SELECT id, skill_id, security_score FROM skills ORDER BY RANDOM() LIMIT %s",
+    cursor.execute("SELECT id, skill_id, risk_score FROM skills ORDER BY RANDOM() LIMIT %s",
                    (len(skills) * 3 // 4,))
     skills_for_audit = cursor.fetchall()
 
@@ -518,8 +522,8 @@ def insert_skills(conn, skills):
         {"id": "sig8", "name": "API key exposure", "description": "API key logged in plaintext", "severity": "Critical", "data": {}},
     ]
 
-    for skill_id, skill_skill_id, security_score in skills_for_audit:
-        risk_level = "low" if security_score >= 90 else "medium" if security_score >= 75 else "high" if security_score >= 60 else "critical"
+    for skill_id, skill_skill_id, risk_score in skills_for_audit:
+        risk_level = "low" if risk_score <= 20 else "medium" if risk_score <= 50 else "high" if risk_score <= 80 else "critical"
         num_signals = random.randint(0, 3)
         signals = random.sample(risk_signals_pool, min(num_signals, len(risk_signals_pool)))
 

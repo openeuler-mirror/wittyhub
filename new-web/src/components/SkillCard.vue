@@ -13,13 +13,13 @@ function getSkillRoutePath(skillId: string): string {
 
 function getSecurityLevel(score: number | null): { label: string; class: string } {
   if (score === null) return { label: '未检测', class: 'tag-gray' }
-  if (score >= 80) return { label: '安全', class: 'tag-green' }
-  if (score >= 50) return { label: '低风险', class: 'tag-blue' }
-  if (score >= 20) return { label: '中风险', class: 'tag-orange' }
+  if (score <= 20) return { label: '安全', class: 'tag-green' }
+  if (score <= 50) return { label: '低风险', class: 'tag-blue' }
+  if (score <= 80) return { label: '中风险', class: 'tag-orange' }
   return { label: '高风险', class: 'tag-red' }
 }
 
-const securityLevel = computed(() => getSecurityLevel(props.skill.security_score))
+const securityLevel = computed(() => getSecurityLevel(props.skill.risk_score))
 
 function truncate(text: string | null, length: number): string {
   if (!text) return ''

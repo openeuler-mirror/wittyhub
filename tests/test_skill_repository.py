@@ -424,7 +424,7 @@ openeuler_repos:
             "tags": ["test"],
             "platform": "openclaw",
             "extra_metadata": {},
-            "security_score": 85,
+            "risk_score": 85,
             "download_count": 10,
             "rating": "4.5",
             "created_at": datetime.now(timezone.utc).isoformat(),

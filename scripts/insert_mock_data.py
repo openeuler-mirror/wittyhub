@@ -56,14 +56,14 @@ for i in range(20):
     version = f"v{random.randint(1,3)}.{random.randint(0,9)}.{random.randint(0,20)}"
     skill_id = f"{author}/{template['name']}:{version}"
     commit_id = ''.join(random.choices('0123456789abcdef', k=40))
-    security_score = random.randint(60, 100)
+    risk_score = random.randint(60, 100)
     download_count = random.randint(0, 500)
     rating = round(random.uniform(3.5, 5.0), 1)
 
     tags_list = template["tags"]
     tags_sql = "ARRAY[" + ", ".join(f"'{t}'" for t in tags_list) + "]::text[]"
 
-    sql = f"""INSERT INTO skills (id, skill_id, name, description, version, commit_id, author, source, source_url, category, tags, platform, extra_metadata, content, security_score, download_count, rating, created_at, updated_at)
+    sql = f"""INSERT INTO skills (id, skill_id, name, description, version, commit_id, author, source, source_url, category, tags, platform, extra_metadata, content, risk_score, download_count, rating, created_at, updated_at)
 VALUES (
     '{uuid.uuid4()}',
     '{skill_id}',
@@ -79,7 +79,7 @@ VALUES (
     'openclaw',
     '{{}}'::jsonb,
     E'{template["content"].replace("'", "''")}',
-    {security_score},
+    {risk_score},
     {download_count},
     '{rating}',
     NOW(),

@@ -13,7 +13,7 @@ export interface Skill {
   platform: string | null
   content: string | null
   metadata: Record<string, any>
-  security_score: number | null
+  risk_score: number | null
   security_level?: string
   download_count: number
   rating: number | null

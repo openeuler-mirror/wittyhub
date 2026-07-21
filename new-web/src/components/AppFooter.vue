@@ -192,6 +192,7 @@ $color: #fff;
 .footer {
   overflow: hidden;
   background: #121214;
+  margin-top: 80px;
 
   :deep(.content-wrapper) {
     padding-bottom: 0;

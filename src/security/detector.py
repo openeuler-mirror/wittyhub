@@ -82,8 +82,8 @@ class SkillspectorClient:
 
     @property
     def enabled(self) -> bool:
-        """True when the client has credentials and can authenticate."""
-        return self.auth is not None
+        """True when the client has credentials and a valid URL."""
+        return self.auth is not None and bool(self.base_url)
 
     def run_scan(
         self,
@@ -453,7 +453,7 @@ class SkillspectorCollector:
             await session.execute(
                 update(Skill)
                 .where(Skill.id == audit.resource_id)
-                .values(security_score=score)
+                .values(risk_score=score)
             )
 
         await session.commit()
@@ -493,9 +493,9 @@ class SecurityDetector:
         if not risk_signals:
             return "low"
 
-        critical_count = sum(1 for s in risk_signals if s.severity == "Critical")
-        high_count = sum(1 for s in risk_signals if s.severity == "High")
-        medium_count = sum(1 for s in risk_signals if s.severity == "Medium")
+        critical_count = sum(1 for s in risk_signals if s.severity.upper() == "CRITICAL")
+        high_count = sum(1 for s in risk_signals if s.severity.upper() == "HIGH")
+        medium_count = sum(1 for s in risk_signals if s.severity.upper() == "MEDIUM")
 
         if critical_count > 0:
             return "critical"

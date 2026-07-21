@@ -243,7 +243,7 @@ class SearchService:
                 "category": skill.category,
                 "tags": skill.tags or [],
                 "platform": skill.platform,
-                "security_score": skill.security_score,
+                "risk_score": skill.risk_score,
                 "download_count": skill.download_count,
                 "rating": skill.rating,
                 "created_at": skill.created_at.isoformat() if skill.created_at else None,
@@ -284,7 +284,7 @@ class SearchService:
         sql = text(f"""
             SELECT id, skill_id, name, description, version, commit_id, author, source,
                    source_url, category, tags, platform, extra_metadata, content,
-                   security_score, download_count, rating, created_at, updated_at,
+                   risk_score, download_count, rating, created_at, updated_at,
                    embedding <-> CAST(:embedding AS vector) AS distance
             FROM skills
             WHERE {where_sql}
@@ -312,7 +312,7 @@ class SearchService:
                 "category": row.category,
                 "tags": row.tags or [],
                 "platform": row.platform,
-                "security_score": row.security_score,
+                "risk_score": row.risk_score,
                 "download_count": row.download_count,
                 "rating": row.rating,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -372,7 +372,7 @@ class SearchService:
                 "category": agent.category,
                 "tags": agent.tags or [],
                 "platform": agent.platform,
-                "security_score": agent.security_score,
+                "risk_score": agent.risk_score,
                 "download_count": agent.download_count,
                 "rating": agent.rating,
                 "created_at": agent.created_at.isoformat() if agent.created_at else None,

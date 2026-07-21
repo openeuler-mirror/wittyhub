@@ -49,6 +49,7 @@ class SecurityService:
         merged_details: dict[str, Any] = {}
         scanner_names: list[str] = []
         skillspector_score: int | None = None
+        sp_report: Any = None
         # --- Skillspector ---
         if "skillspector" in scanners:
             version = metadata.get("version") if isinstance(metadata, dict) else None
@@ -76,13 +77,17 @@ class SecurityService:
 
         # --- Calculate risk level & score ---
         if scanner_names:
-            risk_level = self.detector._calculate_risk_level(all_signals)
+            # Prefer Jenkins raw risk_level when available
+            if sp_report is not None and sp_report.risk_level != "unknown":
+                risk_level = sp_report.risk_level
+            else:
+                risk_level = self.detector._calculate_risk_level(all_signals)
         else:
             risk_level = "unknown"
-        security_score = (
+        risk_score = (
             skillspector_score
             if skillspector_score is not None
-            else self._calculate_security_score(risk_level)
+            else self._calculate_risk_score(risk_level)
         )
 
         merged_details["scanners"] = scanner_names
@@ -90,6 +95,8 @@ class SecurityService:
         audit_data = {
             "resource_type": "skill",
             "resource_id": skill.id,
+            "version": skill.version,
+            "commit_id": skill.commit_id,
             "audit_type": "+".join(scanner_names) if scanner_names else "none",
             "risk_level": risk_level,
             "risk_signals": [signal.__dict__ for signal in all_signals],
@@ -97,7 +104,7 @@ class SecurityService:
         }
 
         await self.audit_repo.create(audit_data)
-        await self.skill_repo.update(skill_id, {"security_score": security_score})
+        await self.skill_repo.update(skill_id, {"risk_score": risk_score})
 
         await self.session.commit()
 
@@ -112,17 +119,19 @@ class SecurityService:
                 }
                 for s in all_signals
             ],
-            "security_score": security_score,
+            "risk_score": risk_score,
             "scanners": scanner_names,
         }
 
 
-    def _calculate_security_score(self, risk_level: str) -> int:
+    def _calculate_risk_score(self, risk_level: str) -> int | None:
+        """Map risk_level to SkillSpector-compatible risk score (0-100, higher = riskier)."""
+        if risk_level == "unknown":
+            return None
         score_map = {
-            "critical": 0,
-            "high": 25,
-            "medium": 50,
-            "low": 75,
-            "unknown": 100,
+            "critical": 90,
+            "high": 65,
+            "medium": 35,
+            "low": 10,
         }
-        return score_map.get(risk_level, 100)
+        return score_map.get(risk_level)

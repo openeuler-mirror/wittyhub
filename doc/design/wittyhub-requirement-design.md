@@ -534,7 +534,7 @@ CREATE TABLE skills (
     content TEXT,                          -- skill.md 内容
 
     -- 统计信息
-    security_score INTEGER,
+    risk_score INTEGER,
     download_count INTEGER DEFAULT 0,
     rating DECIMAL(3,2),
 
@@ -679,7 +679,7 @@ Response:
       "category": "DevTools",
       "tags": ["search", "discovery"],
       "source": "github",
-      "security_score": 95,
+      "risk_score": 95,
       "download_count": 1500000
     }
   ]

@@ -389,7 +389,7 @@ flowchart TD
 
 说明：
 
-- community 仓库缓存目录：`/opt/wittyhub/skill-data/openeuler-community`
+- community 仓库缓存目录：`/opt/wittyhub/openeuler-community`
 - 只读取 `openeuler/<repo>`
 - 不读取 `src-openeuler/<repo>`
 - 映射示例：`openeuler/PilotGo-plugin-llmops` -> `gitcode.com_openeuler_PilotGo-plugin-llmops` -> `sig_name`
@@ -402,25 +402,25 @@ flowchart TD
 
 ```yaml
 storage:
-  local_path: /opt/wittyhub/skill-data
+  local_path: /opt/wittyhub/
 ```
 
 仓库 clone 路径：
 
 ```text
-/opt/wittyhub/skill-data/skill-repositories/<repo_name>
+/opt/wittyhub/skill-repositories/<repo_name>
 ```
 
 示例：
 
 ```text
-/opt/wittyhub/skill-data/skill-repositories/gitcode.com_openeuler_wittyhub-cli
+/opt/wittyhub/skill-repositories/gitcode.com_openeuler_wittyhub-cli
 ```
 
 日志路径：
 
 ```text
-/opt/wittyhub/skill-data/logs/skillcrawler.log
+/opt/wittyhub/logs/skillcrawler.log
 ```
 
 ---

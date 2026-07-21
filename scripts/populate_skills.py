@@ -225,7 +225,8 @@ def populate_skills():
         version = data.get("version", "main")
         skill_id = generate_skill_id(data["source_url"], data["name"], version)
         skill_name_slug = data["name"].lower().replace(' ', '-')
-        content = fetch_skill_content(data["source_url"], skill_name_slug, version)
+        # Skip network fetch — use placeholder content
+        content = None  # fetch_skill_content(data["source_url"], skill_name_slug, version)
         skill = Skill(
             id=uuid.uuid4(),
             skill_id=skill_id,
@@ -241,7 +242,11 @@ def populate_skills():
             platform=data.get("platform", "claude"),
             extra_metadata={},
             content=content,
-            security_score=random.randint(70, 100),
+            risk_score=random.choices(
+                range(0, 101),
+                weights=[3]*21 + [2]*30 + [1]*30 + [0.5]*20,  # bias toward safe/low risk
+                k=1
+            )[0],
             download_count=data.get("download_count", random.randint(1000, 100000)),
             rating=data.get("rating", f"{random.uniform(4.0, 5.0):.1f}"),
             created_at=datetime.utcnow() - timedelta(days=random.randint(1, 365)),

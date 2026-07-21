@@ -211,13 +211,13 @@ class SkillRepository:
             conditions = []
             for level in security_level:
                 if level == "安全":
-                    conditions.append(skill_model.security_score >= 80)
+                    conditions.append(skill_model.risk_score <= 20)
                 elif level == "低风险":
-                    conditions.append(skill_model.security_score.between(60, 79))
+                    conditions.append(skill_model.risk_score.between(21, 50))
                 elif level == "中风险":
-                    conditions.append(skill_model.security_score.between(40, 59))
+                    conditions.append(skill_model.risk_score.between(51, 80))
                 elif level == "高风险":
-                    conditions.append(skill_model.security_score < 40)
+                    conditions.append(skill_model.risk_score >= 81)
             if conditions:
                 from sqlalchemy import or_
                 query = query.where(or_(*conditions))
@@ -423,7 +423,7 @@ class SkillRepository:
             "platform": representative.platform,
             "extra_metadata": representative.extra_metadata,
             "content": representative.content,
-            "security_score": representative.security_score,
+            "risk_score": representative.risk_score,
             "download_count": download_count,
             "rating": representative.rating,
             "updated_at": datetime.now(timezone.utc),
@@ -644,10 +644,10 @@ class SkillRepository:
 
         # Security level counts
         level_expr = case(
-            (latest_skills.c.security_score >= 80, "安全"),
-            (latest_skills.c.security_score.between(60, 79), "低风险"),
-            (latest_skills.c.security_score.between(40, 59), "中风险"),
-            (latest_skills.c.security_score < 40, "高风险"),
+            (latest_skills.c.risk_score <= 20, "安全"),
+            (latest_skills.c.risk_score.between(21, 50), "低风险"),
+            (latest_skills.c.risk_score.between(51, 80), "中风险"),
+            (latest_skills.c.risk_score >= 81, "高风险"),
             else_="未检测",
         )
         security_result = await self.session.execute(
@@ -657,7 +657,15 @@ class SkillRepository:
             )
             .select_from(latest_skills)
             .group_by(level_expr)
-            .order_by(func.count().desc())
+            .order_by(
+                case(
+                    (level_expr == "安全", 1),
+                    (level_expr == "低风险", 2),
+                    (level_expr == "中风险", 3),
+                    (level_expr == "高风险", 4),
+                    else_=5,
+                )
+            )
         )
         security_levels = [{"name": row.level, "count": row.count} for row in security_result.fetchall()]
 

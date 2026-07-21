@@ -1,0 +1,104 @@
+@use 'screen' as *;
+
+@mixin text-truncate($line: 1) {
+  @if $line == 1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  } @else {
+    display: -webkit-box;
+    -webkit-line-clamp: $line;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@mixin hover {
+  @media (hover: hover) {
+    &:hover {
+      @content;
+    }
+  }
+}
+
+@mixin hoverable {
+  @media (hover: hover) {
+    &:hover {
+      @content;
+    }
+  }
+}
+
+@mixin in-dark {
+  [data-o-theme="e.dark"] &,
+  .dark & {
+    @content;
+  }
+}
+
+// 四级标题 (footer category titles)
+@mixin h4 {
+  font-size: 20px;
+  line-height: 28px;
+  @include respond-to('laptop') {
+    font-size: 18px;
+    line-height: 26px;
+  }
+  @include respond-to('pad_h') {
+    font-size: 16px;
+    line-height: 24px;
+  }
+  @include respond-to('pad_v') {
+    font-size: 16px;
+    line-height: 24px;
+  }
+  @include respond-to('phone') {
+    font-size: 14px;
+    line-height: 22px;
+  }
+}
+
+// 提示文本1
+@mixin tip1 {
+  font-size: 14px;
+  line-height: 22px;
+  @include respond-to('laptop') {
+    font-size: 12px;
+    line-height: 18px;
+  }
+  @include respond-to('pad_h') {
+    font-size: 12px;
+    line-height: 18px;
+  }
+  @include respond-to('pad_v') {
+    font-size: 12px;
+    line-height: 18px;
+  }
+  @include respond-to('phone') {
+    font-size: 10px;
+    line-height: 16px;
+  }
+}
+
+// 提示文本2
+@mixin tip2 {
+  font-size: 12px;
+  line-height: 18px;
+  @include respond-to('laptop') {
+    font-size: 12px;
+    line-height: 18px;
+  }
+  @include respond-to('pad_h') {
+    font-size: 12px;
+    line-height: 18px;
+  }
+  @include respond-to('pad_v') {
+    font-size: 12px;
+    line-height: 18px;
+  }
+  @include respond-to('phone') {
+    font-size: 10px;
+    line-height: 16px;
+  }
+}

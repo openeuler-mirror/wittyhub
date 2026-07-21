@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #002FA7;
+  --color-primary-light: #3385ff;
+  --color-bg: #F5F6F8;
+  --color-bg-dark: #111421;
+  --color-text: #1F2329;
+  --color-text-secondary: #646A73;
+  --color-text-tertiary: #8F959E;
+  --color-border: #E5E6EB;
+  --color-border-dark: #2A2F3C;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.dark body {
+  color: #C9CDD4;
+  background-color: var(--color-bg-dark);
+}
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 0 16px;
+  }
+}
+
+.btn {
+  @apply inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer;
+}
+
+.btn-primary {
+  @apply bg-primary-500 text-white hover:bg-primary-600;
+}
+
+.btn-secondary {
+  @apply bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700;
+}
+
+.btn-ghost {
+  @apply text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800;
+}
+
+.card {
+  @apply bg-white rounded-lg border border-gray-200 transition-all dark:bg-gray-800 dark:border-gray-700;
+}
+
+.card-hover {
+  @apply hover:border-primary-300 hover:shadow-md dark:hover:border-primary-600;
+}
+
+.tag {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+}
+
+.tag-blue {
+  @apply bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400;
+}
+
+.tag-green {
+  @apply bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400;
+}
+
+.tag-orange {
+  @apply bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400;
+}
+
+.tag-red {
+  @apply bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400;
+}
+
+.tag-gray {
+  @apply bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300;
+}

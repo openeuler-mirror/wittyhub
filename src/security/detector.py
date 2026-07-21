@@ -367,6 +367,8 @@ class SkillspectorCollector:
                     if await self._collect_one(session, audit, build_number):
                         processed += 1
                 except Exception:
+                    # Roll back to keep session usable for subsequent pending audits
+                    await session.rollback()
                     logger.exception(
                         "Failed to collect result for audit %s (build #%s)",
                         audit.id, build_number,
@@ -407,8 +409,8 @@ class SkillspectorCollector:
         """Collect a single Jenkins result.  Returns True if collected."""
         from src.models.orm import SecurityAudit, Skill
 
-        # 1. Wait for build
-        status = self._client.wait_for_build(build_number)
+        # 1. Wait for build (offload sync HTTP polling to a worker thread)
+        status = await asyncio.to_thread(self._client.wait_for_build, build_number)
         if status != "SUCCESS":
             details = dict(audit.details or {})
             details["skillspector_collected"] = True
@@ -421,8 +423,8 @@ class SkillspectorCollector:
             await session.commit()
             return True
 
-        # 2. Fetch report
-        report = self._client.fetch_report(build_number)
+        # 2. Fetch report (also sync HTTP → offload)
+        report = await asyncio.to_thread(self._client.fetch_report, build_number)
         if report is None:
             return False
 

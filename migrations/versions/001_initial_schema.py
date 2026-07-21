@@ -10,6 +10,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
 revision: str = "001_initial_schema"
@@ -60,7 +61,8 @@ def upgrade() -> None:
         sa.Column("platform", sa.String(length=100), nullable=True),
         sa.Column("extra_metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("content", sa.Text(), nullable=True),
-        sa.Column("security_score", sa.Integer(), nullable=True),
+        sa.Column("risk_score", sa.Integer(), nullable=True),
+        sa.Column("embedding", Vector(dim=768), nullable=True),
         sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("rating", sa.String(length=10), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -84,7 +86,8 @@ def upgrade() -> None:
         sa.Column("platform", sa.String(length=100), nullable=True),
         sa.Column("extra_metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("content", sa.Text(), nullable=True),
-        sa.Column("security_score", sa.Integer(), nullable=True),
+        sa.Column("risk_score", sa.Integer(), nullable=True),
+        sa.Column("embedding", Vector(dim=768), nullable=True),
         sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("rating", sa.String(length=10), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -105,7 +108,7 @@ def upgrade() -> None:
         sa.Column("category", sa.String(length=100), nullable=True),
         sa.Column("tags", ARRAY_TEXT, nullable=True),
         sa.Column("extra_metadata", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("security_score", sa.Integer(), nullable=True),
+        sa.Column("risk_score", sa.Integer(), nullable=True),
         sa.Column("download_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("rating", sa.String(length=10), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
@@ -123,6 +126,8 @@ def upgrade() -> None:
         sa.Column("risk_level", sa.String(length=20), nullable=False),
         sa.Column("risk_signals", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("details", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("version", sa.String(length=50), nullable=True),
+        sa.Column("commit_id", sa.String(length=40), nullable=True),
         sa.Column("audited_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.ForeignKeyConstraint(["resource_id"], ["skills.id"], ondelete="CASCADE"),
     )
@@ -143,6 +148,7 @@ def upgrade() -> None:
     op.create_index("idx_skills_created_at", "skills", [sa.text("created_at DESC")])
     op.create_index("idx_skills_tags", "skills", ["tags"], postgresql_using="gin")
     op.create_index("idx_skills_skill_id", "skills", ["skill_id"], unique=True)
+    op.execute('CREATE INDEX idx_skills_embedding ON skills USING ivfflat (embedding vector_l2_ops);')
 
     op.create_index("idx_skill_versions_category", "skill_versions", ["category"])
     op.create_index("idx_skill_versions_platform", "skill_versions", ["platform"])
@@ -151,6 +157,7 @@ def upgrade() -> None:
     op.create_index("idx_skill_versions_tags", "skill_versions", ["tags"], postgresql_using="gin")
     op.create_index("idx_skill_versions_skill_id", "skill_versions", ["skill_id"])
     op.create_index("idx_skill_versions_unique", "skill_versions", ["skill_id", "version"],unique=True)
+    op.execute('CREATE INDEX idx_skill_versions_embedding ON skill_versions USING ivfflat (embedding vector_l2_ops);')
 
     op.create_index("idx_agents_category", "agents", ["category"])
     op.create_index("idx_agents_tags", "agents", ["tags"], postgresql_using="gin")
@@ -158,6 +165,7 @@ def upgrade() -> None:
     op.create_index("idx_audits_resource", "security_audits", ["resource_type", "resource_id"])
     op.create_index("idx_audits_risk_level", "security_audits", ["risk_level"])
     op.create_index("idx_audits_audited_at", "security_audits", [sa.text("audited_at DESC")])
+    op.create_index("idx_audits_version", "security_audits", ["resource_id", "version", "commit_id"])
 
     op.create_index("idx_downloads_resource", "download_history", ["resource_type", "resource_id"])
     op.create_index("idx_downloads_date", "download_history", [sa.text("downloaded_at DESC")])
@@ -166,6 +174,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("idx_downloads_date", table_name="download_history")
     op.drop_index("idx_downloads_resource", table_name="download_history")
+    op.drop_index("idx_audits_version", table_name="security_audits")
     op.drop_index("idx_audits_audited_at", table_name="security_audits")
     op.drop_index("idx_audits_risk_level", table_name="security_audits")
     op.drop_index("idx_audits_resource", table_name="security_audits")
@@ -177,7 +186,8 @@ def downgrade() -> None:
     op.drop_index("idx_skills_source", table_name="skills")
     op.drop_index("idx_skills_platform", table_name="skills")
     op.drop_index("idx_skills_category", table_name="skills")
-    
+    op.execute('DROP INDEX IF EXISTS idx_skills_embedding;')
+
     op.drop_index("idx_skill_versions_unique", table_name="skill_versions")
     op.drop_index("idx_skill_versions_skill_id", table_name="skill_versions")
     op.drop_index("idx_skill_versions_tags", table_name="skill_versions")
@@ -185,6 +195,7 @@ def downgrade() -> None:
     op.drop_index("idx_skill_versions_source", table_name="skill_versions")
     op.drop_index("idx_skill_versions_platform", table_name="skill_versions")
     op.drop_index("idx_skill_versions_category", table_name="skill_versions")
+    op.execute('DROP INDEX IF EXISTS idx_skill_versions_embedding;')
 
     op.drop_table("download_history")
     op.drop_table("security_audits")

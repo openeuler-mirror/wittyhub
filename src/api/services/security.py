@@ -76,19 +76,25 @@ class SecurityService:
                         skillspector_score = sp_report.details["skillspector_score"]
 
         # --- Calculate risk level & score ---
-        if scanner_names:
+        if async_mode:
+            # Scan triggered but result not yet collected; unknown until
+            # SkillspectorCollector writes back the real values.
+            risk_level = "unknown"
+            risk_score = None
+        elif scanner_names:
             # Prefer Jenkins raw risk_level when available
             if sp_report is not None and sp_report.risk_level != "unknown":
                 risk_level = sp_report.risk_level
             else:
                 risk_level = self.detector._calculate_risk_level(all_signals)
+            risk_score = (
+                skillspector_score
+                if skillspector_score is not None
+                else self._calculate_risk_score(risk_level)
+            )
         else:
             risk_level = "unknown"
-        risk_score = (
-            skillspector_score
-            if skillspector_score is not None
-            else self._calculate_risk_score(risk_level)
-        )
+            risk_score = None
 
         merged_details["scanners"] = scanner_names
 

@@ -202,7 +202,7 @@ erDiagram
         string category
         array tags
         vector embedding
-        int security_score
+        int risk_score
         int download_count
     }
 
@@ -670,7 +670,7 @@ sequenceDiagram
         API->>SEC: audit_skill(skill_id, source, ...)
         SEC->>SOC: 供应链安全检测
         SOC-->>SEC: risk_signals, risk_level
-        SEC-->>API: security_score
+        SEC-->>API: risk_score
         API->>REPO: create(skill_dict)
         REPO->>PG: INSERT INTO skills
         API-->>Importer: 201 SkillResponse

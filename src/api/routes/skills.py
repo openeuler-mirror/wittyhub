@@ -147,6 +147,7 @@ async def audit_skill(
 async def trigger_skill_audit(
     skill_id: str,
     scanners: str | None = Query(None, description="Comma-separated: skillspector"),
+    async_mode: bool = Query(False, description="Trigger scan without waiting for result"),
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger a fresh security audit for a skill and return the result."""
@@ -156,11 +157,14 @@ async def trigger_skill_audit(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    security_service = SecurityService(db)
+    if not security_service.detector.enable_audit:
+        raise HTTPException(status_code=503, detail="Security audit is disabled")
+
     scanner_list = None
     if scanners:
         scanner_list = [s.strip() for s in scanners.split(",") if s.strip()]
 
-    security_service = SecurityService(db)
     audit_result = await security_service.audit_skill(
         skill_id=skill.skill_id,
         source=skill.source,
@@ -171,6 +175,7 @@ async def trigger_skill_audit(
             "content": skill.content,
         },
         scanners=scanner_list,
+        async_mode=async_mode,
     )
 
     if "error" in audit_result:
@@ -290,6 +295,7 @@ async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
 async def create_skill(
     skill_data: SkillCreate,
     request: Request,
+    async_mode: bool = Query(False, description="Trigger security audit without waiting for result"),
     db: AsyncSession = Depends(get_db),
 ):
     repo = SkillRepository(db)
@@ -336,6 +342,7 @@ async def create_skill(
                 skill.source,
                 skill.source_url,
                 {"version": skill.version, "commit_id": skill.commit_id, "content": skill.content or ""},
+                async_mode=async_mode,
             )
             # risk_score is already persisted by audit_skill internally
         except Exception:

@@ -226,6 +226,8 @@ class SkillRepository:
         if security_level:
             conditions = []
             for level in security_level:
+                # NVIDIA SkillSpector native risk levels (0-100, higher = riskier)
+                # 前端展示用中文：安全(0-20) / 低风险(21-50) / 中风险(51-80) / 高风险(81-100) / 未检测(NULL)
                 if level == "安全":
                     conditions.append(skill_model.risk_score <= 20)
                 elif level == "低风险":
@@ -657,7 +659,8 @@ class SkillRepository:
         )
         platforms = [{"name": row.platform, "count": row.count} for row in platform_result.fetchall()]
 
-        # Security level counts
+        # Security level counts (NVIDIA SkillSpector native levels, 中文展示)
+        # 安全(0-20) / 低风险(21-50) / 中风险(51-80) / 高风险(81-100) / 未检测(NULL)
         level_expr = case(
             (latest_skills.c.risk_score <= 20, "安全"),
             (latest_skills.c.risk_score.between(21, 50), "低风险"),

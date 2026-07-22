@@ -6,6 +6,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/
     sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/*.sources 2>/dev/null; \
     apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    git \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 

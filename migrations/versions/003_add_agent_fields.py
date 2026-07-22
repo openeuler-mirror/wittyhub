@@ -1,7 +1,7 @@
 """Add fields to Agent model and create AgentVersion model.
 
-Revision ID: 005_add_agent_fields
-Revises: 004_skill_repos
+Revision ID: 003_add_agent_fields
+Revises: 002_skill_repos
 Create Date: 2026-07-14 00:00:00
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "005_add_agent_fields"
-down_revision: Union[str, None] = "004_skill_repos"
+revision: str = "003_add_agent_fields"
+down_revision: Union[str, None] = "002_skill_repos"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1,7 +1,7 @@
 """Add skill repos table and skill repo foreign key.
 
-Revision ID: 004_skill_repos
-Revises: 003_add_embedding_column
+Revision ID: 002_skill_repos
+Revises: 001_initial_schema
 Create Date: 2026-06-06 00:00:00
 
 """
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "004_skill_repos"
-down_revision: Union[str, None] = "003_add_embedding_column"
+revision: str = "002_skill_repos"
+down_revision: Union[str, None] = "001_initial_schema"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

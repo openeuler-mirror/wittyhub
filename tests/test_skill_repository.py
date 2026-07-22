@@ -82,11 +82,11 @@ class TestSkillRepositoryUnit:
     def test_skill_manager_workspace_defaults_to_storage_local_path(self, tmp_path):
         from skillcrawler.core import skill_manager
 
-        storage_path = str(tmp_path / "skill-data")
+        storage_path = str(tmp_path)
         with patch.object(skill_manager.settings.storage, "local_path", storage_path):
             manager = skill_manager.SkillManager(MagicMock(), MagicMock())
 
-        assert manager.workspace_base == (tmp_path / "skill-data").resolve()
+        assert manager.workspace_base == tmp_path.resolve()
 
     def test_skillcrawler_platform_maps_to_config_key(self):
         from skillcrawler.main import _config_key_for_platform, _config_keys_for_platform

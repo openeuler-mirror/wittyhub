@@ -240,6 +240,7 @@ class SkillScanner:
             author=author,
             source=host,
             source_url=source_url,
+            repo_url=repo.url,
             category=category,
             tags=as_optional_str_list(metadata.get('tags')),
             platform=as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),

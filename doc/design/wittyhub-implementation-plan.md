@@ -336,14 +336,33 @@ if embedding is None:
 
 #### 4.1.9 数据库扩展初始化
 
-```sql
--- deploy/docker/init.sql
-CREATE EXTENSION IF NOT EXISTS "vector";
-CREATE EXTENSION IF NOT EXISTS "unaccent";
-CREATE TEXT SEARCH CONFIGURATION zhcfg (COPY = pg_catalog.simple);
-ALTER TEXT SEARCH CONFIGURATION zhcfg
-  ALTER MAPPING FOR asciiword, word WITH unaccent, simple;
+数据库扩展与中文全文搜索配置由首个 Alembic 迁移脚本统一管理：
+
+```python
+# migrations/versions/001_initial_schema.py
+def upgrade() -> None:
+    op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
+    op.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm";')
+    op.execute('CREATE EXTENSION IF NOT EXISTS "unaccent";')
+    op.execute('CREATE EXTENSION IF NOT EXISTS "vector";')
+
+    op.execute(
+        """
+        DO $$ BEGIN
+            CREATE TEXT SEARCH CONFIGURATION zhcfg (COPY = pg_catalog.simple);
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+        """
+    )
+    op.execute(
+        """
+        ALTER TEXT SEARCH CONFIGURATION zhcfg
+        ALTER MAPPING FOR asciiword, word WITH unaccent, simple;
+        """
+    )
 ```
+
+容器启动后执行 `alembic upgrade head` 即可完成扩展安装与建表，PostgreSQL 镜像需选用带 pgvector 的 `pgvector/pgvector:pg16`。
 
 ---
 

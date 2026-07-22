@@ -18,13 +18,13 @@ WittyHub 的爬取阶段已经将 Skill 所属 Git 仓库克隆到本地，并�
 `storage.local_path` 是后端和爬虫共享的运行时数据根目录。当前配置为：
 
 ```text
-/opt/wittyhub/skill-data
+/opt/wittyhub/
 ```
 
 目录布局：
 
 ```text
-/opt/wittyhub/skill-data/
+/opt/wittyhub/
 ├── skill-repositories/      # 爬虫 clone 的 Git 仓库
 ├── download-cache/          # 下载接口生成的 ZIP 缓存
 └── logs/                    # skillcrawler 日志
@@ -137,7 +137,7 @@ git -C <skill_repo.local_path> cat-file -e <commit_id>:<skill_relative_path>/SKI
 示例：
 
 ```bash
-git -C /opt/wittyhub/skill-data/skill-repositories/gitcode.com_openeuler_opendesign-components \
+git -C /opt/wittyhub/skill-repositories/gitcode.com_openeuler_opendesign-components \
   cat-file -e \
   130b99b0145a4c357c9ac760b1834375716fdb01:packages/skills/clean-code/SKILL.md
 ```
@@ -160,7 +160,7 @@ git -C <skill_repo.local_path> \
 本次示例等价为：
 
 ```bash
-git -C /opt/wittyhub/skill-data/skill-repositories/gitcode.com_openeuler_opendesign-components \
+git -C /opt/wittyhub/skill-repositories/gitcode.com_openeuler_opendesign-components \
   archive \
   --format=zip \
   --prefix=clean-code/ \
@@ -205,7 +205,7 @@ clean-code/
 当前配置下是：
 
 ```text
-/opt/wittyhub/skill-data/download-cache/
+/opt/wittyhub/download-cache/
 ```
 
 ### 4.2 缓存 Key

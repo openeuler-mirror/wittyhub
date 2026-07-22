@@ -40,6 +40,10 @@ export const useSkillStore = defineStore('skill', () => {
         params.security_level = filter.value.securityLevel.join(',')
       }
 
+      if (filter.value.provider.length > 0) {
+        params.platform = filter.value.provider.join(',')
+      }
+
       if (filter.value.sortBy === 'hot' || filter.value.sortBy === 'downloads') {
         params.sort_by = 'download_count'
         if (filter.value.sortPeriod && filter.value.sortPeriod !== 'all') {

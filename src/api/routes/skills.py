@@ -89,13 +89,14 @@ async def list_skills(
 ):
     tag_list = tags.split(",") if tags else None
     category_list = category.split(",") if category else None
+    platform_list = platform.split(",") if platform else None
     security_level_list = security_level.split(",") if security_level else None
     repo = SkillRepository(db)
     skills, total = await repo.list(
         skip=skip,
         limit=limit,
         category=category_list,
-        platform=platform,
+        platform=platform_list,
         tags=tag_list,
         security_level=security_level_list,
         sort_by=sort_by,

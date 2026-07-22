@@ -261,7 +261,7 @@ onMounted(async () => {
                   <OOption
                     v-for="v in versions"
                     :key="v.version"
-                    :label="`v${v.version}`"
+                    :label="v.version"
                     :value="v.version"
                   />
                 </OSelect>
@@ -293,7 +293,7 @@ onMounted(async () => {
               <div class="version-header-divider"></div>
               <div class="version-rows">
                 <div v-for="v in filteredVersions" :key="v.version" class="version-row">
-                  <span class="version-badge">v{{ v.version }}</span>
+                  <span class="version-badge">{{ v.version }}</span>
                   <div class="version-cli-group">
                     <code class="version-install-cmd">skillhub install {{ skill?.skill_id }}</code>
                     <button
@@ -372,7 +372,7 @@ onMounted(async () => {
                 </div>
                 <div class="info-row">
                   <span class="info-label">版本</span>
-                  <span class="info-value">v{{ skill.version || '-' }}</span>
+                  <span class="info-value">{{ skill.version || '-' }}</span>
                 </div>
               </div>
             </div>

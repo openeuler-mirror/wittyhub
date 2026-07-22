@@ -478,10 +478,10 @@ wittyhub install <skill-id> [选项]
 
 | 组件 | 说明 |
 |------|------|
-| SkillCard | Skill卡片，显示名称、描述、分类、安全等级 |
+| SkillCard | Skill卡片，显示名称、描述、分类、风险等级 |
 | SearchBar | 搜索栏，支持关键词输入 |
 | CategoryNav | 分类导航，带图标 |
-| SecurityBadge | 安全等级徽章（基于分数） |
+| SecurityBadge | 风险等级徽章（基于风险分，遵循 NVIDIA SkillSpector 标准） |
 | AppHeader | 顶部导航，含暗色模式切换 |
 | AppFooter | 页脚 |
 
@@ -679,7 +679,7 @@ Response:
       "category": "DevTools",
       "tags": ["search", "discovery"],
       "source": "github",
-      "risk_score": 95,
+      "risk_score": 10,
       "download_count": 1500000
     }
   ]

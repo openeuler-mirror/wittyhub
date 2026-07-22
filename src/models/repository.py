@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
-from sqlalchemy import case, delete, desc, func, select, update
+from sqlalchemy import case, delete, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -194,15 +194,31 @@ class SkillRepository:
         skill_model,
         *,
         category: list[str] | None = None,
-        platform: str | None = None,
+        platform: list[str] | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
         security_level: list[str] | None = None,
     ):
         if category:
-            query = query.where(skill_model.category.in_(category))
+            conditions = []
+            normal_cats = []
+            for c in category:
+                if c.lower() == "others":
+                    conditions.append(
+                        or_(
+                            skill_model.category.is_(None),
+                            skill_model.category == "",
+                            func.lower(skill_model.category).in_(["others", "other"]),
+                        )
+                    )
+                else:
+                    normal_cats.append(c)
+            if normal_cats:
+                conditions.append(skill_model.category.in_(normal_cats))
+            if conditions:
+                query = query.where(or_(*conditions))
         if platform:
-            query = query.where(skill_model.platform == platform)
+            query = query.where(skill_model.platform.in_(platform))
         if tags:
             query = query.where(skill_model.tags.contains(tags))
         if source:
@@ -210,6 +226,8 @@ class SkillRepository:
         if security_level:
             conditions = []
             for level in security_level:
+                # NVIDIA SkillSpector native risk levels (0-100, higher = riskier)
+                # 前端展示用中文：安全(0-20) / 低风险(21-50) / 中风险(51-80) / 高风险(81-100) / 未检测(NULL)
                 if level == "安全":
                     conditions.append(skill_model.risk_score <= 20)
                 elif level == "低风险":
@@ -219,7 +237,6 @@ class SkillRepository:
                 elif level == "高风险":
                     conditions.append(skill_model.risk_score >= 81)
             if conditions:
-                from sqlalchemy import or_
                 query = query.where(or_(*conditions))
         return query
 
@@ -463,7 +480,7 @@ class SkillRepository:
         skip: int = 0,
         limit: int = 20,
         category: list[str] | None = None,
-        platform: str | None = None,
+        platform: list[str] | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
         sort_by: str = "updated_at",
@@ -628,7 +645,7 @@ class SkillRepository:
                 str(item["name"]).lower(),
             )
         )
-        total_categories = len(categories)
+        total_categories = len([c for c in categories if c["name"].lower() != "others"])
 
         # Platform counts
         platform_result = await self.session.execute(
@@ -644,7 +661,8 @@ class SkillRepository:
         )
         platforms = [{"name": row.platform, "count": row.count} for row in platform_result.fetchall()]
 
-        # Security level counts
+        # Security level counts (NVIDIA SkillSpector native levels, 中文展示)
+        # 安全(0-20) / 低风险(21-50) / 中风险(51-80) / 高风险(81-100) / 未检测(NULL)
         level_expr = case(
             (latest_skills.c.risk_score <= 20, "安全"),
             (latest_skills.c.risk_score.between(21, 50), "低风险"),

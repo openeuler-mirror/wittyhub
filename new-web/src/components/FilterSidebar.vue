@@ -4,11 +4,25 @@ import { useSkillStore } from '@/stores/skill'
 
 const skillStore = useSkillStore()
 
-const providers = [
-  { name: '社区官方', value: 'community', count: 126 },
-  { name: '企业组织', value: 'enterprise', count: 468 },
-  { name: '个人', value: 'individual', count: 231 }
-]
+const platformLabel: Record<string, string> = {
+  openeuler: '社区官方',
+  enterprise: '企业组织',
+  personal: '个人'
+}
+
+const platformKeys = ['openeuler', 'enterprise', 'personal']
+
+const providers = computed(() => {
+  const platformCounts: Record<string, number> = {}
+  for (const p of skillStore.stats?.platforms ?? []) {
+    platformCounts[p.name] = p.count
+  }
+  return platformKeys.map(key => ({
+    name: platformLabel[key],
+    value: key,
+    count: platformCounts[key] ?? 0
+  }))
+})
 
 const allCategories = computed(() => skillStore.categories)
 

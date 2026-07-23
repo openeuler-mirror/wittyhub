@@ -58,9 +58,8 @@ export interface RiskSignal {
 }
 
 export interface DownloadResponse {
-  download_url: string
-  file_path: string | null
-  security_audit: SecurityAudit | null
+  blob: Blob
+  filename: string
 }
 
 export interface SkillVersionsResponse {

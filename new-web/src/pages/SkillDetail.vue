@@ -129,10 +129,15 @@ async function downloadSkill() {
   if (!skill.value || downloading.value) return
   downloading.value = true
   try {
-    const resp = await api.getSkillDownload(skill.value.skill_id)
-    if (resp.download_url) {
-      window.open(resp.download_url, '_blank')
-    }
+    const { blob, filename } = await api.getSkillDownload(skill.value.skill_id)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
   } catch (e) {
     console.error('下载失败:', e)
   } finally {

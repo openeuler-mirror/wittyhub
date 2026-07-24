@@ -184,10 +184,27 @@ def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
 
     metadata: dict[str, object] = {}
     current_key: str | None = None
+    block_scalar_indicator: str | None = None
     for line in raw_frontmatter.splitlines():
         stripped_line = line.strip()
         if not stripped_line or stripped_line.startswith('#'):
             continue
+
+        # While in a YAML block scalar (| or >), any indented line is content;
+        # a non-indented line ends the block and is processed normally.
+        if block_scalar_indicator is not None:
+            if line[:1] in (' ', '\t'):
+                if current_key is not None:
+                    existing = metadata.get(current_key)
+                    if isinstance(existing, str) and existing:
+                        if block_scalar_indicator == '|':
+                            metadata[current_key] = f'{existing}\n{stripped_line}'
+                        else:  # folded '>'
+                            metadata[current_key] = f'{existing} {stripped_line}'
+                    else:
+                        metadata[current_key] = stripped_line
+                continue
+            block_scalar_indicator = None
 
         if stripped_line.startswith('- ') and current_key == 'triggers':
             triggers = metadata.setdefault('triggers', [])
@@ -206,7 +223,15 @@ def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
 
         key, value = line.split(':', 1)
         current_key = key.strip()
-        metadata[current_key] = _parse_frontmatter_value(current_key, value.strip())
+        value = value.strip()
+
+        if value in ('|', '>', '|-', '>-', '|+', '>+'):
+            block_scalar_indicator = value[0]
+            metadata[current_key] = ''
+            continue
+
+        block_scalar_indicator = None
+        metadata[current_key] = _parse_frontmatter_value(current_key, value)
 
     return metadata, content.strip()
 

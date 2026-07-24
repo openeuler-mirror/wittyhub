@@ -15,6 +15,16 @@ const client = axios.create({
   timeout: 30000
 })
 
+function parseContentDispositionFilename(header: string | undefined): string {
+  if (!header) return 'skill.zip'
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match) {
+    try { return decodeURIComponent(utf8Match[1].trim()) } catch { /* ignore */ }
+  }
+  const match = header.match(/filename="?([^";]+)"?/i)
+  return match ? match[1].trim() : 'skill.zip'
+}
+
 export const api = {
   async listSkills(params: {
     skip?: number
@@ -59,8 +69,12 @@ export const api = {
   },
 
   async getSkillDownload(skillId: string): Promise<DownloadResponse> {
-    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/download`)
-    return data
+    const resp = await client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
+      responseType: 'blob'
+    })
+    const blob: Blob = resp.data
+    const filename = parseContentDispositionFilename(resp.headers['content-disposition'])
+    return { blob, filename }
   },
 
   async reindex(): Promise<{ status: string; indexed_count: number; total_skills: number }> {

@@ -81,7 +81,7 @@ function truncateHash(hash: string | null): string {
 
 async function copyCliCommand() {
   if (!skill.value) return
-  const command = `skillhub install ${skill.value.skill_id}`
+  const command = `npx wittyhub install ${skill.value.skill_id}`
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(command)
@@ -104,7 +104,7 @@ async function copyCliCommand() {
 }
 
 function copyVersionCmd(skillId: string) {
-  const command = `skillhub install ${skillId}`
+  const command = `npx wittyhub install ${skillId}`
   try {
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(command)
@@ -129,10 +129,15 @@ async function downloadSkill() {
   if (!skill.value || downloading.value) return
   downloading.value = true
   try {
-    const resp = await api.getSkillDownload(skill.value.skill_id)
-    if (resp.download_url) {
-      window.open(resp.download_url, '_blank')
-    }
+    const { blob, filename } = await api.getSkillDownload(skill.value.skill_id)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
   } catch (e) {
     console.error('下载失败:', e)
   } finally {
@@ -295,7 +300,7 @@ onMounted(async () => {
                 <div v-for="v in filteredVersions" :key="v.version" class="version-row">
                   <span class="version-badge">{{ v.version }}</span>
                   <div class="version-cli-group">
-                    <code class="version-install-cmd">skillhub install {{ skill?.skill_id }}</code>
+                    <code class="version-install-cmd">npx wittyhub install {{ skill?.skill_id }}</code>
                     <button
                       class="version-copy-btn"
                       :class="{ 'is-copied': copiedVersion }"
@@ -328,7 +333,7 @@ onMounted(async () => {
                 <h3 class="cli-label">CLI 安装</h3>
                 <div class="cli-divider"></div>
                 <div class="cli-input-group">
-                  <code class="cli-command">skillhub install {{ skill.skill_id }}</code>
+                  <code class="cli-command">npx wittyhub install {{ skill.skill_id }}</code>
                   <button class="cli-copy-btn" :class="{ 'is-copied': cliCopied }" @click="copyCliCommand" :aria-label="cliCopied ? '已复制' : '复制'">
                     <span v-if="!cliCopied" class="btn-icon-sm" v-html="copySvg"></span>
                     <span v-else class="btn-icon-sm copied-icon">

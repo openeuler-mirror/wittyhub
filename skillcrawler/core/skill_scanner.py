@@ -22,7 +22,7 @@ from skillcrawler.core.skill_parser import (
     should_skip_relative_path,
     to_repository_relative_path,
 )
-from src.models.orm import SkillVersion
+from src.models.orm import Skill, SkillVersion
 from src.models.repository import SkillRepository
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class SkillScanner:
         repository_git_metadata: dict[str, Any] | None = None,
         version_snapshots: list[dict[str, str]] | None = None,
         author: str | None = None,
-    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+    ) -> tuple[list[Skill], list[SkillVersion]]:
         if not repo_root.exists():
             raise ValueError(
                 f'Repository root does not exist for repository {repo.id}: {repo_root}'
@@ -93,8 +93,8 @@ class SkillScanner:
         repository_commit_id: str | None,
         repository_latest_tags: list[str],
         author: str | None,
-    ) -> list[SkillVersion]:
-        discovered: list[SkillVersion] = []
+    ) -> list[Skill]:
+        discovered: list[Skill] = []
         category_cache: dict[str, str | None] = {}
         for skill_file in skill_files:
             relative_path = to_repository_relative_path(repo_root, skill_file)
@@ -200,7 +200,7 @@ class SkillScanner:
         category_cache: dict[str, str | None],
         version_source: str | None,
         author: str | None,
-    ) -> SkillVersion:
+    ) -> Skill | SkillVersion:
         metadata, content = metadata_content
         merged_metadata = dict(metadata)
         if repository_latest_tags and 'repository_latest_tags' not in merged_metadata:

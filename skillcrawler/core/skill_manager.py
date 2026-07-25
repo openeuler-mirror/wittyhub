@@ -23,7 +23,7 @@ from skillcrawler.core.skill_parser import (
 )
 from skillcrawler.core.skill_scanner import SkillScanner
 from src.core.config import get_settings
-from src.models.orm import SkillVersion
+from src.models.orm import Skill
 from src.models.repository import SkillRepoRepository, SkillRepository
 
 if TYPE_CHECKING:
@@ -267,13 +267,13 @@ class SkillManager:
             skill_num=unique_skill_count,
         )
 
-    async def _scan_local_repository(
+    async def _discover_skills(
         self,
         repo: SkillRepoModel,
         *,
         clone_dir: Path,
         author: str | None,
-    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+    ) -> tuple[list[Skill], list[Skill]]:
         clone_url = normalize_clone_url_for_git(repo.url)
         self._git_ops.ensure_full_history(clone_dir, clone_url, repo.url)
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
@@ -368,7 +368,7 @@ class SkillManager:
         return None
 
     @staticmethod
-    def _count_unique_skills(skills: list[SkillVersion]) -> int:
+    def _count_unique_skills(skills: list[Skill]) -> int:
         return len(
             {
                 str(skill.skill_id).strip()

@@ -247,37 +247,6 @@ class SkillRepository:
             .subquery()
         )
 
-    def _build_summary_skill(
-        self,
-        representative: SkillVersion,
-        *,
-        download_count: int = 0,
-    ) -> Skill:
-        return Skill(
-            skill_repo_id=representative.skill_repo_id,
-            skill_id=representative.skill_id,
-            name=representative.name,
-            description=representative.description,
-            version=representative.version,
-            commit_id=representative.commit_id,
-            author=representative.author,
-            source=representative.source,
-            source_url=representative.source_url,
-            repo_url=representative.repo_url,
-            category=representative.category,
-            tags=representative.tags,
-            platform=representative.platform,
-            extra_metadata=representative.extra_metadata,
-            content=representative.content,
-            risk_score=representative.risk_score,
-            download_count=download_count,
-            rating=representative.rating,
-            created_at=representative.created_at,
-            updated_at=representative.updated_at,
-            last_indexed_at=representative.last_indexed_at,
-            embedding=representative.embedding,
-        )
-
     async def create(self, skill_data: dict[str, Any]) -> Skill:
         skill = Skill(**skill_data)
         self.session.add(skill)
@@ -356,9 +325,9 @@ class SkillRepository:
     async def store_skills_and_versions(
         self,
         skill_repo_id: uuid.UUID,
-        latest_skills: list[SkillVersion],
+        latest_skills: list[Skill],
         tagged_skills: list[SkillVersion],
-    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+    ) -> tuple[list[Skill], list[SkillVersion]]:
         existing_result = await self.session.execute(
             select(Skill)
             .where(Skill.skill_repo_id == skill_repo_id)
@@ -390,7 +359,7 @@ class SkillRepository:
         for skill_id in scanned_ids - existing_ids:
             skill = scanned_skills[skill_id]
             skill.skill_repo_id = skill_repo_id
-            self.session.add(self._build_summary_skill(skill))
+            self.session.add(skill)
 
         for skill_id in scanned_ids & existing_ids:
             scanned_skill = scanned_skills[skill_id]
@@ -422,7 +391,7 @@ class SkillRepository:
 
     def _build_summary_update_values(
         self,
-        representative: SkillVersion,
+        representative: Skill | SkillVersion,
         *,
         download_count: int,
     ) -> dict[str, Any]:

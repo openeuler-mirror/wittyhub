@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAppStore } from '@/stores/app'
-import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem } from '@opensig/opendesign'
+import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading } from '@opensig/opendesign'
 import FilterSidebar from '@/components/FilterSidebar.vue'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillListItem from '@/components/SkillListItem.vue'
@@ -180,8 +180,8 @@ function onPaginationChange(
                 <OTabPane value="latest" label="最新" />
               </OTab>
 
+              <div class="sort-dropdown-wrapper" v-if="skillStore.filter.sortBy !== 'latest'">
               <ODropdown
-                v-if="skillStore.filter.sortBy !== 'latest'"
                 trigger="click"
                 option-width-mode="min-width"
                 option-wrap-class="sort-period-dropdown"
@@ -203,9 +203,10 @@ function onPaginationChange(
                   />
                 </template>
               </ODropdown>
+              </div>
 
-              <!-- 搜索结果提示 -->
-              <div v-if="isSearchPage && searchQuery" class="text-sm text-[var(--o-color-text3)]">
+              <!-- 搜索结果提示：数据加载完成后再显示 -->
+              <div v-if="isSearchPage && searchQuery && !skillStore.loading" class="text-sm text-[var(--o-color-text3)]">
                 为您找到 <span class="text-[var(--o-color-info1)] font-semibold">{{ skillStore.total }}</span> 个与 "{{ searchQuery }}" 匹配的搜索结果
               </div>
             </div>
@@ -230,26 +231,9 @@ function onPaginationChange(
               </OTab>
           </div>
 
-          <!-- 加载态：首次加载时显示骨架屏，刷新数据时保留旧内容 -->
-          <div v-if="skillStore.loading && !skillStore.hasLoadedOnce" class="space-y-4">
-            <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              <div v-for="i in 6" :key="i" class="bg-white rounded-lg border border-[var(--o-color-control4)] p-3">
-                <div class="h-5 bg-[var(--o-color-control6)] rounded w-3/4 mb-3 animate-pulse"></div>
-                <div class="h-3 bg-[var(--o-color-control6)] rounded w-1/2 mb-3 animate-pulse"></div>
-                <div class="h-10 bg-[var(--o-color-control6)] rounded mb-3 animate-pulse"></div>
-                <div class="flex gap-1 mb-3">
-                  <div class="h-5 w-12 bg-[var(--o-color-control6)] rounded animate-pulse"></div>
-                  <div class="h-5 w-12 bg-[var(--o-color-control6)] rounded animate-pulse"></div>
-                </div>
-                <div class="h-4 bg-[var(--o-color-control6)] rounded w-full animate-pulse"></div>
-              </div>
-            </div>
-            <div v-else class="space-y-2">
-              <div v-for="i in 10" :key="i" class="bg-white rounded-lg border border-[var(--o-color-control4)] p-3">
-                <div class="h-4 bg-[var(--o-color-control6)] rounded w-1/3 mb-2 animate-pulse"></div>
-                <div class="h-3 bg-[var(--o-color-control6)] rounded w-2/3 animate-pulse"></div>
-              </div>
-            </div>
+          <!-- 加载态 -->
+          <div v-if="skillStore.loading" class="loading-container">
+            <OLoading v-model:visible="skillStore.loading" size="medium" />
           </div>
 
           <!-- 空态 -->
@@ -259,13 +243,13 @@ function onPaginationChange(
           </div>
 
           <!-- Skill 列表 -->
-          <template v-else>
+          <template v-else-if="!skillStore.loading">
             <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               <SkillCard v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
             </div>
             <div v-else class="border border-gray-200 rounded-lg dark:border-gray-700 overflow-hidden">
               <!-- 列表视图表头 -->
-              <div class="flex items-center gap-4 px-4 py-2 bg-white dark:bg-gray-800 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px; border-bottom: 1px solid #002FA7;">
+              <div class="flex items-center gap-8 px-6 py-4 bg-white dark:bg-gray-800 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px; border-bottom: 1px solid #002FA7;">
                 <div class="flex-1 min-w-0 max-w-[560px]">名称</div>
                 <div class="hidden md:block w-[100px]">分类</div>
                 <div class="hidden sm:block w-[100px]">风险等级</div>
@@ -276,8 +260,8 @@ function onPaginationChange(
             </div>
           </template>
 
-          <!-- 分页（独立于条件渲染，避免切换时 DOM 重建闪烁） -->
-          <div v-if="skillStore.total > 0" class="flex items-center justify-between mt-8">
+          <!-- 分页 -->
+          <div v-if="skillStore.total > 0 && !skillStore.loading" class="flex items-center justify-between mt-8">
               <div></div>
               <OPagination
                 v-model:page="skillStore.filter.page"
@@ -294,7 +278,7 @@ function onPaginationChange(
       <!-- 提交新Skill区 -->
       <div class="mt-16 text-center">
         <h2 class="submit-title">提交新Skill</h2>
-        <p class="text-[var(--o-color-info3)]">参与社区贡献，与开发者共建SkillHub</p>
+        <p class="text-[var(--o-color-info3)] text-base leading-6">参与社区贡献，与开发者共建SkillHub</p>
       </div>
 
       <div class="mt-8 overflow-hidden relative submit-wrapper" style="border-radius: var(--o-radius-s);">
@@ -302,7 +286,7 @@ function onPaginationChange(
         <div class="relative p-8 submit-card">
           <h3 class="text-lg font-semibold text-[var(--o-color-info1)] mb-4">在仓库中提交PR</h3>
           <p class="submit-desc">
-            Fork <a href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[var(--o-color-link1)] hover:text-[var(--o-color-link1-hover)]"><code class="px-1.5 py-0.5 rounded bg-transparent" style="font-family: inherit">openeuler/wittyhub</code></a> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
+            Fork <a href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[var(--o-color-link1)] hover:text-[var(--o-color-link1-hover)]"><code class="px-1.5 py-0.5 rounded bg-transparent text-[var(--o-color-link1)] hover:font-semibold" style="font-family: inherit">openeuler/wittyhub</code></a> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
           </p>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-8 submit-methods-grid">
@@ -342,6 +326,14 @@ function onPaginationChange(
   max-width: 1488px;
   margin: 0 auto;
   padding: 0 24px;
+}
+
+/* 加载容器 */
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
 }
 
 /* 搜索图标 */
@@ -714,6 +706,10 @@ function onPaginationChange(
   height: 32px !important;
 }
 
+.sort-dropdown-wrapper {
+  margin-left: 14px;
+}
+
 .sort-period-btn {
   display: inline-flex;
   align-items: center;
@@ -724,22 +720,34 @@ function onPaginationChange(
   min-width: 92px;
   max-width: 92px;
   box-sizing: border-box;
-  margin-left: 14px;
   padding: 0 4px;
   border: none;
   background: none;
-  color: var(--o-color-info1);
+  color: #000000;
   font-family: HarmonyHeiTi;
-  font-size: var(--o-font_size-tip1);
-  line-height: var(--o-line_height-tip1);
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: right;
   cursor: pointer;
   border-radius: var(--o-radius-s);
   white-space: nowrap;
   width: auto;
 
   &:hover {
-    background: var(--o-color-control2-light);
+    color: #002FA7;
   }
+}
+
+[data-o-theme="e.dark"] .sort-period-btn:hover,
+.dark .sort-period-btn:hover {
+  color: var(--o-color-primary1);
+}
+
+[data-o-theme="e.dark"] .sort-period-btn,
+.dark .sort-period-btn {
+  color: var(--o-color-info1);
 }
 
 /* 分页跳转输入框 */
@@ -781,8 +789,9 @@ function onPaginationChange(
 <style lang="scss">
 /* Teleport 到 body 的下拉面板全局样式 */
 .sort-period-dropdown {
-  width: 136px !important;
-  transform: translateX(-8px);
+  width: 116px !important;
+  min-width: 116px;
+  transform: translateX(-12px);
 }
 
 [data-o-theme="e.dark"] .o-pagination-select.o-select,

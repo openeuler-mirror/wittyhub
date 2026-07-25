@@ -4,31 +4,30 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { Skill, SkillVersion } from '@/api/types'
 import { marked } from 'marked'
+import { createHighlighter, type Highlighter } from 'shiki'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
-import { OSelect, OOption, OTab, OTabPane, OBreadcrumb, OBreadcrumbItem } from '@opensig/opendesign'
+import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
+import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading } from '@opensig/opendesign'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 
 const categoryNames: Record<string, string> = {
-  Frontend: '前端',
-  Networking: '网络',
-  Database: '数据库',
-  AI: 'AI',
-  Mobile: '移动端',
-  DevOps: 'DevOps',
-  Backend: '后端',
-  Data: '数据',
-  Development: '开发工具',
-  Design: '设计',
-  Cloud: '云服务',
-  Security: '安全'
+  'Research and Design': '研究设计',
+  'Development and Build': '开发构建',
+  'Engineering and Compilation': '工程编译',
+  'Quality and Validation': '质量验证',
+  'Release and Deployment': '发布部署',
+  'Monitoring and Operations': '监控运维',
+  'Performance Optimization': '性能优化',
+  'Security Hardening': '安全加固',
+  others: '其他'
 }
 
 const skill = ref<Skill | null>(null)
@@ -38,6 +37,20 @@ const error = ref('')
 const activeTab = ref<'versions' | 'usage'>('usage')
 const downloading = ref(false)
 const toastVisible = ref(false)
+const copiedVersion = ref(false)
+const cliCopied = ref(false)
+
+// ===== Shiki 代码高亮 =====
+let highlighter: Highlighter | null = null
+const highlighterReady = ref(false)
+
+async function initHighlighter() {
+  highlighter = await createHighlighter({
+    themes: ['github-light', 'github-dark'],
+    langs: ['bash', 'shell', 'javascript', 'typescript', 'python', 'json', 'yaml', 'markdown', 'html', 'css', 'vue', 'sql', 'go', 'java', 'rust', 'xml', 'diff']
+  })
+  highlighterReady.value = true
+}
 
 function showCopyToast() {
   toastVisible.value = true
@@ -55,20 +68,48 @@ function stripFrontmatter(content: string): string {
 
 const renderedContent = computed(() => {
   if (!skill.value?.content) return ''
+  // 触发响应式：highlighterReady 变化时重新计算
+  const ready = highlighterReady.value
+
   const renderer = new marked.Renderer()
   renderer.code = (code: string, lang: string | undefined) => {
-    const langClass = lang ? ` class="language-${lang}"` : ''
-    const escaped = code
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
+    let highlighted: string
+    if (ready && highlighter && lang) {
+      try {
+        highlighted = highlighter.codeToHtml(code, {
+          lang,
+          themes: { light: 'github-light', dark: 'github-dark' }
+        })
+      } catch {
+        highlighted = `<pre><code>${escapeHtml(code)}</code></pre>`
+      }
+    } else {
+      highlighted = `<pre><code>${escapeHtml(code)}</code></pre>`
+    }
     return `<div class="code-block-wrap">
   <button class="code-copy-btn" data-code="${code.replace(/"/g, '&quot;')}" aria-label="复制代码">${copySvg}</button>
-  <pre><code${langClass}>${escaped}</code></pre>
+  ${highlighted}
 </div>\n`
+  }
+  renderer.heading = (text: string, level: number) => {
+    const tag = `h${level}`
+    if (level === 1) {
+      return `<${tag}>${text}</${tag}><div class="heading-divider heading-divider--h1"></div>\n`
+    }
+    if (level === 2) {
+      return `<${tag}>${text}</${tag}><div class="heading-divider heading-divider--h2"></div>\n`
+    }
+    return `<${tag}>${text}</${tag}>\n`
   }
   return marked(stripFrontmatter(skill.value.content), { renderer })
 })
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
 
 async function copyMarkdownCode(e: MouseEvent) {
   const btn = (e.target as HTMLElement).closest('.code-copy-btn') as HTMLElement
@@ -135,7 +176,8 @@ async function copyCliCommand() {
       document.execCommand('copy')
       document.body.removeChild(textarea)
     }
-    showCopyToast()
+    cliCopied.value = true
+    setTimeout(() => { cliCopied.value = false }, 2000)
   } catch (e) {
     console.error('复制失败:', e)
   }
@@ -156,7 +198,8 @@ function copyVersionCmd(skillId: string) {
       document.execCommand('copy')
       document.body.removeChild(textarea)
     }
-    showCopyToast()
+    copiedVersion.value = true
+    setTimeout(() => { copiedVersion.value = false }, 2000)
   } catch (e) {
     console.error('复制失败:', e)
   }
@@ -190,6 +233,8 @@ onMounted(async () => {
     return
   }
   loading.value = true
+  // 并行初始化 Shiki 高亮器和加载数据
+  initHighlighter()
   try {
     const [skillRes, versionsRes] = await Promise.all([
       api.getSkill(decodeURIComponent(skillId)),
@@ -231,7 +276,6 @@ onMounted(async () => {
               --breadcrumb-text-size: 14px;
               --breadcrumb-text-height: 22px;
               --breadcrumb-separator-size: 24px;
-              --breadcrumb-color: #00000099;
               --breadcrumb-gap: 4px;
             "
           >
@@ -242,11 +286,8 @@ onMounted(async () => {
         </div>
 
         <!-- 加载态 -->
-        <div v-if="loading" class="loading-section">
-          <div class="skeleton h-8 w-1/2 mb-4"></div>
-          <div class="skeleton h-4 w-1/3 mb-6"></div>
-          <div class="skeleton h-24 w-full mb-8"></div>
-          <div class="skeleton h-48 w-full"></div>
+        <div v-if="loading" class="info-card-hero loading-card">
+          <OLoading v-model:visible="loading" size="medium" />
         </div>
 
         <!-- 错误态 -->
@@ -300,19 +341,25 @@ onMounted(async () => {
             <div class="version-toolbar">
               <div class="version-card">
                 <span class="version-card-label">版本</span>
-                <OSelect
-                  v-model="selectedVersion"
-                  size="medium"
-                  option-width-mode="width"
-                  no-responsive
+                <ODropdown
+                  trigger="click"
+                  option-width-mode="min-width"
+                  option-wrap-class="version-dropdown"
                 >
-                  <OOption
-                    v-for="v in versions"
-                    :key="v.version"
-                    :label="v.version"
-                    :value="v.version"
-                  />
-                </OSelect>
+                  <button class="version-btn">
+                    {{ selectedVersion || '选择版本' }}
+                    <span class="version-btn-icon" v-html="chevronDownSvg"></span>
+                  </button>
+                  <template #dropdown>
+                    <ODropdownItem
+                      v-for="v in versions"
+                      :key="v.version"
+                      :label="v.version"
+                      :value="v.version"
+                      @click="selectedVersion = v.version"
+                    />
+                  </template>
+                </ODropdown>
               </div>
             </div>
           </div>
@@ -453,28 +500,38 @@ onMounted(async () => {
   margin-top: 40px;
   margin-bottom: 40px;
 
+  --breadcrumb-color: #00000099;
+
   :deep(.o-breadcrumb-item-label) {
     font-family: HarmonyHeiTi;
     font-weight: var(--o-font_weight-regular);
     letter-spacing: 0px;
     text-align: left;
+    color: var(--breadcrumb-color);
+    transition: color 0.2s;
+    cursor: pointer;
+
+    @include hover {
+      color: var(--o-color-primary1);
+    }
+  }
+
+  :deep(.o-icon-chevron-right) {
+    color: var(--breadcrumb-color);
   }
 }
 
+.dark .breadcrumb-wrap,
+[data-o-theme="e.dark"] .breadcrumb-wrap {
+  --breadcrumb-color: rgba(255, 255, 255, 0.6);
+}
+
 /* ===== 加载 & 错误 ===== */
-.loading-section {
-  padding: 40px 0;
-}
-
-.skeleton {
-  background: var(--o-color-fill3);
-  border-radius: 8px;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
+.loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
 }
 
 .error-section {
@@ -518,7 +575,7 @@ onMounted(async () => {
     letter-spacing: 0px;
     text-align: left;
     color: var(--o-color-info3);
-    margin-bottom: 16px;
+    margin-bottom: 24px;
   }
 
   .tag-category {
@@ -548,7 +605,7 @@ onMounted(async () => {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 0;
   }
 }
 
@@ -572,8 +629,6 @@ onMounted(async () => {
 }
 
 .sidebar-sticky {
-  position: sticky;
-  top: 96px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -607,19 +662,56 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-/* OSelect：与筛选栏统一 */
-:deep(.o-select) {
-  --select-height: 32px;
-  --select-radius: 4px;
-  --select-text-size: 14px;
-  width: 120px;
+/* 版本按钮 */
+.version-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  min-width: 92px;
+  padding: 0 8px;
+  border: 1px solid #0000003F;
+  background: #FFFFFF;
+  color: #000000;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: #002FA7;
+  }
 }
 
-:deep(.o-select-input) {
-  font-size: var(--o-font_size-text1);
-  font-weight: var(--o-font_weight-regular);
-  line-height: var(--o-line_height-text1);
+.dark .version-btn:hover,
+[data-o-theme="e.dark"] .version-btn:hover {
+  border-color: var(--o-color-primary1);
+}
+
+.dark .version-btn,
+[data-o-theme="e.dark"] .version-btn {
+  background: #242427;
+  border-color: rgba(255, 255, 255, 0.15);
   color: var(--o-color-info1);
+}
+
+.version-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  width: 24px;
+  height: 24px;
+
+  :deep(svg) {
+    width: 24px;
+    height: 24px;
+    display: block;
+  }
 }
 
 .action-card {
@@ -766,7 +858,6 @@ onMounted(async () => {
     background: var(--o-color-fill3);
     border: none;
     border-radius: 6px;
-    overflow: hidden;
   }
 
   .cli-command {
@@ -782,9 +873,10 @@ onMounted(async () => {
     word-break: keep-all;
     white-space: nowrap;
     overflow-x: auto;
+    border-radius: 6px;
 
     &::-webkit-scrollbar {
-      height: 6px;
+      height: 4px;
     }
 
     &::-webkit-scrollbar-track {
@@ -1013,20 +1105,48 @@ onMounted(async () => {
 
   :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
     margin-top: 24px;
-    margin-bottom: 12px;
+    margin-bottom: 24px;
     color: var(--o-color-info1);
     font-weight: 600;
   }
 
-  :deep(h1) { font-size: 32px; }
-  :deep(h2) { font-size: 24px; }
+  :deep(h1) {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: var(--o-color-info1);
+    font-family: var(--o-font_family);
+    font-weight: var(--o-font_weight-semibold);
+    font-size: var(--o-font_size-h1);
+    line-height: var(--o-line_height-h1);
+    letter-spacing: 0px;
+    text-align: left;
+  }
+
+  :deep(.heading-divider) {
+    height: 2px;
+    background: #002FA7;
+  }
+
+  :deep(.heading-divider--h1) {
+    margin-bottom: 16px;
+  }
+
+  :deep(.heading-divider--h2) {
+    height: 1px;
+    background: var(--o-color-control4);
+    margin-bottom: 12px;
+  }
+  :deep(h2) {
+    margin-bottom: 8px;
+    font-size: 24px;
+  }
   :deep(h3) { font-size: 20px; }
   :deep(h4) { font-size: 15px; }
   :deep(h5) { font-size: 14px; }
   :deep(h6) { font-size: 13px; }
 
   :deep(p) {
-      margin-bottom: 14px;
+      margin-bottom: 8px;
       color: var(--o-color-info2);
       font-size: 16px;
     }
@@ -1046,7 +1166,7 @@ onMounted(async () => {
   }
 
   :deep(li) {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     font-size: 16px;
   }
 
@@ -1060,14 +1180,21 @@ onMounted(async () => {
   }
 
   :deep(pre) {
-    background: var(--o-color-fill1);
-    border-radius: 8px;
+    background: #F3F3F5;
+    border-radius: 4px;
     padding: 16px;
     overflow-x: auto;
     margin-bottom: 16px;
+    color: #000000;
+    font-family: HarmonyHeiTi;
+    font-weight: regular;
+    font-size: 14px;
+    line-height: 22px;
+    letter-spacing: 0px;
+    text-align: left;
 
     &::-webkit-scrollbar {
-      height: 6px;
+      height: 4px;
     }
 
     &::-webkit-scrollbar-track {
@@ -1082,10 +1209,21 @@ onMounted(async () => {
     code {
       background: none;
       padding: 0;
-      color: var(--o-color-info1);
+      color: inherit;
       font-size: 14px;
     }
     font-size: 14px;
+  }
+
+  /* ===== Shiki 双主题：浅色默认，深色由 --shiki-dark ===== */
+  :deep(.shiki) {
+    background-color: #F3F3F5 !important;
+    border-radius: 4px;
+    color: var(--shiki-light) !important;
+  }
+
+  :deep(.shiki span) {
+    color: var(--shiki-light);
   }
 
   :deep(blockquote) {
@@ -1109,19 +1247,31 @@ onMounted(async () => {
 
     th, td {
       padding: 10px 14px;
-      border: 1px solid var(--o-color-control4);
+      border: none;
       text-align: left;
       font-size: 14px;
     }
 
     th {
-      background: var(--o-color-fill1);
+      border-radius: 4px 4px 0px 0px;
+      background: #FFFFFF;
+      border: none;
+      border-bottom: 1px solid #002FA7;
       font-weight: 600;
       color: var(--o-color-info2);
     }
 
-    td {
-      color: var(--o-color-info2);
+    tbody tr {
+      background: #FFFFFF02;
+
+      &:nth-child(even) {
+        background: #EBF1FA66;
+      }
+
+      td {
+        border: none;
+        color: var(--o-color-info2);
+      }
     }
   }
 
@@ -1177,6 +1327,31 @@ onMounted(async () => {
       width: 12px;
       height: 12px;
     }
+  }
+}
+
+/* ===== Shiki 深色模式覆盖 ===== */
+[data-o-theme='e.dark'] .markdown-body {
+  :deep(.shiki),
+  :deep(.shiki span) {
+    background-color: var(--o-color-control2-light) !important;
+    color: var(--shiki-dark) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+
+  :deep(table th) {
+    background: var(--o-color-control2-light);
+    border-bottom-color: var(--o-color-primary1);
+  }
+
+  :deep(table tbody tr) {
+    background: transparent;
+  }
+
+  :deep(table tbody tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.04);
   }
 }
 
@@ -1315,5 +1490,26 @@ onMounted(async () => {
 .toast-leave-to {
   opacity: 0;
   transform: translateX(-50%) translateY(-12px);
+}
+</style>
+
+<style lang="scss">
+/* ODropdown teleport 到 body 的全局样式 */
+.version-dropdown {
+  min-width: 92px !important;
+
+  .o-dropdown-item {
+    color: #000000;
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    font-size: 16px;
+    line-height: 24px;
+    letter-spacing: 0px;
+    text-align: left;
+  }
+}
+
+[data-o-theme='e.dark'] .version-dropdown .o-dropdown-item {
+  color: var(--o-color-info1);
 }
 </style>

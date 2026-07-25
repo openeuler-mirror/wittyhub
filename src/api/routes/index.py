@@ -23,6 +23,7 @@ async def search(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     tag_list = tags.split(",") if tags else None
+    category_list = category.split(",") if category else None
     embedding = None
 
     settings = get_settings()
@@ -44,7 +45,7 @@ async def search(
         query=q,
         limit=limit,
         offset=skip,
-        category=category,
+        category=category_list,
         platform=platform,
         tags=tag_list,
         embedding=embedding,

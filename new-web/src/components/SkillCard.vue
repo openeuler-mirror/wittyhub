@@ -9,18 +9,15 @@ const props = defineProps<{
 }>()
 
 const categoryNames: Record<string, string> = {
-  Frontend: '前端',
-  Networking: '网络',
-  Database: '数据库',
-  AI: 'AI',
-  Mobile: '移动端',
-  DevOps: 'DevOps',
-  Backend: '后端',
-  Data: '数据',
-  Development: '开发工具',
-  Design: '设计',
-  Cloud: '云服务',
-  Security: '安全'
+  'Research and Design': '研究设计',
+  'Development and Build': '开发构建',
+  'Engineering and Compilation': '工程编译',
+  'Quality and Validation': '质量验证',
+  'Release and Deployment': '发布部署',
+  'Monitoring and Operations': '监控运维',
+  'Performance Optimization': '性能优化',
+  'Security Hardening': '安全加固',
+  others: '其他'
 }
 
 function getSkillRoutePath(skillId: string): string {
@@ -49,7 +46,7 @@ function truncate(text: string | null, length: number): string {
     class="card card-hover flex flex-col p-4 group border-0"
   >
     <div class="mb-3">
-      <h3 class="skill-card-title">{{ skill.name }}<span :class="['tag', securityLevel.class]">{{ securityLevel.label }}</span></h3>
+      <h3 class="skill-card-title"><span class="title-text">{{ skill.name }}</span><span :class="['tag', securityLevel.class]">{{ securityLevel.label }}</span></h3>
     </div>
 
     <p class="skill-card-desc">{{ truncate(skill.description, 120) }}</p>
@@ -99,6 +96,7 @@ function truncate(text: string | null, length: number): string {
   color: #000000;
   text-align: left;
   margin: 0;
+  display: block;
 }
 
 [data-o-theme="e.dark"] .skill-card-title,
@@ -106,15 +104,24 @@ function truncate(text: string | null, length: number): string {
   color: var(--o-color-info1);
 }
 
+[data-o-theme="e.dark"] .skill-card-desc,
+.dark .skill-card-desc {
+  color: var(--o-color-info3);
+}
+
+.skill-card-title .title-text {
+  margin-right: 12px;
+}
+
 .skill-card-title .tag {
-  margin-left: 12px;
   height: 24px;
   padding-top: 3px;
   padding-bottom: 3px;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  vertical-align: 3px;
+  vertical-align: baseline;
+  transform: translateY(-3px);
 }
 
 .mb-3 {
@@ -140,10 +147,11 @@ function truncate(text: string | null, length: number): string {
 .skill-card-desc {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-text1);
-  line-height: var(--o-r-line_height-text1);
-  color: var(--o-color-text3);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
   text-align: left;
+  color: #00000099;
   margin-bottom: 16px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -154,7 +162,7 @@ function truncate(text: string | null, length: number): string {
 .skill-card-tag {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-tip1);
+  font-size: 12px;
   line-height: var(--o-r-line_height-tip1);
   color: var(--o-color-info1);
   border-radius: 4px;
@@ -167,7 +175,7 @@ function truncate(text: string | null, length: number): string {
 .tag-gray {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-tip1);
+  font-size: 12px;
   line-height: var(--o-r-line_height-tip1);
   color: var(--o-color-info1);
   background: var(--o-color-white);

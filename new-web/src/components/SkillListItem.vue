@@ -8,18 +8,15 @@ const props = defineProps<{
 }>()
 
 const categoryNames: Record<string, string> = {
-  Frontend: '前端',
-  Networking: '网络',
-  Database: '数据库',
-  AI: 'AI',
-  Mobile: '移动端',
-  DevOps: 'DevOps',
-  Backend: '后端',
-  Data: '数据',
-  Development: '开发工具',
-  Design: '设计',
-  Cloud: '云服务',
-  Security: '安全'
+  'Research and Design': '研究设计',
+  'Development and Build': '开发构建',
+  'Engineering and Compilation': '工程编译',
+  'Quality and Validation': '质量验证',
+  'Release and Deployment': '发布部署',
+  'Monitoring and Operations': '监控运维',
+  'Performance Optimization': '性能优化',
+  'Security Hardening': '安全加固',
+  others: '其他'
 }
 
 function getSkillRoutePath(skillId: string): string {
@@ -45,7 +42,7 @@ function truncate(text: string | null, length: number): string {
 <template>
   <RouterLink
     :to="getSkillRoutePath(skill.skill_id)"
-    class="flex items-center gap-4 px-4 py-3 border-b border-gray-200 bg-white hover:bg-gray-50 transition-colors last:border-b-0 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 group"
+    class="flex items-center gap-8 px-6 py-4 border-b border-gray-200 bg-white hover:bg-gray-50 transition-colors last:border-b-0 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 group"
   >
     <div class="flex-1 min-w-0 max-w-[560px]">
       <div class="flex items-center mb-1">
@@ -117,12 +114,12 @@ function truncate(text: string | null, length: number): string {
 
 .skill-list-name {
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
+  font-weight: 600;
   font-size: 16px;
   line-height: 24px;
   letter-spacing: 0px;
   text-align: left;
-  color: var(--o-color-info1);
+  color: #000000;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -131,13 +128,12 @@ function truncate(text: string | null, length: number): string {
 
 .group:hover .skill-list-name {
   color: #002FA7;
-  font-weight: var(--o-font_weight-semibold);
 }
 
 .skill-list-desc {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-text1);
+  font-size: 14px;
   line-height: var(--o-r-line_height-text1);
   letter-spacing: 0px;
   text-align: left;

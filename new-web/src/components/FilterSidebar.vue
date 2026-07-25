@@ -26,26 +26,35 @@ const providers = computed(() => {
 
 const allCategories = computed(() => skillStore.categories)
 
-const securityLevels = computed(() => (skillStore.stats?.security_levels ?? []).filter(l => l.name !== '未检测'))
+const ALL_SECURITY_LEVELS = ['安全', '低风险', '中风险', '高风险']
+
+const securityLevels = computed(() => {
+  const levelCounts: Record<string, number> = {}
+  for (const l of skillStore.stats?.security_levels ?? []) {
+    if (l.name !== '未检测') {
+      levelCounts[l.name] = l.count
+    }
+  }
+  return ALL_SECURITY_LEVELS.map(name => ({
+    name,
+    count: levelCounts[name] ?? 0
+  }))
+})
 
 function toggleArrayItem(arr: string[], item: string): string[] {
   return arr.includes(item) ? arr.filter(i => i !== item) : [...arr, item]
 }
 
 const categoryNames: Record<string, string> = {
-  Frontend: '前端',
-  Networking: '网络',
-  Database: '数据库',
-  AI: 'AI',
-  Mobile: '移动端',
-  DevOps: 'DevOps',
-  Backend: '后端',
-  Data: '数据',
-  Development: '开发工具',
-  Design: '设计',
-  Cloud: '云服务',
-  Security: '安全',
-  Others: '其他'
+  'Research and Design': '研究设计',
+  'Development and Build': '开发构建',
+  'Engineering and Compilation': '工程编译',
+  'Quality and Validation': '质量验证',
+  'Release and Deployment': '发布部署',
+  'Monitoring and Operations': '监控运维',
+  'Performance Optimization': '性能优化',
+  'Security Hardening': '安全加固',
+  others: '其他'
 }
 
 function displayCategory(name: string): string {

@@ -15,6 +15,8 @@ security:
   # Skillspector (Jenkins-based scanner) — sensitive fields via env vars
   enable_audit: true
   skillspector_jenkins_url: ""  # 通过环境变量 SKILLSPECTOR_JENKINS_URL 配置
+  skillspector_jenkins_user: ""
+  skillspector_jenkins_token: ""
 
 database:
   host: "localhost"

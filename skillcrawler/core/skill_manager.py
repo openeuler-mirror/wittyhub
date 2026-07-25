@@ -250,14 +250,14 @@ class SkillManager:
         repo_name: str,
     ) -> SkillRepoModel:
         author = self._resolve_skill_author(repo.platform, repo_name)
-        latest_skills, tagged_skills = await self._scan_local_repository(
+        latest_skills, tagged_skills = await self._discover_skills(
             repo,
             clone_dir=clone_dir,
             author=author,
         )
         unique_skill_count = self._count_unique_skills(latest_skills)
         repository_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
-        await self.skill_repository.sync_for_skill_repo(
+        await self.skill_repository.store_skills_and_versions(
             repo.id, latest_skills, tagged_skills,
         )
         return await self.skill_repo_repository.update_skill_repository(
@@ -299,7 +299,7 @@ class SkillManager:
         repo = await self.skill_repo_repository.update_skill_repository(
             repo.id, local_path=str(clone_dir),
         )
-        return await self._scanner.scan_skill_repository_root(
+        return await self._scanner.start_scan(
             repo=repo,
             repo_root=clone_dir,
             repository_git_metadata=repository_git_metadata,

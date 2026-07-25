@@ -353,7 +353,7 @@ class SkillRepository:
         )
         return {commit_id for commit_id in result.scalars().all() if commit_id}
 
-    async def sync_for_skill_repo(
+    async def store_skills_and_versions(
         self,
         skill_repo_id: uuid.UUID,
         latest_skills: list[SkillVersion],

@@ -44,7 +44,7 @@ class SkillScanner:
         self.skill_repository = skill_repository
         self.category_classifier = category_classifier
 
-    async def scan_skill_repository_root(
+    async def start_scan(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
@@ -62,7 +62,7 @@ class SkillScanner:
         repository_git_metadata = repository_git_metadata or {}
         repository_commit_id = as_optional_str(repository_git_metadata.get('commit_id'))
         repository_latest_tags = as_optional_str_list(repository_git_metadata.get('latest_tags')) or []
-        latest_skills = await self._scan_current_repository_state(
+        latest_skills = await self._scan_latest_skills(
             repo=repo,
             repo_root=repo_root,
             skill_files=skill_files,
@@ -73,7 +73,7 @@ class SkillScanner:
 
         tagged_skills: list[SkillVersion] = []
         if version_snapshots:
-            tagged_skills = await self._scan_skill_repository_versions(
+            tagged_skills = await self._scan_tagged_skills(
                 repo=repo,
                 repo_root=repo_root,
                 skill_files=skill_files,
@@ -85,7 +85,7 @@ class SkillScanner:
 
         return latest_skills, tagged_skills
 
-    async def _scan_current_repository_state(
+    async def _scan_latest_skills(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
@@ -119,7 +119,7 @@ class SkillScanner:
             discovered.append(skill)
         return discovered
 
-    async def _scan_skill_repository_versions(
+    async def _scan_tagged_skills(
         self,
         repo: SkillRepoModel,
         repo_root: Path,

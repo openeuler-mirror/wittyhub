@@ -284,11 +284,6 @@ class SkillManager:
         version_snapshots = GitOperations.build_repository_version_snapshots(
             repository_git_metadata, as_optional_str, as_optional_str_list,
         )
-        tag_snapshots = [
-            snapshot
-            for snapshot in version_snapshots
-            if as_optional_str(snapshot.get('version_source')) == 'tag'
-        ]
 
         if repo.branch is None:
             detected_branch = self._git_ops.get_cloned_repo_branch(clone_dir)
@@ -303,7 +298,7 @@ class SkillManager:
             repo=repo,
             repo_root=clone_dir,
             repository_git_metadata=repository_git_metadata,
-            version_snapshots=tag_snapshots or None,
+            version_snapshots=version_snapshots or None,
             author=author,
         )
 

@@ -365,6 +365,7 @@ class SkillRepository:
             scanned_skill = scanned_skills[skill_id]
             existing_skill = existing_skills[skill_id]
             scanned_skill.skill_repo_id = skill_repo_id
+            scanned_skill.id = existing_skill.id
             if scanned_skill.commit_id == existing_skill.commit_id:
                 continue
             await self.session.execute(

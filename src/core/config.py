@@ -32,9 +32,9 @@ class StorageConfig(BaseSettings):
 
 
 class ModelConfig(BaseSettings):
-    name: str = "deepseek-chat"
+    name: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
-    api_key: str = ""
+    api_key: str = "sk-9767243ba0364f52ab5bb7878ad2d42a"
     timeout: float = 30
 
 

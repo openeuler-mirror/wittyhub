@@ -107,7 +107,7 @@ const menuPanel = () => {
     display: flex;
     align-items: center;
     @include respond-to('>pad_v') {
-      height: 80px;
+      height: 72px;
     }
     @include respond-to('<=pad_v') {
       height: 48px;
@@ -156,9 +156,10 @@ const menuPanel = () => {
 }
 
 .skillhub-title {
-  font-weight: 700;
-  font-size: 18px;
-  line-height: 24px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 20px;
+  line-height: 26px;
   color: var(--o-color-info1);
   text-decoration: none;
   flex-shrink: 0;

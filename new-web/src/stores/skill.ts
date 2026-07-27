@@ -7,6 +7,7 @@ export const useSkillStore = defineStore('skill', () => {
   const skills = ref<Skill[]>([])
   const total = ref(0)
   const loading = ref(false)
+  const hasLoadedOnce = ref(false)
   const stats = ref<Stats | null>(null)
   const categories = ref<Category[]>([])
 
@@ -19,7 +20,7 @@ export const useSkillStore = defineStore('skill', () => {
     sortPeriod: 'all',
     viewMode: 'card',
     page: 1,
-    pageSize: 20
+    pageSize: 12
   })
 
   const totalPages = computed(() => Math.ceil(total.value / filter.value.pageSize))
@@ -69,6 +70,7 @@ export const useSkillStore = defineStore('skill', () => {
     } catch (e) {
       console.error('Failed to fetch skills:', e)
     } finally {
+      hasLoadedOnce.value = true
       loading.value = false
     }
   }
@@ -108,7 +110,7 @@ export const useSkillStore = defineStore('skill', () => {
       sortPeriod: 'all',
       viewMode: 'card',
       page: 1,
-      pageSize: 20
+      pageSize: 12
     }
   }
 
@@ -116,6 +118,7 @@ export const useSkillStore = defineStore('skill', () => {
     skills,
     total,
     loading,
+    hasLoadedOnce,
     stats,
     categories,
     filter,

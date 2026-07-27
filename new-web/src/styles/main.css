@@ -25,7 +25,7 @@ html, body {
 }
 
 body {
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: HarmonyHeiTi, Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-text);
@@ -74,11 +74,25 @@ body {
 }
 
 .card {
-  @apply bg-white rounded-lg border border-gray-200 transition-all dark:bg-gray-800 dark:border-gray-700;
+  @apply bg-white rounded-lg border border-gray-200 transition-all dark:border-gray-700;
+}
+
+.dark .card,
+[data-o-theme="e.dark"] .card {
+  background: #242427;
 }
 
 .card-hover {
-  @apply hover:border-primary-300 hover:shadow-md dark:hover:border-primary-600;
+  @apply transition-shadow;
+}
+
+.card-hover:hover {
+  box-shadow: var(--o-shadow-2);
+}
+
+[data-o-theme="e.dark"] .card-hover:hover,
+.dark .card-hover:hover {
+  box-shadow: 0 2px 24px rgba(255, 255, 255, 0.12);
 }
 
 .tag {
@@ -86,21 +100,45 @@ body {
 }
 
 .tag-blue {
-  @apply bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400;
+  border-radius: 4px;
+  background: #497AF8;
+  color: #FFFFFF;
 }
 
 .tag-green {
-  @apply bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400;
+  border-radius: 4px;
+  background: #0BB151;
+  color: #FFFFFF;
 }
 
 .tag-orange {
-  @apply bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400;
+  border-radius: 4px;
+  background: #FA7305;
+  color: #FFFFFF;
 }
 
 .tag-red {
-  @apply bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400;
+  border-radius: 4px;
+  background: #E60012;
+  color: #FFFFFF;
 }
 
 .tag-gray {
   @apply bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300;
+}
+
+.tag-category {
+  border-radius: 4px;
+  background: var(--o-color-control2-light);
+  color: var(--o-color-info1);
+}
+
+/* 暗色模式：hero 区域搜索框背景透明，与背景图融合 */
+[data-o-theme="e.dark"] .hero-section .o_box-main {
+  background: transparent !important;
+}
+
+[data-o-theme="e.dark"] .tag-category,
+.dark .tag-category {
+  background: #2B2B2F;
 }

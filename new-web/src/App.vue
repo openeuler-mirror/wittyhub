@@ -13,9 +13,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-[#F5F6F8] dark:bg-[#111421]">
+  <div class="min-h-screen flex flex-col bg-[#F5F6F8] dark:bg-[#1A1A1C]">
     <AppHeader />
-    <main class="flex-1 pt-20 md:pt-20 pt-12">
+    <main class="flex-1" style="padding-top: 72px;">
       <RouterView />
     </main>
     <AppFooter />

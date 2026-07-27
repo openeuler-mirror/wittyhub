@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAppStore } from '@/stores/app'
-import { OSelect, OOption } from '@opensig/opendesign'
+import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading } from '@opensig/opendesign'
 import FilterSidebar from '@/components/FilterSidebar.vue'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillListItem from '@/components/SkillListItem.vue'
@@ -15,6 +15,7 @@ import cardBgLight from '@/assets/bg/card-bg-light.png'
 import cardBgDark from '@/assets/bg/card-bg-dark.png'
 import submitSkillSvg from '@/assets/icons/submit-skill.svg?raw'
 import submitLinkSvg from '@/assets/icons/submit-link.svg?raw'
+import emptyStateSvg from '@/assets/icons/empty-state.svg?raw'
 
 const skillStore = useSkillStore()
 const appStore = useAppStore()
@@ -28,9 +29,12 @@ const sortOptions = [
   { label: '近30天', value: 'month' }
 ]
 
-const pageSizeOptions = [20, 50, 100]
+const pageSizeOptions = [12, 24, 48, 96]
 
-const totalPages = computed(() => skillStore.totalPages)
+const currentSortLabel = computed(() => {
+  const opt = sortOptions.find(o => o.value === skillStore.filter.sortPeriod)
+  return opt ? opt.label : '全部时间'
+})
 
 const isSearchPage = computed(() => route.path === '/skills/search')
 const searchQuery = computed(() => route.query.q as string || '')
@@ -74,6 +78,13 @@ function handleSearch() {
   }
 }
 
+function handleClear() {
+  searchInput.value = ''
+  router.push('/')
+  skillStore.setFilter('keyword', '')
+  skillStore.fetchSkills()
+}
+
 function setSortBy(sort: 'hot' | 'latest' | 'downloads') {
   skillStore.setFilter('sortBy', sort)
   skillStore.fetchSkills()
@@ -88,91 +99,58 @@ function setViewMode(mode: 'card' | 'list') {
   skillStore.setFilter('viewMode', mode)
 }
 
-function changePage(page: number) {
-  if (page < 1 || page > totalPages.value) return
-  skillStore.setFilter('page', page)
-  skillStore.fetchSkills()
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
-
-function changePageSize(size: number) {
-  skillStore.setFilter('pageSize', size)
-  skillStore.setFilter('page', 1)
-  skillStore.fetchSkills()
-}
-
-function getPageNumbers(): (number | string)[] {
-  const pages: (number | string)[] = []
-  const total = totalPages.value
-  const current = skillStore.filter.page
-
-  if (total <= 7) {
-    for (let i = 1; i <= total; i++) pages.push(i)
-    return pages
+function onPaginationChange(
+  newVal: { page: number; pageSize: number },
+  oldVal: { page: number; pageSize: number }
+) {
+  if (newVal.pageSize !== oldVal.pageSize) {
+    skillStore.filter.page = 1
   }
-
-  pages.push(1)
-
-  if (current > 4) pages.push('...')
-
-  const start = Math.max(2, current - 2)
-  const end = Math.min(total - 1, current + 2)
-
-  for (let i = start; i <= end; i++) pages.push(i)
-
-  if (current < total - 3) pages.push('...')
-
-  pages.push(total)
-
-  return pages
+  skillStore.fetchSkills()
+  if (newVal.page !== oldVal.page) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 }
 </script>
 
 <template>
   <div>
     <!-- Hero 区域 -->
-    <section class="relative overflow-hidden" style="height: 319.2px">
+    <section class="hero-section relative overflow-hidden" style="height: 319.2px">
       <!-- 设计稿背景图 -->
       <div class="absolute inset-0 pointer-events-none">
         <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
       </div>
 
       <div class="container-wide relative h-full flex flex-col items-center justify-center text-center">
-        <h1 class="text-4xl font-bold text-[var(--o-color-info1)] mb-3" style="font-family: HarmonyHeiTi">
-          SkillHub
-        </h1>
-        <p class="text-[16px] leading-6 text-[var(--o-color-text3)] mb-2">
-          探索、评价、贡献openEuler技能
-        </p>
-        <p class="text-sm leading-[22px] text-[var(--o-color-text3)] mb-8" style="font-family: HarmonyHeiTi">
-          <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
+        <h1 class="hero-title">SkillHub</h1>
+        <p class="hero-subtitle">探索、评估、贡献openEuler技能</p>
+        <p class="hero-stats">
+          <span class="hero-stats-number">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
           Skills
           <span class="mx-2 text-[var(--o-color-text3)]">|</span>
-          <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.stats?.total_categories || '15' }}</span>
+          <span class="hero-stats-number">{{ skillStore.stats?.total_categories || '15' }}</span>
           领域分类
         </p>
 
         <!-- 搜索框 -->
         <div style="max-width:620px; width:100%; margin:0 auto">
-          <div class="relative">
-            <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--o-color-text3)]" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
-              <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <input
-              v-model="searchInput"
-              type="text"
-              placeholder="搜索 Skill"
-              class="w-full h-12 pl-12 pr-24 text-sm bg-white border border-[var(--o-color-control4)] rounded-lg shadow-sm focus:outline-none focus:border-[var(--o-color-primary1)] focus:ring-1 focus:ring-[var(--o-color-primary1)]/20 text-[var(--o-color-info1)] placeholder:text-[var(--o-color-text3)] dark:bg-gray-800 dark:border-gray-700"
-              @keyup.enter="handleSearch"
-            />
-            <button
-              @click="handleSearch"
-              class="absolute right-1.5 top-1/2 -translate-y-1/2 h-9 px-5 bg-[var(--o-color-primary1)] text-white text-sm rounded-md hover:bg-[var(--o-color-primary1)]/90 transition-colors"
-            >
-              搜索
-            </button>
-          </div>
+          <OInput
+            v-model="searchInput"
+            placeholder="搜索 Skill"
+            size="large"
+            round="8px"
+            clearable
+            @press-enter="handleSearch"
+            @clear="handleClear"
+            style="width: 100%"
+          >
+            <template #prefix>
+              <svg class="search-icon" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17.549 16.523l0.087 0.074 2.76 2.754c0.274 0.273 0.274 0.716 0.001 0.99-0.246 0.246-0.629 0.271-0.903 0.075l-0.087-0.074-2.76-2.754c-0.274-0.273-0.274-0.716-0.001-0.99 0.246-0.246 0.629-0.271 0.903-0.075zM10.821 3.454c4.099 0 7.423 3.323 7.423 7.423s-3.323 7.423-7.423 7.423c-4.099 0-7.423-3.323-7.423-7.423s3.323-7.423 7.423-7.423zM10.821 4.854c-3.326 0-6.023 2.696-6.023 6.023s2.696 6.023 6.023 6.023c3.326 0 6.023-2.696 6.023-6.023s-2.696-6.023-6.023-6.023z" fill="currentColor"></path>
+              </svg>
+            </template>
+          </OInput>
         </div>
       </div>
     </section>
@@ -187,232 +165,150 @@ function getPageNumbers(): (number | string)[] {
 
         <!-- 右侧内容区 -->
         <div class="flex-1 min-w-0">
-          <!-- 搜索结果提示 -->
-          <div v-if="isSearchPage && searchQuery" class="mb-4 text-sm text-[var(--o-color-text3)]">
-            为您找到 <span class="text-[var(--o-color-primary1)] font-medium">{{ skillStore.total }}</span> 个与 "{{ searchQuery }}" 匹配的搜索结果
-          </div>
-
-          <!-- 工具栏 -->
+          <!-- 搜索结果提示 + 工具栏 -->
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-2">
-              <div class="switch-tab">
-                <div
-                  class="switch-tab-slider"
-                  :class="{ 'slider-right': skillStore.filter.sortBy === 'latest' }"
-                />
-                <button
-                  class="switch-handler"
-                  :class="{ active: skillStore.filter.sortBy === 'hot' }"
-                  @click="setSortBy('hot')"
-                >
-                  热门
+              <OTab
+                v-model="skillStore.filter.sortBy"
+                variant="button"
+                round="4px"
+                size="large"
+                header-class="sort-tab"
+                @change="skillStore.fetchSkills()"
+              >
+                <OTabPane value="hot" label="热门" />
+                <OTabPane value="latest" label="最新" />
+              </OTab>
+
+              <div class="sort-dropdown-wrapper" v-if="skillStore.filter.sortBy !== 'latest'">
+              <ODropdown
+                trigger="click"
+                option-width-mode="min-width"
+                option-wrap-class="sort-period-dropdown"
+                style="--dropdown-item-bg-color-hover: var(--o-color-control2-light)"
+              >
+                <button class="sort-period-btn">
+                  {{ currentSortLabel }}
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5.759 8.873a.7.7 0 0 1 .918-.063l.072.063 5.016 5.016a.3.3 0 0 0 .37.043l.054-.043 5.062-5.062a.7.7 0 0 1 1.053.918l-.063.072-5.062 5.062a1.7 1.7 0 0 1-2.296.099l-.108-.099-5.016-5.016a.7.7 0 0 1 0-.99"/>
+                  </svg>
                 </button>
-                <button
-                  class="switch-handler"
-                  :class="{ active: skillStore.filter.sortBy === 'latest' }"
-                  @click="setSortBy('latest')"
-                >
-                  最新
-                </button>
+                <template #dropdown>
+                  <ODropdownItem
+                    v-for="opt in sortOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                    @click="setSortPeriod(opt.value)"
+                  />
+                </template>
+              </ODropdown>
               </div>
 
-              <OSelect
-                v-if="skillStore.filter.sortBy !== 'latest'"
-                size="medium"
-                option-width-mode="width"
-                :model-value="skillStore.filter.sortPeriod"
-                no-responsive
-                @change="(v: any) => setSortPeriod(String(v))"
-              >
-                <OOption
-                  v-for="opt in sortOptions"
-                  :key="opt.value"
-                  :label="opt.label"
-                  :value="opt.value"
-                />
-              </OSelect>
+              <!-- 搜索结果提示：数据加载完成后再显示 -->
+              <div v-if="isSearchPage && searchQuery && !skillStore.loading" class="text-sm text-[var(--o-color-text3)]">
+                为您找到 <span class="text-[var(--o-color-info1)] font-semibold">{{ skillStore.total }}</span> 个与 "{{ searchQuery }}" 匹配的搜索结果
+              </div>
             </div>
 
-            <div class="switch-tab">
-              <div
-                class="switch-tab-slider"
-                :class="{ 'slider-right': skillStore.filter.viewMode === 'list' }"
-              />
-              <button
-                class="switch-handler flex items-center justify-center"
-                :class="{ active: skillStore.filter.viewMode === 'card' }"
-                @click="setViewMode('card')"
-                title="卡片视图"
+            <OTab
+                v-model="skillStore.filter.viewMode"
+                variant="button"
+                round="4px"
+                size="large"
+                header-class="view-tab"
               >
-                <span class="w-5 h-5 flex items-center justify-center" v-html="viewGridSvg"></span>
-              </button>
-              <button
-                class="switch-handler flex items-center justify-center"
-                :class="{ active: skillStore.filter.viewMode === 'list' }"
-                @click="setViewMode('list')"
-                title="列表视图"
-              >
-                <span class="w-5 h-5 flex items-center justify-center" v-html="viewListSvg"></span>
-              </button>
-            </div>
+                <OTabPane value="card">
+                  <template #nav>
+                    <span class="w-5 h-5 flex items-center justify-center" v-html="viewGridSvg" title="卡片视图"></span>
+                  </template>
+                </OTabPane>
+                <OTabPane value="list">
+                  <template #nav>
+                    <span class="w-5 h-5 flex items-center justify-center" v-html="viewListSvg" title="列表视图"></span>
+                  </template>
+                </OTabPane>
+              </OTab>
           </div>
 
           <!-- 加载态 -->
-          <div v-if="skillStore.loading" class="space-y-4">
-            <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              <div v-for="i in 6" :key="i" class="bg-white rounded-lg border border-[var(--o-color-control4)] p-3">
-                <div class="h-5 bg-[var(--o-color-control6)] rounded w-3/4 mb-3 animate-pulse"></div>
-                <div class="h-3 bg-[var(--o-color-control6)] rounded w-1/2 mb-3 animate-pulse"></div>
-                <div class="h-10 bg-[var(--o-color-control6)] rounded mb-3 animate-pulse"></div>
-                <div class="flex gap-1 mb-3">
-                  <div class="h-5 w-12 bg-[var(--o-color-control6)] rounded animate-pulse"></div>
-                  <div class="h-5 w-12 bg-[var(--o-color-control6)] rounded animate-pulse"></div>
-                </div>
-                <div class="h-4 bg-[var(--o-color-control6)] rounded w-full animate-pulse"></div>
-              </div>
-            </div>
-            <div v-else class="space-y-2">
-              <div v-for="i in 10" :key="i" class="bg-white rounded-lg border border-[var(--o-color-control4)] p-3">
-                <div class="h-4 bg-[var(--o-color-control6)] rounded w-1/3 mb-2 animate-pulse"></div>
-                <div class="h-3 bg-[var(--o-color-control6)] rounded w-2/3 animate-pulse"></div>
-              </div>
-            </div>
+          <div v-if="skillStore.loading" class="loading-container">
+            <OLoading v-model:visible="skillStore.loading" size="medium" />
           </div>
 
           <!-- 空态 -->
-          <div v-else-if="skillStore.skills.length === 0" class="text-center py-16">
-            <svg class="w-16 h-16 mx-auto text-[var(--o-color-text3)] mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
+          <div v-else-if="!skillStore.loading && skillStore.skills.length === 0" class="text-center py-16">
+            <div class="empty-state-svg w-48 sm:w-56 md:w-64 mx-auto mb-6" v-html="emptyStateSvg"></div>
             <p class="text-[var(--o-color-text3)]">暂无相关 Skill</p>
           </div>
 
           <!-- Skill 列表 -->
-          <template v-else>
+          <template v-else-if="!skillStore.loading">
             <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               <SkillCard v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
             </div>
             <div v-else class="border border-gray-200 rounded-lg dark:border-gray-700 overflow-hidden">
               <!-- 列表视图表头 -->
-              <div class="flex items-center gap-4 px-4 py-2 border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px;">
-                <div class="flex-1 min-w-0">名称</div>
-                <div class="hidden md:block w-24">分类</div>
-                <div class="hidden sm:block w-20">风险等级</div>
-                <div class="hidden sm:block w-20">下载量</div>
-                <div class="hidden lg:block w-24">贡献者</div>
+              <div class="flex items-center gap-8 px-6 py-4 bg-white dark:bg-gray-800 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px; border-bottom: 1px solid #002FA7;">
+                <div class="flex-1 min-w-0 max-w-[560px]">名称</div>
+                <div class="hidden md:block w-[100px]">分类</div>
+                <div class="hidden sm:block w-[100px]">风险等级</div>
+                <div class="hidden sm:block w-[100px]">下载量</div>
+                <div class="hidden lg:block w-36">贡献者</div>
               </div>
               <SkillListItem v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
             </div>
-
-            <!-- 分页 -->
-            <div class="flex items-center justify-between mt-8">
-              <div class="text-sm text-[var(--o-color-text3)]">
-                共 {{ skillStore.total }} 条数据
-              </div>
-
-              <div class="flex items-center gap-2">
-                <select
-                  :value="skillStore.filter.pageSize"
-                  class="h-8 px-2 text-sm bg-white border border-[var(--o-color-control4)] rounded-md text-[var(--o-color-info1)] focus:outline-none focus:border-[var(--o-color-primary1)] dark:bg-gray-800 dark:border-gray-700"
-                  @change="changePageSize(Number(($event.target as HTMLSelectElement).value))"
-                >
-                  <option v-for="size in pageSizeOptions" :key="size" :value="size">
-                    {{ size }}条/页
-                  </option>
-                </select>
-
-                <div class="flex items-center gap-1">
-                  <!-- 上一页 -->
-                  <button
-                    class="w-8 h-8 flex items-center justify-center rounded-md border border-[var(--o-color-control4)] text-[var(--o-color-text3)] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 dark:hover:bg-gray-800"
-                    :disabled="skillStore.filter.page <= 1"
-                    @click="changePage(skillStore.filter.page - 1)"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-                    </svg>
-                  </button>
-
-                  <!-- 页码 -->
-                  <template v-for="(page, idx) in getPageNumbers()" :key="idx">
-                    <span v-if="page === '...'" class="w-8 h-8 flex items-center justify-center text-sm text-[var(--o-color-text3)]">...</span>
-                    <button
-                      v-else
-                      class="w-8 h-8 text-sm rounded-md transition-colors"
-                      :class="page === skillStore.filter.page
-                        ? 'bg-[var(--o-color-primary1)] text-white'
-                        : 'text-[var(--o-color-info1)] page-btn'"
-                      @click="changePage(page as number)"
-                    >
-                      {{ page }}
-                    </button>
-                  </template>
-
-                  <!-- 下一页 -->
-                  <button
-                    class="w-8 h-8 flex items-center justify-center rounded-md border border-[var(--o-color-control4)] text-[var(--o-color-text3)] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 dark:hover:bg-gray-800"
-                    :disabled="skillStore.filter.page >= totalPages"
-                    @click="changePage(skillStore.filter.page + 1)"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                    </svg>
-                  </button>
-                </div>
-
-                <!-- 跳页 -->
-                <div class="flex items-center gap-1 text-sm text-[var(--o-color-text3)]">
-                  跳至
-                  <input
-                    type="number"
-                    :value="skillStore.filter.page"
-                    class="w-12 h-7 px-1 text-center border border-[var(--o-color-control4)] rounded-md focus:outline-none focus:border-[var(--o-color-primary1)] text-[var(--o-color-info1)] dark:bg-gray-800 dark:border-gray-700"
-                    min="1"
-                    :max="totalPages"
-                    @keyup.enter="changePage(Number(($event.target as HTMLInputElement).value))"
-                  />
-                  页
-                </div>
-              </div>
-            </div>
           </template>
+
+          <!-- 分页 -->
+          <div v-if="skillStore.total > 0 && !skillStore.loading" class="flex items-center justify-between mt-8">
+              <div></div>
+              <OPagination
+                v-model:page="skillStore.filter.page"
+                v-model:page-size="skillStore.filter.pageSize"
+                :total="skillStore.total"
+                :page-sizes="pageSizeOptions"
+                :layout="['total', 'pagesize', 'pager', 'jumper']"
+                @change="onPaginationChange"
+              />
+            </div>
         </div>
       </div>
 
       <!-- 提交新Skill区 -->
       <div class="mt-16 text-center">
-        <h2 class="text-2xl font-bold text-[var(--o-color-info1)] mb-3">提交新Skill</h2>
-        <p class="text-[var(--o-color-text3)]">参与社区贡献，与开发者共建SkillHub</p>
+        <h2 class="submit-title">提交新Skill</h2>
+        <p class="text-[var(--o-color-info3)] text-base leading-6">参与社区贡献，与开发者共建SkillHub</p>
       </div>
 
-      <div class="mt-8 overflow-hidden relative border border-[var(--o-color-control4)]">
+      <div class="mt-8 overflow-hidden relative submit-wrapper" style="border-radius: var(--o-radius-s);">
         <img :src="appStore.isDark ? cardBgDark : cardBgLight" alt="" class="absolute inset-0 w-full h-full object-cover pointer-events-none" />
-        <div class="relative p-8">
+        <div class="relative p-8 submit-card">
           <h3 class="text-lg font-semibold text-[var(--o-color-info1)] mb-4">在仓库中提交PR</h3>
-          <p class="text-sm text-[var(--o-color-text3)] mb-6">
-            Fork <a href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[var(--o-color-link1)] underline underline-offset-2 hover:text-[var(--o-color-link1-hover)]"><code class="px-1.5 py-0.5 rounded text-xs bg-transparent">openeuler/wittyhub</code><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
+          <p class="submit-desc">
+            Fork <a href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[var(--o-color-link1)] hover:text-[var(--o-color-link1-hover)]"><code class="px-1.5 py-0.5 rounded bg-transparent text-[var(--o-color-link1)] hover:font-semibold" style="font-family: inherit">openeuler/wittyhub</code></a> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
           </p>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8 submit-methods-grid">
             <div>
-              <h3 class="font-medium text-[var(--o-color-info1)] mb-2">方式1</h3>
-              <p class="text-sm text-[var(--o-color-text3)] mb-3 inline-flex items-center gap-1">
+              <h3 class="method-title">方式1</h3>
+              <p class="method-sub-label">
                 <span v-html="submitSkillSvg"></span>
                 提交单个Skill
               </p>
-              <p class="text-sm text-[var(--o-color-text3)]">
+              <p class="method-desc">
                 在skills目录下创建user/skillname目录，包含Skill.md 文件和其他依赖文件。
               </p>
             </div>
 
             <div>
-              <h3 class="font-medium text-[var(--o-color-info1)] mb-2">方式2</h3>
-              <p class="text-sm text-[var(--o-color-text3)] mb-3 inline-flex items-center gap-1">
+              <h3 class="method-title">方式2</h3>
+              <p class="method-sub-label">
                 <span v-html="submitLinkSvg"></span>
                 提交Skill仓库链接，自动拉取Skill
               </p>
-              <p class="text-sm text-[var(--o-color-text3)] mb-3">在skills/skill-repo.yaml里填写你的repo。</p>
-              <div class="bg-[#eff6ff] rounded-md p-3 text-xs font-mono text-[var(--o-color-text3)]">
+              <p class="method-desc">在skills/skill-repo.yaml里填写你的repo。</p>
+              <div class="code-sample">
                 <div>personal_repo:</div>
                 <div>&nbsp;&nbsp;- url: https://gitcode.com/user/reponame</div>
                 <div>&nbsp;&nbsp;&nbsp;&nbsp;branch: main  --选填</div>
@@ -427,9 +323,60 @@ function getPageNumbers(): (number | string)[] {
 
 <style scoped>
 .container-wide {
-  max-width: 1416px;
+  max-width: 1488px;
   margin: 0 auto;
   padding: 0 24px;
+}
+
+/* 加载容器 */
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+/* 搜索图标 */
+.search-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--o-color-text3);
+}
+
+/* Hero 标题 */
+.hero-title {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 40px;
+  line-height: 56px;
+  color: var(--o-color-info1);
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.hero-subtitle {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: var(--o-r-font_size-text2);
+  line-height: var(--o-r-line_height-text2);
+  color: var(--o-color-info1);
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.hero-stats {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: var(--o-r-font_size-text1);
+  line-height: var(--o-r-line_height-text1);
+  color: var(--o-color-info3);
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.hero-stats-number {
+  font-weight: var(--o-font_weight-medium);
+  color: var(--o-color-text3);
 }
 
 @media (max-width: 768px) {
@@ -448,69 +395,428 @@ function getPageNumbers(): (number | string)[] {
   color: #C9CDD4;
 }
 
-/* switch-tab: 滑块切换按钮组 (参考 openEuler portal switch-tab 模式) */
-.switch-tab {
-  display: inline-flex;
-  position: relative;
-  background: var(--o-color-fill1);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.switch-tab-slider {
-  position: absolute;
-  width: calc(50% - 2.5px);
-  height: calc(100% - 6px);
-  top: 3px;
-  left: 3px;
-  background: var(--o-color-fill2);
-  border-radius: 5px;
-  z-index: 1;
-  transition: left 0.2s cubic-bezier(0.2, 0, 0, 1);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-  pointer-events: none;
-}
-
-.switch-tab-slider.slider-right {
-  left: calc(50% + 0.5px);
-}
-
-.switch-handler {
-  position: relative;
-  z-index: 2;
-  padding: 4px 16px;
-  height: 30px;
-  cursor: pointer;
-  border: none;
-  background: transparent;
+/* 提交新Skill 标题 */
+.submit-title {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 40px;
+  line-height: 56px;
+  letter-spacing: -0.32px;
+  text-align: center;
   color: var(--o-color-info1);
-  font-size: 14px;
-  line-height: 22px;
-  border-radius: 5px;
-  transition: color 0.2s ease;
-  user-select: none;
+  margin-bottom: 12px;
 }
 
-.switch-handler:not(.active):hover {
-  color: var(--o-color-link1);
-  background: var(--o-color-fill3);
+[data-o-theme="e.dark"] .submit-title,
+.dark .submit-title {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 32px;
+  line-height: normal;
+  letter-spacing: -0.32px;
+  text-align: center;
 }
 
-.switch-handler.active {
-  color: var(--o-color-link1);
-  font-weight: 500;
+[data-o-theme="e.dark"] .submit-title + p,
+.dark .submit-title + p {
+  color: var(--o-color-info1);
 }
 
-/* OSelect 覆盖：与 switch-tab/筛选栏统一 */
+/* 提交新Skill 描述文本 */
+.submit-desc {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info3);
+  margin-bottom: 24px;
+}
+
+/* 提交方式标题 */
+.method-title {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: var(--o-font_size-h3);
+  line-height: var(--o-line_height-h3);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+  margin-bottom: 8px;
+}
+
+/* 提交方式子标签 */
+.method-sub-label {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+  margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.method-sub-label svg {
+  background: #FFFFFF;
+  border-radius: 4px;
+}
+
+/* 提交方式描述 */
+.method-desc {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info3);
+  margin-bottom: 12px;
+}
+
+/* 代码示例块 */
+.code-sample {
+  background: var(--o-color-control2-light);
+  border-radius: 4px;
+  padding: 12px;
+  font-family: HarmonyHeiTi;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info3);
+}
+
+[data-o-theme="e.dark"] .code-sample,
+.dark .code-sample {
+  background: var(--o-color-control2-light);
+}
+
+/* 提交卡片 */
+.submit-wrapper {
+  background: #FFFFFF;
+}
+
+[data-o-theme="e.dark"] .submit-wrapper,
+.dark .submit-wrapper {
+  background: #242427;
+}
+
+.submit-card {
+  position: relative;
+  z-index: 1;
+  border-radius: var(--o-radius-s);
+}
+
+/* 方式1和方式2之间的竖分割线 */
+.submit-methods-grid {
+  position: relative;
+}
+
+@media (min-width: 768px) {
+  .submit-methods-grid::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    background: var(--o-color-control4);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+}
+
+/* OTab button variant: 排序切换 (热门/最新) */
+.sort-tab {
+  width: 148px;
+
+  :deep(.o-tab-head) {
+    background: var(--o-color-fill1);
+    border-radius: 4px;
+    padding: 4px;
+    height: 48px !important;
+    border: none;
+    box-sizing: border-box;
+  }
+
+  :deep(.o-tab-navs) {
+    gap: 0;
+  }
+
+  :deep(.o-tab-nav) {
+    width: 68px !important;
+    min-width: 68px !important;
+    height: 40px;
+    padding: 0;
+    border: none !important;
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    font-size: var(--o-r-font_size-text2);
+    line-height: var(--o-r-line_height-text2);
+    color: var(--o-color-primary1) !important;
+    border-radius: 4px !important;
+    background: transparent !important;
+    justify-content: center;
+    align-items: center;
+
+    &:hover:not(.is-active) {
+      background: color-mix(in srgb, var(--o-color-primary1) 8%, transparent);
+    }
+
+    &.is-active {
+      font-weight: var(--o-font_weight-semibold);
+      background: var(--o-color-fill2) !important;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    }
+  }
+}
+
+/* OTab button variant: 视图切换 (卡片/列表) */
+.view-tab {
+  --tab-nav-padding: 8px 16px;
+
+  :deep(.o-tab-head) {
+    background: var(--o-color-fill1);
+    border-radius: 4px;
+    padding: 3px;
+    min-height: auto;
+    border: none;
+    box-sizing: border-box;
+  }
+
+  :deep(.o-tab-navs) {
+    gap: 0;
+  }
+
+  :deep(.o-tab-nav) {
+    width: 44px !important;
+    min-width: 44px !important;
+    padding: 0;
+    border: none !important;
+    color: var(--o-color-primary1) !important;
+    border-radius: 4px !important;
+    background: transparent !important;
+    justify-content: center;
+    align-items: center;
+
+    &:hover:not(.is-active) {
+      background: color-mix(in srgb, var(--o-color-primary1) 8%, transparent);
+    }
+
+    &.is-active {
+      background: var(--o-color-fill2) !important;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    }
+  }
+}
+
+/* 空态 SVG */
+.empty-state-svg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 8 / 7;
+}
+
+.empty-state-svg svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* OSelect 覆盖：与筛选栏统一 */
 :deep(.o-select) {
   --select-height: 32px;
   --select-radius: 4px;
-  --select-text-size: 14px;
+  --select-text-size: 16px;
   width: 120px;
+  border: none !important;
+  background: transparent !important;
 }
 
-/* 分页按钮 hover 浅蓝 */
-.page-btn:hover {
-  background-color: color-mix(in srgb, var(--o-color-primary1) 20%, transparent);
+:deep(.o-select-input) {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-r-font_size-text1);
+  line-height: var(--o-r-line_height-text1);
+  color: var(--o-color-info1);
+  text-align: center;
+}
+
+:deep(.o-option-item) {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-r-font_size-text1);
+  line-height: var(--o-r-line_height-text1);
+  color: var(--o-color-info1);
+  text-align: right;
+}
+
+/* 分页下拉框 */
+.page-size-select {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-tip1);
+  line-height: var(--o-line_height-tip1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+[data-o-theme="e.dark"] .page-size-select,
+.dark .page-size-select {
+  background-color: #242427;
+}
+
+/* 分页信息文本 */
+.pagination-info {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-tip1);
+  line-height: var(--o-line_height-tip1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info2);
+}
+
+/* OPagination 统一高度 32px */
+:deep(.o-pagination-wrap) {
+  --pagination-item-size: 32px;
+  --pagination-arrow-size: 32px;
+}
+
+:deep(.o-pagination-select.o-select) {
+  height: 32px !important;
+  border-radius: 4px !important;
+  background: var(--o-color-white) !important;
+  border: 1px solid #0000003F !important;
+}
+
+:deep(.o-pagination-input.o-input-number) {
+  height: 32px !important;
+  --input-height: 32px;
+}
+
+:deep(.o-pagination-input.o-input-number .o_input-input) {
+  height: 32px !important;
+}
+
+.sort-dropdown-wrapper {
+  margin-left: 14px;
+}
+
+.sort-period-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: #000000;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: right;
+  cursor: pointer;
+  border-radius: var(--o-radius-s);
+  white-space: nowrap;
+  width: auto;
+
+  &:hover {
+    color: #002FA7;
+  }
+}
+
+[data-o-theme="e.dark"] .sort-period-btn:hover,
+.dark .sort-period-btn:hover {
+  color: var(--o-color-primary1);
+}
+
+[data-o-theme="e.dark"] .sort-period-btn,
+.dark .sort-period-btn {
+  color: var(--o-color-info1);
+}
+
+/* 分页跳转输入框 */
+:deep(.o_box-main) {
+  border-radius: 4px;
+  background: var(--o-color-white);
+  border: 1px solid #00000019;
+}
+
+/* 分页箭头图标替换 */
+:deep(.o-icon-chevron-left),
+:deep(.o-icon-chevron-right) {
+  width: 24px;
+  height: 24px;
+}
+
+:deep(.o-icon-chevron-left path),
+:deep(.o-icon-chevron-right path) {
+  display: none;
+}
+
+:deep(.o-icon-chevron-left) {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M14.754 5.764c0.251 0.251 0.271 0.644 0.063 0.918l-0.063 0.072-5.016 5.016c-0.1 0.1-0.115 0.254-0.043 0.37l0.043 0.054 5.062 5.062c0.273 0.273 0.273 0.717 0 0.99-0.251 0.251-0.644 0.271-0.918 0.063l-0.072-0.063-5.062-5.062c-0.629-0.629-0.662-1.628-0.099-2.296l0.099-0.108 5.016-5.016c0.273-0.273 0.717-0.273 0.99 0z'/%3E%3C/svg%3E") no-repeat center;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M14.754 5.764c0.251 0.251 0.271 0.644 0.063 0.918l-0.063 0.072-5.016 5.016c-0.1 0.1-0.115 0.254-0.043 0.37l0.043 0.054 5.062 5.062c0.273 0.273 0.273 0.717 0 0.99-0.251 0.251-0.644 0.271-0.918 0.063l-0.072-0.063-5.062-5.062c-0.629-0.629-0.662-1.628-0.099-2.296l0.099-0.108 5.016-5.016c0.273-0.273 0.717-0.273 0.99 0z'/%3E%3C/svg%3E") no-repeat center;
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  background: currentColor;
+}
+
+:deep(.o-icon-chevron-right) {
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M9.246 5.764c-0.251 0.251-0.271 0.644-0.063 0.918l0.063 0.072 5.016 5.016c0.1 0.1 0.115 0.254 0.043 0.37l-0.043 0.054-5.062 5.062c-0.273 0.273-0.273 0.717 0 0.99 0.251 0.251 0.644 0.271 0.918 0.063l0.072-0.063 5.062-5.062c0.629-0.629 0.662-1.628 0.099-2.296l-0.099-0.108-5.016-5.016c-0.273-0.273-0.717-0.273-0.99 0z'/%3E%3C/svg%3E") no-repeat center;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M9.246 5.764c-0.251 0.251-0.271 0.644-0.063 0.918l0.063 0.072 5.016 5.016c0.1 0.1 0.115 0.254 0.043 0.37l-0.043 0.054-5.062 5.062c-0.273 0.273-0.273 0.717 0 0.99 0.251 0.251 0.644 0.271 0.918 0.063l0.072-0.063 5.062-5.062c0.629-0.629 0.662-1.628 0.099-2.296l-0.099-0.108-5.016-5.016c-0.273-0.273-0.717-0.273-0.99 0z'/%3E%3C/svg%3E") no-repeat center;
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  background: currentColor;
+}
+</style>
+
+<style lang="scss">
+/* Teleport 到 body 的下拉面板全局样式 */
+.sort-period-dropdown {
+  width: 116px !important;
+  min-width: 116px;
+  transform: translateX(-12px);
+}
+
+[data-o-theme="e.dark"] .o-pagination-select.o-select,
+.dark .o-pagination-select.o-select {
+  background: #242427 !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-o-theme="e.dark"] .o-pagination-select .o-select-input,
+.dark .o-pagination-select .o-select-input {
+  color: var(--o-color-info1) !important;
+}
+
+[data-o-theme="e.dark"] .o_box-main,
+.dark .o_box-main {
+  background: #242427;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-o-theme="e.dark"] .o_box-main .o_input-input,
+.dark .o_box-main .o_input-input {
+  color: var(--o-color-info1) !important;
+}
+
+.o-dropdown-item:hover {
+  background: var(--o-color-control2-light);
 }
 </style>

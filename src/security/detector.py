@@ -212,7 +212,13 @@ class SkillspectorClient:
                 return None
 
         if resp.status_code != 200:
-            logger.error("Report fetch returned %d", resp.status_code)
+            logger.error(
+                "Report fetch failed: build_number=%s status_code=%s url=%s response=%s",
+                build_number,
+                resp.status_code,
+                url,
+                resp.text[:500],
+            )
             return None
 
         try:
@@ -353,6 +359,7 @@ class SkillspectorCollector:
         async with self._session_factory() as session:
             pending = await self._fetch_pending(session)
             for audit in pending:
+                audit_id = audit.id
                 build_number = (audit.details or {}).get("skillspector_build_number")
                 if build_number is None:
                     continue
@@ -364,7 +371,7 @@ class SkillspectorCollector:
                     await session.rollback()
                     logger.exception(
                         "Failed to collect result for audit %s (build #%s)",
-                        audit.id, build_number,
+                        audit_id, build_number,
                     )
         return processed
 
@@ -402,6 +409,12 @@ class SkillspectorCollector:
         """Collect a single Jenkins result.  Returns True if collected."""
         from src.models.orm import SecurityAudit, Skill, SkillVersion
 
+        logger.info(
+            "Collecting Skillspector result: audit_id=%s build_number=%s",
+            audit.id,
+            build_number,
+        )
+
         # 1. Wait for build (offload sync HTTP polling to a worker thread)
         status = await asyncio.to_thread(self._client.wait_for_build, build_number)
         if status != "SUCCESS":
@@ -419,6 +432,11 @@ class SkillspectorCollector:
         # 2. Fetch report (also sync HTTP → offload)
         report = await asyncio.to_thread(self._client.fetch_report, build_number)
         if report is None:
+            logger.warning(
+                "Build #%d ended with %s but report is unavailable; will retry",
+                build_number,
+                status,
+            )
             return False
 
         # 3. Parse & update

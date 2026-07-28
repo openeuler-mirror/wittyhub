@@ -121,7 +121,6 @@ def upgrade() -> None:
         sa.Column("version", sa.String(length=50), nullable=True),
         sa.Column("commit_id", sa.String(length=40), nullable=True),
         sa.Column("audited_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.ForeignKeyConstraint(["resource_id"], ["skills.id"], ondelete="CASCADE"),
     )
 
     op.create_table(

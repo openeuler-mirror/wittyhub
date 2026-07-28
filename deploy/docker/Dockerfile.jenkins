@@ -14,38 +14,44 @@
 #   GIT_REF               分支/标签 (默认 main)
 # ============================================================================
 
-# ---- Stage 1: 构建 SkillSpector CLI ----
-FROM python:3.12-slim AS skillspector-builder
+# ---- Stage 1: 构建 SkillSpector wheels ----
+FROM python:3.13-slim AS skillspector-builder
 
 ARG GIT_REPO_URL=https://github.com/JunchengDwain/SkillSpector.git
 ARG GIT_REF=main
 
-RUN apt-get update && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${GIT_REF}" "${GIT_REPO_URL}" /tmp/skillspector
 
 WORKDIR /tmp/skillspector
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install pip --upgrade && \
-    /opt/venv/bin/pip install --no-cache-dir .
+RUN pip config set global.timeout 120 && \
+    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install pip --upgrade && \
+    pip wheel . -w /tmp/wheels
 
 # ---- Stage 2: Jenkins 镜像 ----
 FROM jenkins/jenkins:lts
 
 USER root
 
-# 系统依赖
-RUN apt-get update && \
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 python3-venv python3-dev python3-pip python3-full \
-        gcc make git curl ca-certificates && \
+        python3 python3-pip git curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# 从 Stage 1 复制 SkillSpector venv
-COPY --from=skillspector-builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# 从 Stage 1 复制预构建的 wheels
+COPY --from=skillspector-builder /tmp/wheels /tmp/wheels
+
+# 安装 SkillSpector
+RUN pip config set global.timeout 120 && \
+    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --no-cache-dir --break-system-packages --ignore-installed /tmp/wheels/*.whl && \
+    rm -rf /tmp/wheels
 
 # 验证 SkillSpector 安装
 RUN skillspector --version

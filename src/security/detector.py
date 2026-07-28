@@ -8,7 +8,6 @@ import asyncio
 import logging
 import re
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -74,7 +73,6 @@ class SkillspectorClient:
         self.auth = (user, token) if user and token else None
         self.timeout = timeout
         self.poll_interval = poll_interval
-        self._crumb: tuple[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -109,19 +107,16 @@ class SkillspectorClient:
     # ------------------------------------------------------------------
 
     def _get_crumb(self, client: httpx.Client) -> tuple[str, str] | None:
-        if self._crumb is not None:
-            return self._crumb
         try:
             resp = client.get(
                 f"{self.base_url}/crumbIssuer/api/json", auth=self.auth
             )
             if resp.status_code == 200:
                 data = resp.json()
-                self._crumb = (
+                return (
                     data.get("crumbRequestField", "Jenkins-Crumb"),
                     data.get("crumb", ""),
                 )
-                return self._crumb
         except httpx.RequestError:
             pass
         return None
@@ -155,8 +150,6 @@ class SkillspectorClient:
                 return None
 
         if resp.status_code not in (200, 201, 302, 303):
-            if resp.status_code == 403:
-                self._crumb = None
             logger.error(
                 "Jenkins trigger returned %d: %s", resp.status_code, resp.text[:500]
             )
@@ -301,7 +294,7 @@ class SkillspectorClient:
                 if executable and isinstance(executable, dict):
                     return executable.get("number")
 
-                if data.get("cancelled") or data.get("blocked") or data.get("stuck"):
+                if data.get("cancelled") or data.get("stuck"):
                     logger.error("Queue item stuck/cancelled: %s", data)
                     return None
 

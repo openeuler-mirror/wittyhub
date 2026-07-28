@@ -44,6 +44,20 @@ class SecurityReport:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+def _sanitize_json_value(value: Any) -> Any:
+    """Replace NUL characters recursively before storing values in JSONB."""
+    if isinstance(value, str):
+        return value.replace("\x00", "\\0")
+    if isinstance(value, dict):
+        return {
+            _sanitize_json_value(key): _sanitize_json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json_value(item) for item in value]
+    return value
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Skillspector — Jenkins‑based deep scanner
 # ═══════════════════════════════════════════════════════════════════════════
@@ -445,7 +459,9 @@ class SkillspectorCollector:
             await session.commit()
             return True
 
-        # 2. Fetch report (also sync HTTP → offload)
+        # Jenkins may report FAILURE when findings make the scanner exit 1,
+        # while still archiving a complete report. Fetch for all other terminal
+        # statuses, including SUCCESS, FAILURE, and UNSTABLE.
         report = await asyncio.to_thread(self._client.fetch_report, build_number)
         if report is None:
             logger.warning(
@@ -455,7 +471,9 @@ class SkillspectorCollector:
             )
             return False
 
-        # 3. Parse & update
+        report = _sanitize_json_value(report)
+
+        # 2. Parse & update
         signals = SkillspectorClient.report_to_risk_signals(report)
         severity = report.get("risk_assessment", {}).get("severity", "LOW").upper()
         score = report.get("risk_assessment", {}).get("score")

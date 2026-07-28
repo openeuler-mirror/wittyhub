@@ -417,7 +417,23 @@ class SkillspectorCollector:
 
         # 1. Wait for build (offload sync HTTP polling to a worker thread)
         status = await asyncio.to_thread(self._client.wait_for_build, build_number)
-        if status != "SUCCESS":
+        logger.info(
+            "Jenkins build completed: build_number=%s status=%s",
+            build_number,
+            status,
+        )
+
+        # A polling timeout or transient Jenkins error must remain pending so a
+        # later collector pass can retry it.
+        if status is None:
+            logger.warning(
+                "Build #%d status unavailable; will retry",
+                build_number,
+            )
+            return False
+
+        # These terminal states normally cannot produce a complete report.
+        if status in {"ABORTED", "NOT_BUILT"}:
             details = dict(audit.details or {})
             details["skillspector_collected"] = True
             details["skillspector_status"] = status
@@ -449,6 +465,7 @@ class SkillspectorCollector:
 
         details = dict(audit.details or {})
         details["skillspector_collected"] = True
+        details["skillspector_status"] = status
         details["skillspector_score"] = score
         details["skillspector_version"] = report.get("metadata", {}).get("skillspector_version")
         details["recommendation"] = report.get("risk_assessment", {}).get("recommendation")

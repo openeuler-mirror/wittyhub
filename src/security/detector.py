@@ -400,7 +400,7 @@ class SkillspectorCollector:
         self, session: AsyncSession, audit: Any, build_number: int,
     ) -> bool:
         """Collect a single Jenkins result.  Returns True if collected."""
-        from src.models.orm import SecurityAudit, Skill
+        from src.models.orm import SecurityAudit, Skill, SkillVersion
 
         # 1. Wait for build (offload sync HTTP polling to a worker thread)
         status = await asyncio.to_thread(self._client.wait_for_build, build_number)
@@ -445,11 +445,18 @@ class SkillspectorCollector:
         )
 
         if score is not None:
-            await session.execute(
-                update(Skill)
-                .where(Skill.id == audit.resource_id)
-                .values(risk_score=score)
-            )
+            skill = await session.get(Skill, audit.resource_id)
+            if skill is not None:
+                skill.risk_score = score
+            else:
+                skill_version = await session.get(SkillVersion, audit.resource_id)
+                if skill_version is not None:
+                    skill_version.risk_score = score
+                else:
+                    logger.warning(
+                        "Security audit resource not found: resource_id=%s",
+                        audit.resource_id,
+                    )
 
         await session.commit()
         logger.info(

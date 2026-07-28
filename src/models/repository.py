@@ -783,6 +783,33 @@ class SecurityAuditRepository:
         )
         return list(result.scalars().all())
 
+    async def upsert_by_resource(
+        self,
+        resource_type: str,
+        resource_id: uuid.UUID,
+        audit_data: dict[str, Any],
+    ) -> SecurityAudit:
+        """Create or update a SecurityAudit record for the given resource.
+
+        One record per (resource_type, resource_id) — if one exists, its
+        fields are updated and the ``collected`` flag is reset so the
+        background collector picks it up again.
+        """
+        existing = await self.get_latest_by_resource(resource_type, resource_id)
+        if existing is not None:
+            for key, value in audit_data.items():
+                setattr(existing, key, value)
+            if existing.details:
+                existing.details.pop('skillspector_collected', None)
+            await self.session.flush()
+            await self.session.refresh(existing)
+            return existing
+        audit = SecurityAudit(**audit_data)
+        self.session.add(audit)
+        await self.session.flush()
+        await self.session.refresh(audit)
+        return audit
+
 
 class DownloadHistoryRepository:
     def __init__(self, session: AsyncSession):

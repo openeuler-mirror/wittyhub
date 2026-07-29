@@ -600,22 +600,40 @@ class SkillRepository:
             .group_by(normalized_category)
             .order_by(func.count().desc())
         )
-        categories = []
+        # Build category count map from DB (normalize "others" key)
+        categories_map: dict[str, int] = {}
         for row in category_result.fetchall():
             category_key = row.category_key
             if category_key in {None, "other", "others"}:
-                display_name = "Others"
+                key = "others"
             else:
-                display_name = row.display_name or "Others"
-            categories.append({"name": display_name, "count": row.count})
-        categories.sort(
-            key=lambda item: (
-                1 if str(item["name"]).lower() == "others" else 0,
-                -int(item["count"]),
-                str(item["name"]).lower(),
-            )
+                key = row.display_name or "others"
+            categories_map[key] = row.count
+
+        # Always return all 9 canonical categories (from skill-repos.yaml), fill 0 for missing
+        canonical_categories = [
+            "Research and Design",
+            "Development and Build",
+            "Engineering and Compilation",
+            "Quality and Validation",
+            "Release and Deployment",
+            "Monitoring and Operations",
+            "Performance Optimization",
+            "Security Hardening",
+            "others",
+        ]
+        categories = [
+            {"name": name, "count": categories_map.get(name, 0)}
+            for name in canonical_categories
+        ]
+        # Sort: non-others by count desc, others at end
+        others_entry = [c for c in categories if c["name"] == "others"]
+        non_others = sorted(
+            [c for c in categories if c["name"] != "others"],
+            key=lambda x: -x["count"],
         )
-        total_categories = len([c for c in categories if c["name"].lower() != "others"])
+        categories = non_others + others_entry
+        total_categories = len(non_others)
 
         # Platform counts
         platform_result = await self.session.execute(

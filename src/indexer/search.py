@@ -36,12 +36,12 @@ class SearchService:
         self,
         query,
         *,
-        category: str | None = None,
+        category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
     ):
         if category:
-            query = query.where(Skill.category == category)
+            query = query.where(Skill.category.in_(category))
         if platform:
             query = query.where(Skill.platform == platform)
         if tags:
@@ -115,7 +115,7 @@ class SearchService:
         query: str,
         limit: int = 20,
         offset: int = 0,
-        category: str | None = None,
+        category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
         embedding: list[float] | None = None,
@@ -146,7 +146,7 @@ class SearchService:
             deduped = self._dedupe_skill_results(combined)
             return {
                 "results": deduped[offset:offset + limit],
-                "total": len(deduped),
+                "total": text_results["total"],
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -165,7 +165,7 @@ class SearchService:
             deduped = self._dedupe_skill_results(text_results["results"])
             return {
                 "results": deduped[offset:offset + limit],
-                "total": len(deduped),
+                "total": text_results["total"],
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -177,7 +177,7 @@ class SearchService:
         query: str,
         limit: int = 20,
         offset: int = 0,
-        category: str | None = None,
+        category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -259,7 +259,7 @@ class SearchService:
         embedding: list[float],
         limit: int = 20,
         offset: int = 0,
-        category: str | None = None,
+        category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
         min_similarity: float = 0.47,

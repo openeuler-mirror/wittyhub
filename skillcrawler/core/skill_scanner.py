@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
+from src.security.detector import SecurityDetector, SecurityReport
 from skillcrawler.core.skill_parser import (
     as_optional_str,
     as_optional_str_list,
@@ -22,7 +23,7 @@ from skillcrawler.core.skill_parser import (
     should_skip_relative_path,
     to_repository_relative_path,
 )
-from src.models.orm import SkillVersion
+from src.models.orm import Skill, SkillVersion
 from src.models.repository import SkillRepository
 
 if TYPE_CHECKING:
@@ -39,19 +40,23 @@ class SkillScanner:
         git_ops: GitOperations,
         skill_repository: SkillRepository,
         category_classifier: DeepSeekCategoryClassifier | None = None,
+        security_detector: SecurityDetector | None = None,
+        security_async_mode: bool = False,
     ) -> None:
         self.git_ops = git_ops
         self.skill_repository = skill_repository
         self.category_classifier = category_classifier
+        self.security_detector = security_detector
+        self.security_async_mode = security_async_mode
 
-    async def scan_skill_repository_root(
+    async def start_scan(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
         repository_git_metadata: dict[str, Any] | None = None,
         version_snapshots: list[dict[str, str]] | None = None,
         author: str | None = None,
-    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+    ) -> tuple[list[Skill], list[SkillVersion]]:
         if not repo_root.exists():
             raise ValueError(
                 f'Repository root does not exist for repository {repo.id}: {repo_root}'
@@ -62,7 +67,7 @@ class SkillScanner:
         repository_git_metadata = repository_git_metadata or {}
         repository_commit_id = as_optional_str(repository_git_metadata.get('commit_id'))
         repository_latest_tags = as_optional_str_list(repository_git_metadata.get('latest_tags')) or []
-        latest_skills = await self._scan_current_repository_state(
+        latest_skills = await self._scan_latest_skills(
             repo=repo,
             repo_root=repo_root,
             skill_files=skill_files,
@@ -73,7 +78,7 @@ class SkillScanner:
 
         tagged_skills: list[SkillVersion] = []
         if version_snapshots:
-            tagged_skills = await self._scan_skill_repository_versions(
+            tagged_skills = await self._scan_tagged_skills(
                 repo=repo,
                 repo_root=repo_root,
                 skill_files=skill_files,
@@ -85,7 +90,7 @@ class SkillScanner:
 
         return latest_skills, tagged_skills
 
-    async def _scan_current_repository_state(
+    async def _scan_latest_skills(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
@@ -93,8 +98,8 @@ class SkillScanner:
         repository_commit_id: str | None,
         repository_latest_tags: list[str],
         author: str | None,
-    ) -> list[SkillVersion]:
-        discovered: list[SkillVersion] = []
+    ) -> list[Skill]:
+        discovered: list[Skill] = []
         category_cache: dict[str, str | None] = {}
         for skill_file in skill_files:
             relative_path = to_repository_relative_path(repo_root, skill_file)
@@ -119,7 +124,7 @@ class SkillScanner:
             discovered.append(skill)
         return discovered
 
-    async def _scan_skill_repository_versions(
+    async def _scan_tagged_skills(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
@@ -167,6 +172,7 @@ class SkillScanner:
                     category_cache=category_cache,
                     version_source=version_source_val,
                     author=author,
+                    return_skill_model=False,
                 )
                 version_key = (skill.skill_id, skill.version) if skill.version else None
                 commit_key = (skill.skill_id, skill.commit_id) if skill.commit_id else None
@@ -200,7 +206,9 @@ class SkillScanner:
         category_cache: dict[str, str | None],
         version_source: str | None,
         author: str | None,
-    ) -> SkillVersion:
+        *,
+        return_skill_model: bool = True,
+    ) -> Skill | SkillVersion:
         metadata, content = metadata_content
         merged_metadata = dict(metadata)
         if repository_latest_tags and 'repository_latest_tags' not in merged_metadata:
@@ -230,25 +238,39 @@ class SkillScanner:
             skill_id=skill_id,
             category_cache=category_cache,
         )
-        return SkillVersion(
-            skill_repo_id=repo.id,
+        report = await self._audit_skill_security(
+            repo=repo,
+            relative_path=relative_path,
+            commit_id=commit_id,
             skill_id=skill_id,
-            name=derive_repository_skill_name(skill_file, metadata),
-            description=as_optional_str(metadata.get('description')),
-            version=as_optional_str(metadata.get('version')) or version,
-            commit_id=skill_dir_commit_id or commit_id,
-            author=author,
-            source=host,
-            source_url=source_url,
-            repo_url=repo.url,
-            category=category,
-            tags=as_optional_str_list(metadata.get('tags')),
-            platform=as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),
-            extra_metadata=merged_metadata,
-            content=content or None,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
+        risk_score, audit_details = self._extract_audit_artifacts(report)
+        if audit_details:
+            merged_metadata['security_audit'] = audit_details
+
+        common = {
+            'skill_repo_id': repo.id,
+            'skill_id': skill_id,
+            'name': derive_repository_skill_name(skill_file, metadata),
+            'description': as_optional_str(metadata.get('description')),
+            'version': version or as_optional_str(metadata.get('version')),
+            'commit_id': commit_id or skill_dir_commit_id,
+            'author': author,
+            'source': host,
+            'source_url': source_url,
+            'repo_url': repo.url,
+            'category': category,
+            'tags': as_optional_str_list(metadata.get('tags')),
+            'platform': as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),
+            'extra_metadata': merged_metadata,
+            'content': content or None,
+            'risk_score': risk_score,
+            'created_at': datetime.now(timezone.utc),
+            'updated_at': datetime.now(timezone.utc),
+        }
+        if return_skill_model:
+            return Skill(**common)
+        return SkillVersion(**common)
 
     def _get_skill_directory_commit_id(
         self,
@@ -296,3 +318,79 @@ class SkillScanner:
         )
         category_cache[skill_id] = category
         return category
+
+    async def _audit_skill_security(
+        self,
+        *,
+        repo: SkillRepoModel,
+        relative_path: str,
+        commit_id: str | None,
+        skill_id: str,
+    ) -> SecurityReport | None:
+        """Trigger a security audit for one skill record.
+
+        The crawler stays DB-agnostic; ``SkillManager`` persists the
+        ``SecurityAudit`` row after the skill is stored.
+        """
+        if self.security_detector is None or not self.security_detector.has_skillspector:
+            return None
+        skill_path = Path(relative_path).parent.as_posix()
+        if skill_path == '.':
+            skill_path = ''
+
+        try:
+            if self.security_async_mode:
+                build_number = await self.security_detector.trigger_skillspector(
+                    repo.url, version=commit_id, skill_path=skill_path,
+                )
+                report = SecurityReport(
+                    resource_type='skill',
+                    resource_id=skill_id,
+                    risk_level='unknown',
+                    risk_signals=[],
+                    details={
+                        'skillspector_async': True,
+                        'skillspector_build_number': build_number,
+                        'source': 'skillspector',
+                    },
+                )
+            else:
+                report = await self.security_detector.detect_skillspector(
+                    repo.url, version=commit_id, skill_path=skill_path,
+                )
+        except Exception:
+            _logger.warning(
+                'Security audit failed for skill %s', skill_id, exc_info=True,
+            )
+            report = SecurityReport(
+                resource_type='skill',
+                resource_id=skill_id,
+                risk_level='unknown',
+                risk_signals=[],
+                details={'error': 'audit_failed', 'source': 'skillspector'},
+            )
+
+        return report
+
+    @staticmethod
+    def _extract_audit_artifacts(
+        report: SecurityReport | None,
+    ) -> tuple[int | None, dict[str, Any] | None]:
+        """Translate a ``SecurityReport`` into ``risk_score`` + storable details."""
+        if report is None:
+            return None, None
+
+        score = report.details.get('skillspector_score')
+        if score is None:
+            level = (report.risk_level or 'unknown').lower()
+            score_map = {'critical': 90, 'high': 65, 'medium': 35, 'low': 10}
+            score = score_map.get(level) if level != 'unknown' else None
+
+        details = dict(report.details) if report.details else None
+        if details:
+            details.setdefault('risk_level', report.risk_level)
+            details.setdefault(
+                'risk_signals',
+                [s.__dict__ for s in report.risk_signals],
+            )
+        return score, details

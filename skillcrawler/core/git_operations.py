@@ -263,13 +263,11 @@ class GitOperations:
         latest_tags = as_optional_str_list(repository_git_metadata.get('latest_tags')) or []
         latest_tag_commits = repository_git_metadata.get('latest_tag_commits') or {}
         snapshots: list[dict[str, str]] = []
-        tag_commit_ids: set[str] = set()
 
         for tag in latest_tags:
             commit_id = as_optional_str(latest_tag_commits.get(tag))
             if commit_id is None:
                 continue
-            tag_commit_ids.add(commit_id)
             snapshots.append({
                 'ref': tag,
                 'version': tag,
@@ -277,14 +275,6 @@ class GitOperations:
                 'version_source': 'tag',
             })
 
-        head_commit_id = as_optional_str(repository_git_metadata.get('commit_id'))
-        if head_commit_id and head_commit_id not in tag_commit_ids:
-            snapshots.append({
-                'ref': 'HEAD',
-                'version': 'latest',
-                'commit_id': head_commit_id,
-                'version_source': 'branch_head',
-            })
         return snapshots
 
     # ── Git command execution ──────────────────────────────────────

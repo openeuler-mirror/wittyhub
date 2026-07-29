@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,8 +24,13 @@ from skillcrawler.core.skill_parser import (
 )
 from skillcrawler.core.skill_scanner import SkillScanner
 from src.core.config import get_settings
-from src.models.orm import SkillVersion
-from src.models.repository import SkillRepoRepository, SkillRepository
+from src.models.orm import Skill, SkillVersion
+from src.models.repository import (
+    SecurityAuditRepository,
+    SkillRepoRepository,
+    SkillRepository,
+)
+from src.security.detector import SecurityDetector
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
@@ -64,16 +70,28 @@ class SkillManager:
             self.workspace_base = Path(settings.storage.local_path).expanduser().resolve()
 
         category_classifier: DeepSeekCategoryClassifier | None = None
+        security_detector: SecurityDetector | None = None
         try:
             category_classifier = DeepSeekCategoryClassifier()
         except Exception as exc:
             _logger.warning('Failed to initialize category classifier: %s', exc)
+
+        try:
+            detector = SecurityDetector()
+            if detector.has_skillspector:
+                security_detector = detector
+            else:
+                _logger.info('SecurityDetector: skillspector not configured')
+        except Exception as exc:
+            _logger.warning('Failed to initialize security detector: %s', exc)
 
         self._git_ops = GitOperations()
         self._scanner = SkillScanner(
             git_ops=self._git_ops,
             skill_repository=self.skill_repository,
             category_classifier=category_classifier,
+            security_detector=security_detector,
+            security_async_mode=True,
         )
 
     # ── Public API ─────────────────────────────────────────────────
@@ -250,16 +268,17 @@ class SkillManager:
         repo_name: str,
     ) -> SkillRepoModel:
         author = self._resolve_skill_author(repo.platform, repo_name)
-        latest_skills, tagged_skills = await self._scan_local_repository(
+        latest_skills, tagged_skills = await self._discover_skills(
             repo,
             clone_dir=clone_dir,
             author=author,
         )
         unique_skill_count = self._count_unique_skills(latest_skills)
         repository_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
-        await self.skill_repository.sync_for_skill_repo(
+        await self.skill_repository.store_skills_and_versions(
             repo.id, latest_skills, tagged_skills,
         )
+        await self._store_to_security_audits(latest_skills, tagged_skills)
         return await self.skill_repo_repository.update_skill_repository(
             repo.id,
             repository_commit_id=repository_commit_id,
@@ -267,13 +286,13 @@ class SkillManager:
             skill_num=unique_skill_count,
         )
 
-    async def _scan_local_repository(
+    async def _discover_skills(
         self,
         repo: SkillRepoModel,
         *,
         clone_dir: Path,
         author: str | None,
-    ) -> tuple[list[SkillVersion], list[SkillVersion]]:
+    ) -> tuple[list[Skill], list[Skill]]:
         clone_url = normalize_clone_url_for_git(repo.url)
         self._git_ops.ensure_full_history(clone_dir, clone_url, repo.url)
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
@@ -284,11 +303,6 @@ class SkillManager:
         version_snapshots = GitOperations.build_repository_version_snapshots(
             repository_git_metadata, as_optional_str, as_optional_str_list,
         )
-        tag_snapshots = [
-            snapshot
-            for snapshot in version_snapshots
-            if as_optional_str(snapshot.get('version_source')) == 'tag'
-        ]
 
         if repo.branch is None:
             detected_branch = self._git_ops.get_cloned_repo_branch(clone_dir)
@@ -299,12 +313,66 @@ class SkillManager:
         repo = await self.skill_repo_repository.update_skill_repository(
             repo.id, local_path=str(clone_dir),
         )
-        return await self._scanner.scan_skill_repository_root(
+        return await self._scanner.start_scan(
             repo=repo,
             repo_root=clone_dir,
             repository_git_metadata=repository_git_metadata,
-            version_snapshots=tag_snapshots or None,
+            version_snapshots=version_snapshots or None,
             author=author,
+        )
+
+    async def _store_to_security_audits(
+        self,
+        latest_skills: list[Skill],
+        tagged_skills: list[SkillVersion],
+    ) -> None:
+        """Create ``SecurityAudit`` records for async-triggered skills."""
+        pending: list[tuple[uuid.UUID, str, str | None, str | None, dict]] = []
+
+        for skill in latest_skills:
+            sa = skill.extra_metadata.get('security_audit')
+            if sa and sa.get('skillspector_async') and sa.get('skillspector_build_number') is not None:
+                if skill.id is None:
+                    _logger.warning('Skip security audit: skill %s id is None', skill.skill_id)
+                    continue
+                pending.append((skill.id, skill.version, skill.commit_id, skill.skill_id, sa))
+
+        for skill_version in tagged_skills:
+            sa = skill_version.extra_metadata.get('security_audit')
+            if sa and sa.get('skillspector_async') and sa.get('skillspector_build_number') is not None:
+                if skill_version.id is None:
+                    _logger.warning(
+                        'Skip security audit for version: skill_version %s id is None',
+                        skill_version.version,
+                    )
+                    continue
+                pending.append((skill_version.id, skill_version.version, skill_version.commit_id, skill_version.skill_id, sa))
+
+        if not pending:
+            return
+
+        audit_repo = SecurityAuditRepository(self.skill_repository.session)
+        upserted = 0
+        for resource_id, version, commit_id, _skill_id, sa in pending:
+            await audit_repo.upsert_by_resource(
+                resource_type='skill',
+                resource_id=resource_id,
+                audit_data={
+                    'resource_type': 'skill',
+                    'resource_id': resource_id,
+                    'version': version,
+                    'commit_id': commit_id,
+                    'audit_type': 'skillspector',
+                    'risk_level': 'unknown',
+                    'risk_signals': [],
+                    'details': dict(sa),
+                },
+            )
+            upserted += 1
+
+        _logger.info(
+            'Upserted %d/%d SecurityAudit records',
+            upserted, len(pending),
         )
 
     # ── Internal: helpers ──────────────────────────────────────────
@@ -368,7 +436,7 @@ class SkillManager:
         return None
 
     @staticmethod
-    def _count_unique_skills(skills: list[SkillVersion]) -> int:
+    def _count_unique_skills(skills: list[Skill]) -> int:
         return len(
             {
                 str(skill.skill_id).strip()

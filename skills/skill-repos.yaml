@@ -42,9 +42,8 @@ openeuler_repos:
 - url: https://gitcode.com/openeuler/yuanrong
 - url: https://gitcode.com/openeuler/yuanrong-datasystem
 personal_repos:
-
-enterprise_repos:
 - url: https://gitcode.com/leon-wang2021/aet
+enterprise_repos:
 - url: https://github.com/anthropics/skills
 - url: https://github.com/anthropics/knowledge-work-plugins
 - url: https://github.com/anthropics/claude-code

@@ -63,6 +63,8 @@ services:
       - ../../src:/app/src:ro
       - ../../scripts:/app/scripts:ro
       - ../../migrations:/app/migrations:ro
+      - ../../skillcrawler:/app/skillcrawler:ro
+      - ../../skills:/app/skills:ro
       - /opt/wittyhub:/opt/wittyhub
     networks:
       - wittyhub-network

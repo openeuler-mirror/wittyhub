@@ -91,7 +91,6 @@ class Skill(Base):
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
     skill_repo: Mapped["SkillRepoModel"] = relationship(back_populates="skills")
-    audits: Mapped[list["SecurityAudit"]] = relationship(back_populates="skill", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_skills_skill_repo_id", "skill_repo_id"),
@@ -226,7 +225,6 @@ class SecurityAudit(Base):
     resource_type: Mapped[str] = mapped_column(String(20), nullable=False)
     resource_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("skills.id", ondelete="CASCADE"),
         nullable=False,
     )
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -236,8 +234,6 @@ class SecurityAudit(Base):
     risk_signals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     audited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    skill: Mapped["Skill"] = relationship(back_populates="audits")
 
     __table_args__ = (
         Index("idx_audits_resource", "resource_type", "resource_id"),

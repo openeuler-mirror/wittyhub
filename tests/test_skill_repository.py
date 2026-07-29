@@ -282,7 +282,7 @@ openeuler_repos:
             platform=None,
         )
 
-        skills, _ = await scanner.scan_skill_repository_root(
+        skills, _ = await scanner.start_scan(
             repo=repo,
             repo_root=repository,
             repository_git_metadata={"commit_id": repo_head_commit},

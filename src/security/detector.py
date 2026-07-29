@@ -8,7 +8,6 @@ import asyncio
 import logging
 import re
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,6 +44,20 @@ class SecurityReport:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+def _sanitize_json_value(value: Any) -> Any:
+    """Replace NUL characters recursively before storing values in JSONB."""
+    if isinstance(value, str):
+        return value.replace("\x00", "\\0")
+    if isinstance(value, dict):
+        return {
+            _sanitize_json_value(key): _sanitize_json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json_value(item) for item in value]
+    return value
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Skillspector — Jenkins‑based deep scanner
 # ═══════════════════════════════════════════════════════════════════════════
@@ -74,7 +87,6 @@ class SkillspectorClient:
         self.auth = (user, token) if user and token else None
         self.timeout = timeout
         self.poll_interval = poll_interval
-        self._crumb: tuple[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -109,19 +121,16 @@ class SkillspectorClient:
     # ------------------------------------------------------------------
 
     def _get_crumb(self, client: httpx.Client) -> tuple[str, str] | None:
-        if self._crumb is not None:
-            return self._crumb
         try:
             resp = client.get(
                 f"{self.base_url}/crumbIssuer/api/json", auth=self.auth
             )
             if resp.status_code == 200:
                 data = resp.json()
-                self._crumb = (
+                return (
                     data.get("crumbRequestField", "Jenkins-Crumb"),
                     data.get("crumb", ""),
                 )
-                return self._crumb
         except httpx.RequestError:
             pass
         return None
@@ -155,8 +164,6 @@ class SkillspectorClient:
                 return None
 
         if resp.status_code not in (200, 201, 302, 303):
-            if resp.status_code == 403:
-                self._crumb = None
             logger.error(
                 "Jenkins trigger returned %d: %s", resp.status_code, resp.text[:500]
             )
@@ -219,7 +226,13 @@ class SkillspectorClient:
                 return None
 
         if resp.status_code != 200:
-            logger.error("Report fetch returned %d", resp.status_code)
+            logger.error(
+                "Report fetch failed: build_number=%s status_code=%s url=%s response=%s",
+                build_number,
+                resp.status_code,
+                url,
+                resp.text[:500],
+            )
             return None
 
         try:
@@ -301,7 +314,7 @@ class SkillspectorClient:
                 if executable and isinstance(executable, dict):
                     return executable.get("number")
 
-                if data.get("cancelled") or data.get("blocked") or data.get("stuck"):
+                if data.get("cancelled") or data.get("stuck"):
                     logger.error("Queue item stuck/cancelled: %s", data)
                     return None
 
@@ -360,6 +373,7 @@ class SkillspectorCollector:
         async with self._session_factory() as session:
             pending = await self._fetch_pending(session)
             for audit in pending:
+                audit_id = audit.id
                 build_number = (audit.details or {}).get("skillspector_build_number")
                 if build_number is None:
                     continue
@@ -371,7 +385,7 @@ class SkillspectorCollector:
                     await session.rollback()
                     logger.exception(
                         "Failed to collect result for audit %s (build #%s)",
-                        audit.id, build_number,
+                        audit_id, build_number,
                     )
         return processed
 
@@ -407,11 +421,33 @@ class SkillspectorCollector:
         self, session: AsyncSession, audit: Any, build_number: int,
     ) -> bool:
         """Collect a single Jenkins result.  Returns True if collected."""
-        from src.models.orm import SecurityAudit, Skill
+        from src.models.orm import SecurityAudit, Skill, SkillVersion
+
+        logger.info(
+            "Collecting Skillspector result: audit_id=%s build_number=%s",
+            audit.id,
+            build_number,
+        )
 
         # 1. Wait for build (offload sync HTTP polling to a worker thread)
         status = await asyncio.to_thread(self._client.wait_for_build, build_number)
-        if status != "SUCCESS":
+        logger.info(
+            "Jenkins build completed: build_number=%s status=%s",
+            build_number,
+            status,
+        )
+
+        # A polling timeout or transient Jenkins error must remain pending so a
+        # later collector pass can retry it.
+        if status is None:
+            logger.warning(
+                "Build #%d status unavailable; will retry",
+                build_number,
+            )
+            return False
+
+        # These terminal states normally cannot produce a complete report.
+        if status in {"ABORTED", "NOT_BUILT"}:
             details = dict(audit.details or {})
             details["skillspector_collected"] = True
             details["skillspector_status"] = status
@@ -423,12 +459,21 @@ class SkillspectorCollector:
             await session.commit()
             return True
 
-        # 2. Fetch report (also sync HTTP → offload)
+        # Jenkins may report FAILURE when findings make the scanner exit 1,
+        # while still archiving a complete report. Fetch for all other terminal
+        # statuses, including SUCCESS, FAILURE, and UNSTABLE.
         report = await asyncio.to_thread(self._client.fetch_report, build_number)
         if report is None:
+            logger.warning(
+                "Build #%d ended with %s but report is unavailable; will retry",
+                build_number,
+                status,
+            )
             return False
 
-        # 3. Parse & update
+        report = _sanitize_json_value(report)
+
+        # 2. Parse & update
         signals = SkillspectorClient.report_to_risk_signals(report)
         severity = report.get("risk_assessment", {}).get("severity", "LOW").upper()
         score = report.get("risk_assessment", {}).get("score")
@@ -438,6 +483,7 @@ class SkillspectorCollector:
 
         details = dict(audit.details or {})
         details["skillspector_collected"] = True
+        details["skillspector_status"] = status
         details["skillspector_score"] = score
         details["skillspector_version"] = report.get("metadata", {}).get("skillspector_version")
         details["recommendation"] = report.get("risk_assessment", {}).get("recommendation")
@@ -452,11 +498,18 @@ class SkillspectorCollector:
         )
 
         if score is not None:
-            await session.execute(
-                update(Skill)
-                .where(Skill.id == audit.resource_id)
-                .values(risk_score=score)
-            )
+            skill = await session.get(Skill, audit.resource_id)
+            if skill is not None:
+                skill.risk_score = score
+            else:
+                skill_version = await session.get(SkillVersion, audit.resource_id)
+                if skill_version is not None:
+                    skill_version.risk_score = score
+                else:
+                    logger.warning(
+                        "Security audit resource not found: resource_id=%s",
+                        audit.resource_id,
+                    )
 
         await session.commit()
         logger.info(

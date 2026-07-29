@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from '@/pages/Home.vue'
+import SkillDetail from '@/pages/SkillDetail.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -12,34 +13,22 @@ const router = createRouter({
     {
       path: '/skills/search',
       name: 'search',
-      component: () => import('@/pages/Search.vue')
+      component: Home
     },
     {
       path: '/skills/categories/:category',
       name: 'category',
-      component: () => import('@/pages/Category.vue')
-    },
-    {
-      path: '/skills/leaderboard',
-      name: 'leaderboard',
-      component: () => import('@/pages/Leaderboard.vue')
+      component: Home
     },
     {
       path: '/skills/:skillId(.*)',
       name: 'skill-detail',
-      component: () => import('@/pages/SkillDetail.vue')
-    },
-    {
-      path: '/agents',
-      name: 'agent-list',
-      component: () => import('@/pages/AgentList.vue')
-    },
-    {
-      path: '/agents/:path',
-      name: 'agent-detail',
-      component: () => import('@/pages/AgentDetail.vue')
+      component: SkillDetail
     }
-  ]
+  ],
+  scrollBehavior() {
+    return { top: 0 }
+  }
 })
 
 export default router

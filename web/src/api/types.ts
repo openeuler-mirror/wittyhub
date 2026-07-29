@@ -13,7 +13,8 @@ export interface Skill {
   platform: string | null
   content: string | null
   metadata: Record<string, any>
-  security_score: number | null
+  risk_score: number | null
+  security_level?: string
   download_count: number
   rating: number | null
   created_at: string
@@ -57,102 +58,47 @@ export interface RiskSignal {
 }
 
 export interface DownloadResponse {
-  download_url: string
-  file_path: string | null
-  security_audit: SecurityAudit | null
+  blob: Blob
+  filename: string
 }
 
-export interface ParsedConfigTools {
-  allow?: string[]
-  deny?: string[]
-  profile?: string
-}
-
-export interface AgentSkillRef {
-  name: string
-  source?: string
-  inline?: string
-  installed?: string
-  when?: string[]
-}
-
-export interface SubagentConfig {
-  name: string
-  prompt?: string
-  tools?: ParsedConfigTools
-  skills?: AgentSkillRef[]
-}
-
-export interface OpenClawModule {
-  source?: string
-}
-
-export interface OpenClawConfig {
-  IDENTITY?: OpenClawModule
-  SOUL?: OpenClawModule
-  AGENTS?: OpenClawModule
-  TOOLS?: OpenClawModule
-  HEARTBEAT?: OpenClawModule
-  BOOTSTRAP?: OpenClawModule
-  USER?: OpenClawModule
-}
-
-export interface ParsedAgentConfig {
-  prompt?: string
-  prompt_file?: string
-  tools?: ParsedConfigTools
-  skills?: AgentSkillRef[]
-  subagents?: SubagentConfig[]
-  openclaw?: OpenClawConfig
-}
-
-export interface Agent {
-  id: string
-  agent_id: string
-  name: string
-  description: string | null
-  version: string | null
-  commit_id: string | null
-  author: string | null
-  source: string
+export interface SkillVersionsResponse {
   source_url: string
-  category: string | null
-  tags: string[] | null
-  logo_url: string | null
-  homepage_url: string | null
-  license: string | null
-  readme_content: string | null
-  agent_yaml_content: string | null
-  parsed_config: ParsedAgentConfig | null
-  supported_platforms: string[] | null
-  verified: boolean
-  star_count: number
-  contributor_count: number
-  security_score: number | null
-  download_count: number
-  rating: string | null
-  latest_commit_id: string | null
-  created_at: string
-  updated_at: string
+  skill_id: string
+  versions: SkillVersion[]
 }
 
-export interface AgentVersion {
+export interface SkillVersion {
   version: string
   commit_id: string | null
   author: string | null
   message: string | null
   released_at: string | null
   download_count: number
+  install_command?: string
 }
 
-export interface AgentListResponse {
-  agents: Agent[]
-  total: number
-  skip: number
-  limit: number
+export interface Stats {
+  total_skills: number
+  total_categories: number
+  categories: { name: string; count: number }[]
+  platforms: { name: string; count: number }[]
+  security_levels: { name: string; count: number }[]
 }
 
-export interface AgentVersionsResponse {
-  agent_id: string
-  versions: AgentVersion[]
+export interface Category {
+  name: string
+  count: number
+}
+
+export interface FilterState {
+  keyword: string
+  category: string[]
+  provider: string[]
+  securityLevel: string[]
+  sortBy: 'hot' | 'latest' | 'downloads'
+  sortPeriod: 'all' | 'week' | 'month'
+  viewMode: 'card' | 'list'
+  page: number
+  pageSize: number
 }

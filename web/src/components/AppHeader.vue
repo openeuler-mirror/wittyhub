@@ -1,68 +1,193 @@
 <script setup lang="ts">
-import { RouterLink } from 'vue-router'
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
+import { useScreen } from '@/composables/useScreen'
+import { useAppStore } from '@/stores/app'
+import { OIcon } from '@opensig/opendesign'
+import ContentWrapper from './ContentWrapper.vue'
+import HeaderNav from './HeaderNav.vue'
+import HeaderNavMoblie from './HeaderNavMoblie.vue'
+import logoSrc from '@/assets/header/logo.svg'
+import logoDarkSrc from '@/assets/header/logo_dark.svg'
 
-const isDark = ref(false)
+const appStore = useAppStore()
+const { lePadV } = useScreen()
 
-function toggleDark() {
-  isDark.value = !isDark.value
-  if (isDark.value) {
-    document.documentElement.classList.add('dark')
-    localStorage.setItem('darkMode', 'true')
-  } else {
-    document.documentElement.classList.remove('dark')
-    localStorage.setItem('darkMode', 'false')
-  }
+const menuShow = ref(false)
+
+const menuPanel = () => {
+  setTimeout(() => {
+    menuShow.value = !menuShow.value
+    document.body.style.overflow = menuShow.value ? 'hidden' : ''
+  }, 200)
 }
-
-onMounted(() => {
-  const saved = localStorage.getItem('darkMode')
-  if (saved === 'true' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
-})
 </script>
 
 <template>
-  <header class="bg-white border-b border-gray-100 sticky top-0 z-50 dark:bg-gray-800 dark:border-gray-700">
-    <div class="max-w-7xl mx-auto px-4">
-      <div class="flex items-center justify-between h-16">
-        <RouterLink to="/" class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center">
-            <span class="text-white font-bold text-sm">S</span>
-          </div>
-          <span class="text-xl font-semibold text-primary-500">WittyHub</span>
-        </RouterLink>
-
-        <nav class="hidden md:flex items-center gap-6">
-          <RouterLink to="/" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">首页</RouterLink>
-          <RouterLink to="/skills/search" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">探索</RouterLink>
-          <RouterLink to="/skills/leaderboard" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">排行榜</RouterLink>
-          <RouterLink v-if="false" to="/agents" class="text-gray-600 hover:text-primary-500 transition-colors dark:text-gray-300">Agents</RouterLink>
-        </nav>
-
-        <div class="flex items-center gap-4">
-          <button
-            @click="toggleDark"
-            class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            :title="isDark ? '切换到浅色模式' : '切换到深色模式'"
-          >
-            <svg v-if="isDark" class="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+  <header
+    class="app-header"
+    :class="{ dark: appStore.isDark }"
+  >
+    <ContentWrapper class="app-header-wrap">
+      <!-- 移动端菜单图标 -->
+      <div v-if="lePadV" class="menu-icon">
+        <div class="icon" @click="menuPanel">
+          <OIcon>
+            <svg v-if="!menuShow" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
             </svg>
-            <svg v-else class="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+            <svg v-else width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
-          </button>
-          <RouterLink
-            to="/skills/search"
-            class="btn-primary text-sm"
-          >
-            搜索 Skill
-          </RouterLink>
+          </OIcon>
         </div>
       </div>
-    </div>
+
+      <!-- Logo -->
+      <a href="https://www.openeuler.openatom.cn/zh/" class="logo-link">
+        <img
+          class="logo"
+          alt="openEuler logo"
+          :src="appStore.isDark ? logoDarkSrc : logoSrc"
+        />
+      </a>
+      <div class="logo-divider"></div>
+      <a href="/" class="skillhub-title">SkillHub</a>
+
+      <!-- 桌面端导航 -->
+      <HeaderNav v-if="!lePadV" />
+
+      <!-- 移动端导航 -->
+      <HeaderNavMoblie
+        v-if="lePadV"
+        :menu-show="menuShow"
+        @link-click="menuPanel"
+      />
+    </ContentWrapper>
   </header>
 </template>
+
+<style lang="scss" scoped>
+.app-header {
+  background-color: var(--o-color-fill2);
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 98;
+  box-shadow: var(--o-shadow-1);
+  backdrop-filter: blur(5px);
+
+  @include respond-to('>pad_v') {
+    &.dark {
+      &:after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 1px;
+        background-color: var(--o-color-control4);
+      }
+    }
+
+    &:before {
+      bottom: 0;
+      box-shadow: var(--o-shadow-1);
+      content: '';
+      left: 0;
+      pointer-events: none;
+      position: absolute;
+      right: 0;
+      top: 0;
+      z-index: 100;
+    }
+  }
+
+  .app-header-wrap {
+    display: flex;
+    align-items: center;
+    @include respond-to('>pad_v') {
+      height: 72px;
+    }
+    @include respond-to('<=pad_v') {
+      height: 48px;
+      justify-content: space-between;
+      position: relative;
+    }
+  }
+}
+
+.logo {
+  cursor: pointer;
+  flex-shrink: 0;
+
+  @include respond-to('>pad_v') {
+    height: 32px;
+    width: 136px;
+
+    @include respond-to('laptop') {
+      margin-right: 0;
+    }
+    @include respond-to('pad_h') {
+      margin-right: 0;
+    }
+  }
+
+  @include respond-to('<=pad_v') {
+    height: 24px;
+    width: 136px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 12px;
+  }
+}
+
+.logo-divider {
+  width: 1px;
+  height: 24px;
+  background-color: var(--o-color-control4);
+  margin: 0 16px;
+  flex-shrink: 0;
+
+  @include respond-to('<=pad_v') {
+    display: none;
+  }
+}
+
+.skillhub-title {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 20px;
+  line-height: 26px;
+  color: var(--o-color-info1);
+  text-decoration: none;
+  flex-shrink: 0;
+  margin-right: var(--o-gap-7);
+
+  @include respond-to('laptop') {
+    margin-right: 28px;
+  }
+  @include respond-to('pad_h') {
+    margin-right: var(--o-gap-2);
+  }
+  @include respond-to('<=pad_v') {
+    display: none;
+  }
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
+}
+
+.menu-icon {
+  flex: 1;
+  display: block;
+  .icon {
+    font-size: var(--o-icon_size-m);
+    color: var(--o-color-info1);
+    height: 24px;
+    cursor: pointer;
+  }
+}
+</style>

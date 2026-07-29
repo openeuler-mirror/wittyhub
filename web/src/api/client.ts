@@ -1,21 +1,28 @@
 import axios from 'axios'
-import type { Skill, SkillListResponse, SearchResponse, SecurityAudit, DownloadResponse, Agent, AgentListResponse, AgentVersionsResponse } from './types'
-
-export interface SkillVersionsResponse {
-  source_url: string
-  skill_id: string
-  versions: Skill[]
-}
+import type {
+  Skill,
+  SkillListResponse,
+  SearchResponse,
+  SecurityAudit,
+  DownloadResponse,
+  SkillVersionsResponse,
+  Stats,
+  Category
+} from './types'
 
 const client = axios.create({
   baseURL: '/api/v1',
   timeout: 30000
 })
 
-export interface Stats {
-  total_skills: number
-  total_categories: number
-  categories: { name: string; count: number }[]
+function parseContentDispositionFilename(header: string | undefined): string {
+  if (!header) return 'skill.zip'
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match) {
+    try { return decodeURIComponent(utf8Match[1].trim()) } catch { /* ignore */ }
+  }
+  const match = header.match(/filename="?([^";]+)"?/i)
+  return match ? match[1].trim() : 'skill.zip'
 }
 
 export const api = {
@@ -25,7 +32,9 @@ export const api = {
     category?: string
     platform?: string
     tags?: string
+    security_level?: string
     sort_by?: 'updated_at' | 'download_count'
+    sort_period?: 'week' | 'month'
   } = {}): Promise<SkillListResponse> {
     const { data } = await client.get('/skills/', { params })
     return data
@@ -59,11 +68,13 @@ export const api = {
     return data
   },
 
-  async getSkillDownload(skillId: string): Promise<Blob> {
-    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
-      responseType: 'blob',
+  async getSkillDownload(skillId: string): Promise<DownloadResponse> {
+    const resp = await client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
+      responseType: 'blob'
     })
-    return data
+    const blob: Blob = resp.data
+    const filename = parseContentDispositionFilename(resp.headers['content-disposition'])
+    return { blob, filename }
   },
 
   async reindex(): Promise<{ status: string; indexed_count: number; total_skills: number }> {
@@ -76,33 +87,8 @@ export const api = {
     return data
   },
 
-  async getCategories(): Promise<{ categories: { name: string; count: number }[] }> {
+  async getCategories(): Promise<{ categories: Category[] }> {
     const { data } = await client.get('/index/categories')
-    return data
-  },
-
-  async listAgents(params: {
-    skip?: number
-    limit?: number
-    category?: string
-    tags?: string
-  } = {}): Promise<AgentListResponse> {
-    const { data } = await client.get('/agents/', { params })
-    return data
-  },
-
-  async getAgent(agentId: string): Promise<Agent> {
-    const { data } = await client.get(`/agents/${encodeURIComponent(agentId)}`)
-    return data
-  },
-
-  async getAgentVersions(agentId: string): Promise<AgentVersionsResponse> {
-    const { data } = await client.get(`/agents/${encodeURIComponent(agentId)}/versions`)
-    return data
-  },
-
-  async getAgentDownload(agentId: string): Promise<{ download_url: string }> {
-    const { data } = await client.get(`/agents/${encodeURIComponent(agentId)}/download`)
     return data
   }
 }

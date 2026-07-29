@@ -20,7 +20,10 @@ export default {
           800: '#001a73',
           900: '#001361',
         }
-      }
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+      },
     },
   },
   plugins: [require('@tailwindcss/typography')],

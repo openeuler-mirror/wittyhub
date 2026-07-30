@@ -1,0 +1,13 @@
+services:
+  api:
+    volumes:
+      - ../src:/app/src:ro
+      - ../scripts:/app/scripts:ro
+      - ../migrations:/app/migrations:ro
+      - ../skillcrawler:/app/skillcrawler:ro
+      - ../skills:/app/skills:ro
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8081 --reload
+
+  embedding:
+    volumes:
+      - ./embedding/app.py:/app/app.py:ro

@@ -1,0 +1,129 @@
+name: docker
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - wittyhub-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  embedding:
+    build:
+      context: ..
+      dockerfile: deploy/embedding/Dockerfile
+    ports:
+      - "8082:8081"
+    environment:
+      WITTYHUB_CONFIG: /app/config.yaml
+      SENTENCE_TRANSFORMERS_HOME: /models-cache
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - huggingface-cache:/models-cache
+    networks:
+      - wittyhub-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      WITTYHUB_CONFIG: /app/config.yaml
+      DATABASE__HOST: db
+      DATABASE__PORT: 5432
+      DATABASE__USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      DATABASE__PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DATABASE__DBNAME: ${POSTGRES_DB:?POSTGRES_DB is required}
+      AI__EMBEDDING_HOST: http://embedding:8081
+      SECURITY__SKILLSPECTOR_JENKINS_URL: ${SKILLSPECTOR_JENKINS_URL:-http://skillspector:8080}
+      SECURITY__SKILLSPECTOR_JENKINS_USER: ${SKILLSPECTOR_JENKINS_USER:-admin}
+      SECURITY__SKILLSPECTOR_JENKINS_TOKEN: ${SKILLSPECTOR_JENKINS_TOKEN:-}
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - /opt/wittyhub:/opt/wittyhub
+    networks:
+      - wittyhub-network
+    depends_on:
+      db:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/api/v1/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+      - "443:8443"
+    networks:
+      - wittyhub-network
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  skillspector:
+    profiles: ["skillspector"]
+    build:
+      context: ..
+      dockerfile: deploy/skillspector/Dockerfile
+      args:
+        JENKINS_ADMIN_PASS: ${SKILLSPECTOR_JENKINS_TOKEN:?SKILLSPECTOR_JENKINS_TOKEN is required}
+    ports:
+      - "8083:8080"
+      - "50000:50000"
+    environment:
+      JENKINS_OPTS: --httpPort=8080
+    volumes:
+      - jenkins-data:/var/jenkins_home
+    networks:
+      - wittyhub-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8080/login >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  huggingface-cache:
+  jenkins-data:
+
+networks:
+  wittyhub-network:
+    driver: bridge

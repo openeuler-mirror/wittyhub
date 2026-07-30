@@ -2,7 +2,10 @@
 Simple embedding service using sentence-transformers
 """
 import os
+from pathlib import Path
 from typing import List
+
+import yaml
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -13,8 +16,15 @@ from sentence_transformers import SentenceTransformer
 
 app = FastAPI(title="Embedding Service")
 
-MODEL_NAME = os.getenv("MODEL_NAME", "BAAI/bge-base-zh-v1.5")
-DIMENSION = int(os.getenv("DIMENSION", "768"))
+config_path = Path(os.getenv("WITTYHUB_CONFIG", "/app/config.yaml"))
+if config_path.exists():
+    with config_path.open(encoding="utf-8") as config_file:
+        ai_config = (yaml.safe_load(config_file) or {}).get("ai", {})
+else:
+    ai_config = {}
+
+MODEL_NAME = ai_config.get("embedding_model", "BAAI/bge-base-zh-v1.5")
+DIMENSION = int(ai_config.get("embedding_dimension", 768))
 
 print(f"Loading model: {MODEL_NAME}")
 try:

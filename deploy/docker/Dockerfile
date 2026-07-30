@@ -15,9 +15,11 @@ COPY pyproject.toml README.md ./
 RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
 
 COPY src ./src
-COPY migrations ./migrations
 COPY scripts ./scripts
+COPY migrations ./migrations
 COPY alembic.ini ./
+COPY skillcrawler ./skillcrawler
+COPY skills ./skills
 
 RUN mkdir -p /opt/wittyhub
 

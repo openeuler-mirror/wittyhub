@@ -52,10 +52,6 @@ services:
     environment:
       - WITTYHUB_CONFIG=/app/config.yaml
       - DATABASE__HOST=db
-      - DATABASE__PORT=5432
-      - DATABASE__USER=wittyhub
-      - DATABASE__PASSWORD=wittyhub_secret
-      - DATABASE__DBNAME=wittyhub
       - AI__EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
       - AI__EMBEDDING_HOST=http://embedding:8081
     volumes:

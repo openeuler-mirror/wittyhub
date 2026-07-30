@@ -52,9 +52,9 @@ class SkillRepoEntry(BaseSettings):
 class SecurityConfig(BaseSettings):
     # Skillspector (Jenkins-based scanner)
     enable_audit: bool = False
-    skillspector_jenkins_url: str = ""
-    skillspector_jenkins_user: str = ""  # env: SKILLSPECTOR_JENKINS_USER
-    skillspector_jenkins_token: str = ""  # env: SKILLSPECTOR_JENKINS_TOKEN
+    skillspector_jenkins_url: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_URL
+    skillspector_jenkins_user: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_USER
+    skillspector_jenkins_token: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_TOKEN
 
 
 class AppConfig(BaseSettings):

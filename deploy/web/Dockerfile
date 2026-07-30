@@ -2,10 +2,10 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY web/ .
 RUN npm run build
 
 FROM nginx:1.27-alpine
@@ -18,7 +18,7 @@ RUN mkdir -p /var/cache/nginx /var/run/nginx \
         /etc/nginx/conf.d \
         /usr/share/nginx/html
 
-COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chown=nginx:nginx deploy/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --chown=nginx:nginx --from=builder /app/dist /usr/share/nginx/html
 
 USER nginx

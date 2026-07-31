@@ -24,8 +24,8 @@ COPY deploy/embedding/app.py /app/app.py
 ENV PYTHONUNBUFFERED=1
 ENV MODEL_NAME=BAAI/bge-base-zh-v1.5
 ENV DIMENSION=768
-ENV PORT=8081
+ENV PORT=8082
 
-EXPOSE 8081
+EXPOSE 8082
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8082"]

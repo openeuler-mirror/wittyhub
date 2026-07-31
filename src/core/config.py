@@ -11,9 +11,9 @@ from pydantic_settings import BaseSettings
 class PostgresConfig(BaseSettings):
     host: str = "localhost"
     port: int = 5432
-    user: str = "wittyhub"
-    password: str = "wittyhub_secret"
-    db: str = "wittyhub"
+    user: str = ""
+    password: str = ""
+    db: str = ""
     sslmode: str = "disable"
 
     @property
@@ -32,9 +32,9 @@ class StorageConfig(BaseSettings):
 
 
 class ModelConfig(BaseSettings):
-    name: str = "deepseek-v4-flash"
-    base_url: str = "https://api.deepseek.com"
-    api_key: str = "sk-9767243ba0364f52ab5bb7878ad2d42a"
+    name: str = ""
+    base_url: str = ""
+    api_key: str = ""
     timeout: float = 30
 
 

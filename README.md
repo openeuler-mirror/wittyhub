@@ -79,68 +79,174 @@ flowchart LR
 - Docker & Docker Compose
 - Python 3.10+ (本地开发) + uv
 
-### Docker 部署
+### Docker 运行模式
 
-1. 克隆仓库并准备环境变量
+开发和生产共用 `compose.yaml`，区别在于是否加载 `compose.override.yaml`：
+
+| 对比项 | 开发环境 | 生产环境 |
+|---|---|---|
+| 加载文件 | `compose.yaml` + `compose.override.yaml` | 仅 `compose.yaml` |
+| API 源码 | 挂载宿主机源码 | 使用镜像内构建好的源码 |
+| Embedding 源码 | 挂载宿主机 `app.py` | 使用镜像内构建好的源码 |
+| Uvicorn | 启用 `--reload` | 不启用自动重载 |
+| 推荐运行方式 | 前台运行，方便看日志 | 后台运行并设置自动重启 |
+| 适用场景 | 本地开发和调试 | 服务器部署 |
+
+```mermaid
+flowchart TD
+    START["在 deploy/ 目录运行"] --> MODE{"运行模式"}
+    MODE -->|"开发"| DEV["docker compose up --build"]
+    MODE -->|"生产"| PROD["docker compose -f compose.yaml up -d --build"]
+    BASE["compose.yaml"] --> DEV
+    OVERRIDE["compose.override.yaml"] -->|"自动合并"| DEV
+    BASE --> PROD
+```
+
+两种模式都先准备环境变量：
 
 ```bash
 git clone https://gitcode.com/openeuler/wittyhub.git
 cd wittyhub
 cp deploy/.env.example deploy/.env
-# 编辑 deploy/.env，填写密码、Token 和 API Key
+# 编辑 deploy/.env，填写数据库密码和 SkillSpector Token
 cd deploy
 ```
 
-2. 启动服务
+#### 开发环境
+
+在 `deploy/` 目录直接运行时，Docker Compose 会自动合并 `compose.yaml` 和 `compose.override.yaml`：
 
 ```bash
-docker compose up -d
+docker compose up --build
 ```
 
-3. 初始化数据库
+开发覆盖配置会挂载 `src/`、`scripts/`、`migrations/`、`skillcrawler/`、`skills/` 和 Embedding 源码，并为 API 启用 `--reload`。修改 Python 源码后通常不需要重新构建镜像。
+
+如需后台运行开发环境：
+
+```bash
+docker compose up -d --build
+```
+
+#### 生产环境
+
+生产环境必须显式指定基础文件，避免 Docker Compose 自动加载开发覆盖配置：
+
+```bash
+docker compose -f compose.yaml up -d --build
+```
+
+生产模式不挂载仓库源码，API 不使用 `--reload`；代码和依赖变更后需要重新构建镜像。
+
+#### 数据库初始化
+
+开发环境：
 
 ```bash
 docker compose exec api alembic upgrade head
 ```
 
-4. 生成测试数据
+生产环境：
+
+```bash
+docker compose -f compose.yaml exec api alembic upgrade head
+```
+
+生成测试数据仅建议用于开发环境：
 
 ```bash
 docker compose exec api sh -c \
   'python scripts/generate_test_data.py --host "$POSTGRES__HOST" --password "$POSTGRES__PASSWORD"'
 ```
 
-5. 访问服务
+#### 访问地址
 
 - 前端: http://localhost:8080
 - API: http://localhost:8081
 - API 文档: http://localhost:8081/docs
 
-生产配置不会挂载仓库源码，也不会启用 Uvicorn 自动重载。
-
-### Docker 开发环境
-
-开发配置通过 Compose 默认识别的 `compose.override.yaml` 添加源码挂载和 `--reload`：
-
-```bash
-docker compose up
-```
-
 ### SkillSpector 安全审计
 
-SkillSpector 使用可选的 `skillspector` profile，默认不会启动。先在 `deploy/.env` 中设置安全的 `SKILLSPECTOR_JENKINS_TOKEN`；功能开关 `security.enable_audit` 统一由 `config.yaml` 管理。
+SkillSpector 使用可选的 `skillspector` profile，默认不会启动。先在 `deploy/.env` 中设置安全的 `SECURITY__SKILLSPECTOR_JENKINS_TOKEN`；功能开关 `security.enable_audit` 统一由 `config.yaml` 管理。
+
+开发环境启动：
 
 ```bash
-docker compose --profile skillspector up -d
+docker compose --profile skillspector up --build
+```
+
+生产环境启动：
+
+```bash
+docker compose -f compose.yaml --profile skillspector up -d --build
 ```
 
 Jenkins 默认通过 http://localhost:8083 访问；API 在 Compose 网络内通过 `http://skillspector:8083` 调用它。
 
 ### 配置职责
 
-- `deploy/.env`：数据库凭据、API Key 和 Token，不提交到 Git。
-- `config.yaml`：模型、搜索、审计开关、日志和存储等应用行为。
-- `deploy/compose.yaml`：服务、固定端口、网络、挂载以及必要的环境变量映射，不保存业务配置或密钥。
+- `deploy/.env`：保存数据库凭据和 SkillSpector Token，不提交到 Git；Compose 只会使用 `compose.yaml` 中通过 `${...}` 引用的变量。
+- `config.yaml`：保存模型、搜索、审计开关、日志和存储等应用配置，也是本地直接运行 Python 时的主要配置源。
+- `deploy/compose.yaml`：定义服务、固定端口、网络和挂载，并把 `.env` 中的值映射为 API 能识别的 `SECTION__FIELD` 环境变量。
+
+#### 配置优先级
+
+需要分成 Compose 插值和 Wittyhub 应用加载两个阶段理解。
+
+第一阶段，Docker Compose 解析 `${VAR}` 时，优先级从高到低为：
+
+```text
+当前 Shell 中导出的环境变量
+    > deploy/.env
+    > compose.yaml 中的 ${VAR:-default} 默认值
+```
+
+`.env` 中的变量不会自动全部进入容器。只有被 `compose.yaml` 的 `environment`、`build.args`、`ports` 等位置显式引用的变量才会生效。Compose 中直接写死的值不受 `.env` 影响，例如：
+
+```yaml
+POSTGRES__HOST: db
+POSTGRES__PORT: 5432
+```
+
+第二阶段，Wittyhub API 加载应用配置时，优先级从高到低为：
+
+```text
+API 容器中的 SECTION__FIELD 环境变量
+    > config.yaml
+    > src/core/config.py 中的代码默认值
+```
+
+双下划线表示“配置段与字段”。例如：
+
+| API 容器环境变量 | 覆盖的 `config.yaml` 配置 |
+|---|---|
+| `POSTGRES__HOST` | `postgres.host` |
+| `POSTGRES__USER` | `postgres.user` |
+| `POSTGRES__PASSWORD` | `postgres.password` |
+| `POSTGRES__DB` | `postgres.db` |
+| `SECURITY__SKILLSPECTOR_JENKINS_TOKEN` | `security.skillspector_jenkins_token` |
+
+Docker 部署中的完整链路为：
+
+```mermaid
+flowchart LR
+    ENV["deploy/.env"] -->|"${VAR} 插值"| COMPOSE["compose.yaml"]
+    COMPOSE -->|"注入 SECTION__FIELD"| CONTAINER["API 容器环境变量"]
+    YAML["config.yaml"] --> LOADER["Wittyhub 配置加载器"]
+    DEFAULTS["代码默认值"] --> LOADER
+    CONTAINER -->|"最高优先级覆盖"| LOADER
+    LOADER --> SETTINGS["settings"]
+```
+
+以数据库为例，Docker 中最终来源是：
+
+| 最终字段 | 来源 |
+|---|---|
+| `postgres.host`、`postgres.port` | `compose.yaml` 固定的容器网络地址和端口 |
+| `postgres.user`、`postgres.password`、`postgres.db` | `deploy/.env`，经 Compose 映射后覆盖 YAML |
+| `postgres.sslmode` | `config.yaml`，因为 Compose 没有覆盖它 |
+
+本地不通过 Docker 直接运行 Python 时，程序不会自动读取 `deploy/.env`，因此使用 `config.yaml`；如需临时覆盖，可在 Shell 中设置 `POSTGRES__HOST` 等分层环境变量。
 
 ### 本地开发
 

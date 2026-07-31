@@ -1,9 +1,15 @@
+# 1. 配置优先级（从低到高）：代码默认值 < 本文件 < SECTION__FIELD 环境变量。
+# 2. Docker 部署时，deploy/.env 由 Compose 读取；
+# 只有 compose.yaml 显式映射的变量才会进入容器并覆盖本文件，
+# 例如 POSTGRES__PASSWORD -> postgres.password。
+# 3. 本地直接运行 Python 时不会自动读取 deploy/.env，此时默认使用本文件。
+
 storage:
   type: "local"
   local_path: "/opt/wittyhub"
 
 model:
-  name: deepseek-chat
+  name: deepseek-v4-flash
   base_url: https://api.deepseek.com
   api_key: ""
   timeout: 30
@@ -14,15 +20,15 @@ crawler:
 security:
   # Skillspector (Jenkins-based scanner) — sensitive fields via env vars
   enable_audit: true
-  skillspector_jenkins_url: ""  # 通过环境变量 SKILLSPECTOR_JENKINS_URL 配置
-  skillspector_jenkins_user: ""
+  skillspector_jenkins_url: "http://localhost:8083"
+  skillspector_jenkins_user: "admin"
   skillspector_jenkins_token: ""
 
 postgres:
   host: "localhost"
   port: 5432
   user: "wittyhub"
-  password: "wittyhub_secret"
+  password: ""
   db: "wittyhub"
   sslmode: "disable"
 

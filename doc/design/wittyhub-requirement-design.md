@@ -760,12 +760,12 @@ services:
 
 ```yaml
 # config.yaml
-database:
+postgres:
   host: "localhost"
   port: 5432
   user: "wittyhub"
   password: "wittyhub_secret"
-  dbname: "wittyhub"
+  db: "wittyhub"
 
 storage:
   local_path: /opt/wittyhub

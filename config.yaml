@@ -18,17 +18,17 @@ security:
   skillspector_jenkins_user: ""
   skillspector_jenkins_token: ""
 
-database:
+postgres:
   host: "localhost"
   port: 5432
   user: "wittyhub"
   password: "wittyhub_secret"
-  dbname: "wittyhub"
+  db: "wittyhub"
   sslmode: "disable"
 
 ai:
-  embedding_model: "bge-base-zh-v1.5"
-  embedding_host: "http://localhost:8081"
+  embedding_model: "BAAI/bge-base-zh-v1.5"
+  embedding_host: "http://localhost:8082"
   embedding_dimension: 768
   enable_semantic_search: true
 

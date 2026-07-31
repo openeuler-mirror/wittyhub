@@ -107,7 +107,7 @@ docker compose exec api alembic upgrade head
 
 ```bash
 docker compose exec api sh -c \
-  'python scripts/generate_test_data.py --host "$DATABASE__HOST" --password "$DATABASE__PASSWORD"'
+  'python scripts/generate_test_data.py --host "$POSTGRES__HOST" --password "$POSTGRES__PASSWORD"'
 ```
 
 5. 访问服务
@@ -256,12 +256,12 @@ wittyhub/
 主要配置项 (`config.yaml`):
 
 ```yaml
-database:
+postgres:
   host: localhost
   port: 5432
   user: wittyhub
   password: your_password
-  dbname: wittyhub
+  db: wittyhub
 
 storage:
   type: local

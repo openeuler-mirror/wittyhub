@@ -538,10 +538,8 @@ db (pg_isready) ──► api (HTTP /api/v1/health) ──► web
 ```yaml
 environment:
   WITTYHUB_CONFIG: /app/config.yaml
-  DATABASE__HOST: db
-  DATABASE__PASSWORD: ${POSTGRES_PASSWORD}
-  AI__EMBEDDING_HOST: http://embedding:8082
-  MODEL__API_KEY: ${MODEL_API_KEY}
+  POSTGRES__HOST: db
+  POSTGRES__PASSWORD: ${POSTGRES_PASSWORD}
 volumes:
   - ../config.yaml:/app/config.yaml:ro
 ```
@@ -557,7 +555,7 @@ volumes:
 └── logs/                    # skillcrawler 日志
 ```
 
-环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；数据库、AI、模型、爬虫等配置均可通过 `SECTION__FIELD` 形式覆盖，例如 `DATABASE__HOST=db`。
+环境变量 `WITTYHUB_CONFIG` 指向配置文件路径；PostgreSQL、AI、模型、爬虫等配置均可通过 `SECTION__FIELD` 形式覆盖，例如 `POSTGRES__HOST=db`。
 
 #### 4.3.7 一键部署
 

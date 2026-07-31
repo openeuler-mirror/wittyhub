@@ -4,7 +4,7 @@
 # 用法:
 #   docker build -f deploy/skillspector/Dockerfile -t skillspector-jenkins:latest .
 #   docker run -d --name skillspector-jenkins \
-#     -p 8080:8080 -p 50000:50000 \
+#     -p 8083:8083 -p 50000:50000 \
 #     -v jenkins_home:/var/jenkins_home \
 #     skillspector-jenkins:latest
 #

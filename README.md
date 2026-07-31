@@ -89,6 +89,8 @@ flowchart LR
 | API 源码 | 挂载宿主机源码 | 使用镜像内构建好的源码 |
 | Embedding 源码 | 挂载宿主机 `app.py` | 使用镜像内构建好的源码 |
 | Uvicorn | 启用 `--reload` | 不启用自动重载 |
+| Nginx 配置 | `web/nginx.dev.conf`（仅 HTTP 8080） | `web/nginx.conf`（HTTP 8080 + HTTPS 8443） |
+| Web 宿主机端口 | `8080` | `8080`、`443` |
 | 推荐运行方式 | 前台运行，方便看日志 | 后台运行并设置自动重启 |
 | 适用场景 | 本地开发和调试 | 服务器部署 |
 
@@ -120,7 +122,7 @@ cd deploy
 docker compose up --build
 ```
 
-开发覆盖配置会挂载 `src/`、`scripts/`、`migrations/`、`skillcrawler/`、`skills/` 和 Embedding 源码，并为 API 启用 `--reload`。修改 Python 源码后通常不需要重新构建镜像。
+开发覆盖配置会挂载 `src/`、`scripts/`、`migrations/`、`skillcrawler/`、`skills/` 和 Embedding 源码，并为 API 启用 `--reload`。它还会用 `web/nginx.dev.conf` 覆盖镜像中的生产 Nginx 配置，因此不会加载 HTTPS、证书和 TLS 配置，也不会映射宿主机的 443 端口。修改 Python 源码后通常不需要重新构建镜像。
 
 如需后台运行开发环境：
 
@@ -136,7 +138,7 @@ docker compose up -d --build
 docker compose -f compose.yaml up -d --build
 ```
 
-生产模式不挂载仓库源码，API 不使用 `--reload`；代码和依赖变更后需要重新构建镜像。
+生产模式不挂载仓库源码，API 不使用 `--reload`；Web 使用镜像内的 `web/nginx.conf`，并将宿主机 443 端口映射到容器 8443。启动前需准备该配置引用的证书文件。代码和依赖变更后需要重新构建镜像。
 
 #### 数据库初始化
 

@@ -476,9 +476,9 @@ graph TB
     end
 
     subgraph Docker Compose : wittyhub-network
-        NG[web<br/>nginx:alpine<br/>:8080→80]
+        NG[web<br/>nginx:alpine<br/>:8080→8080]
         API[api<br/>FastAPI uvicorn<br/>:8081→8081]
-        EMB[embedding<br/>BGE 模型服务<br/>:8082→8081]
+        EMB[embedding<br/>BGE 模型服务<br/>:8082→8082]
         DB[(db<br/>pgvector/pg16<br/>:5432)]
     end
 
@@ -504,9 +504,9 @@ graph TB
 | 服务 | 镜像/构建 | 端口 | 依赖 | 说明 |
 |------|-----------|------|------|------|
 | db | pgvector/pgvector:pg16 | 5432 | — | 初始化 Alembic 迁移（扩展 + 表结构） |
-| embedding | embedding.Dockerfile | 8082→8081 | — | BGE 模型，内存限制 4G，启动 ~120s |
-| api | deploy/docker/Dockerfile | 8081→8081 | db ✓ | FastAPI，挂载根目录 config.yaml，并通过环境变量覆盖 Docker 差异 |
-| web | nginx:alpine | 8080→80 | api | 静态 SPA + `/api/` 反向代理 |
+| embedding | deploy/embedding/Dockerfile | 8082→8082 | — | BGE 模型，内存限制 4G，启动 ~120s |
+| api | deploy/api/Dockerfile | 8081→8081 | db ✓ | FastAPI，挂载根目录 config.yaml，并通过环境变量覆盖 Docker 差异 |
+| web | nginx:alpine | 8080→8080 | api | 静态 SPA + `/api/` 反向代理 |
 
 #### 4.3.4 Nginx 路由规则
 
@@ -531,17 +531,19 @@ db (pg_isready) ──► api (HTTP /api/v1/health) ──► web
 
 #### 4.3.6 配置管理
 
-本地和 Docker 共用项目根目录 `config.yaml`。Docker 环境通过 `docker-compose.yaml` 的环境变量覆盖运行时差异：
+本地和 Docker 共用项目根目录 `config.yaml`。
+应用行为由该文件管理；`deploy/.env` 只保存数据库凭据和外部服务密钥。
+固定端口由 Compose 管理，环境变量只负责容器网络差异和敏感值映射：
 
 ```yaml
 environment:
-  - WITTYHUB_CONFIG=/app/config.yaml
-  - DATABASE__HOST=db
-  - AI__EMBEDDING_HOST=http://embedding:8081
-  - AI__EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
-  - SECURITY__ENABLE_AUDIT=false
+  WITTYHUB_CONFIG: /app/config.yaml
+  DATABASE__HOST: db
+  DATABASE__PASSWORD: ${POSTGRES_PASSWORD}
+  AI__EMBEDDING_HOST: http://embedding:8082
+  MODEL__API_KEY: ${MODEL_API_KEY}
 volumes:
-  - ../../config.yaml:/app/config.yaml:ro
+  - ../config.yaml:/app/config.yaml:ro
 ```
 
 配置加载顺序为：`config.yaml` 提供默认值，`SECTION__FIELD` 形式的环境变量覆盖对应字段。
@@ -801,24 +803,24 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  ┌────────────────────────────────────────────────────────────────────┐  │
 │  │  Docker Network: wittyhub-network                                  │  │
 │  │                                                                    │  │
-│  │  ┌─────────────┐   proxy /api/   ┌─────────────┐                  │  │
-│  │  │  web:80     │──────────────►│  api:8081   │                  │  │
-│  │  │  (nginx)    │               │  (FastAPI)  │                  │  │
-│  │  │  :8080      │               │  :8081      │                  │  │
-│  │  └─────────────┘               └──────┬──────┘                  │  │
-│  │        ▲                              │                          │  │
-│  │        │ static files                 │ SQL                      │  │
-│  │   web/dist/                           ▼                          │  │
-│  │                              ┌─────────────┐   HTTP   ┌────────┐│  │
-│  │                              │  db:5432    │          │embedding││  │
-│  │                              │ (pgvector)  │          │ :8081  ││  │
-│  │                              └──────┬──────┘          └────────┘│  │
-│  │                                     │                            │  │
-│  │                              postgres-data                       │  │
-│  │                              /opt/wittyhub            │  │
+│  │  ┌─────────────┐   proxy /api/   ┌─────────────┐                   │  │
+│  │  │  web:8080   │  ──────────────►│  api:8081   │                   │  │
+│  │  │  (nginx)    │                 │  (FastAPI)  │                   │  │
+│  │  │  :8080      │                 │  :8081      │                   │  │
+│  │  └─────────────┘                 └──────┬──────┘                   │  │
+│  │        ▲                              │                            │  │
+│  │        │ static files                 │ SQL                        │  │
+│  │   web/dist/                           ▼                            │  │
+│  │                              ┌─────────────┐   HTTP   ┌────────┐   │  │
+│  │                              │  db:5432    │          │embedding│  │  │
+│  │                              │ (pgvector)  │          │ :8082  │   │  │
+│  │                              └──────┬──────┘          └────────┘   │  │
+│  │                                     │                              │  │
+│  │                              postgres-data                         │  │
+│  │                              /opt/wittyhub                         │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
-│  External: GitHub / GitCode / Gitee / Socket.dev                        │
+│  External: GitHub / GitCode / Gitee / Socket.dev                         │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -919,6 +921,6 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | 数据访问层 | `src/models/repository.py` |
 | ORM 模型 | `src/models/orm.py` |
 | 技能爬取 | `skillcrawler/main.py` |
-| Docker 编排 | `deploy/docker/docker-compose.yaml` |
-| Nginx 配置 | `deploy/docker/nginx.conf` |
+| Docker 编排 | `deploy/compose.yaml`（生产）和 `deploy/compose.override.yaml`（默认开发覆盖） |
+| Nginx 配置 | `deploy/web/nginx.conf` |
 | 数据库迁移 | `migrations/versions/` |

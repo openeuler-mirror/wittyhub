@@ -20,11 +20,12 @@ AI Agent Skills 检索与分发平台。发现、评估和获取可复用的 AI 
 - **现代化前端** - Vue 3 + TypeScript，支持暗色模式
 
 ## 架构
-当前 Docker Compose 部署由 4 个服务组成：`web`、`api`、`embedding`、`db`。
+默认 Docker Compose 部署由 4 个服务组成：`web`、`api`、`embedding`、`db`；可通过 `skillspector` profile 启动 Jenkins + SkillSpector 安全审计服务。
 - `web`：提供 Vue 构建产物，并把 `/api/` 请求转发给 `api`
 - `api`：提供搜索、详情、版本、分类、安全检测等接口
 - `embedding`：为中文语义检索生成向量，供 `api` 调用
 - `db`：使用 PostgreSQL + pgvector 保存 `skills`、`agents`、`security_audits` 等表，以及 pgvector 向量列
+- `skillspector`：可选的 Jenkins + SkillSpector 安全审计服务，通过 Compose profile 启用
 
 ```mermaid
 flowchart LR
@@ -38,6 +39,8 @@ flowchart LR
         SkillData[("/opt/wittyhub<br/>bind mount")]
         PgData[("postgres-data volume")]
         ModelCache[("huggingface-cache volume")]
+        SkillSpector["skillspector<br/>Jenkins :8083<br/>profile 可选"]
+        JenkinsData[("jenkins-data volume")]
     end
 
     User -->|"访问前端"| Web
@@ -50,11 +53,14 @@ flowchart LR
 
     DB --> PgData
     Embedding --> ModelCache
+    API -.->|"启用安全审计时"| SkillSpector
+    SkillSpector --> JenkinsData
 
     DB:::store
     SkillData:::store
     PgData:::store
     ModelCache:::store
+    JenkinsData:::store
 
     classDef store fill:#f8f5ec,stroke:#b6925e,color:#5b4636;
 ```
@@ -75,33 +81,33 @@ flowchart LR
 
 ### Docker 部署
 
-1. 前端构建
+1. 克隆仓库并准备环境变量
 
 ```bash
 git clone https://gitcode.com/openeuler/wittyhub.git
-cd wittyhub/web
-npm install
-npm run build
+cd wittyhub
+cp deploy/.env.example deploy/.env
+# 编辑 deploy/.env，填写密码、Token 和 API Key
+cd deploy
 ```
 
 2. 启动服务
 
 ```bash
-cd ../
-docker compose -f deploy/docker/docker-compose.yaml up -d
+docker compose up -d
 ```
 
 3. 初始化数据库
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yaml exec api alembic upgrade head
+docker compose exec api alembic upgrade head
 ```
 
 4. 生成测试数据
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yaml exec api \
-  python scripts/generate_test_data.py --host db --password wittyhub_secret
+docker compose exec api sh -c \
+  'python scripts/generate_test_data.py --host "$DATABASE__HOST" --password "$DATABASE__PASSWORD"'
 ```
 
 5. 访问服务
@@ -109,6 +115,32 @@ docker compose -f deploy/docker/docker-compose.yaml exec api \
 - 前端: http://localhost:8080
 - API: http://localhost:8081
 - API 文档: http://localhost:8081/docs
+
+生产配置不会挂载仓库源码，也不会启用 Uvicorn 自动重载。
+
+### Docker 开发环境
+
+开发配置通过 Compose 默认识别的 `compose.override.yaml` 添加源码挂载和 `--reload`：
+
+```bash
+docker compose up
+```
+
+### SkillSpector 安全审计
+
+SkillSpector 使用可选的 `skillspector` profile，默认不会启动。先在 `deploy/.env` 中设置安全的 `SKILLSPECTOR_JENKINS_TOKEN`；功能开关 `security.enable_audit` 统一由 `config.yaml` 管理。
+
+```bash
+docker compose --profile skillspector up -d
+```
+
+Jenkins 默认通过 http://localhost:8083 访问；API 在 Compose 网络内通过 `http://skillspector:8083` 调用它。
+
+### 配置职责
+
+- `deploy/.env`：数据库凭据、API Key 和 Token，不提交到 Git。
+- `config.yaml`：模型、搜索、审计开关、日志和存储等应用行为。
+- `deploy/compose.yaml`：服务、固定端口、网络、挂载以及必要的环境变量映射，不保存业务配置或密钥。
 
 ### 本地开发
 

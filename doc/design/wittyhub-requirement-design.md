@@ -764,7 +764,7 @@ postgres:
   host: "localhost"
   port: 5432
   user: "wittyhub"
-  password: "wittyhub_secret"
+  password: ""
   db: "wittyhub"
 
 storage:

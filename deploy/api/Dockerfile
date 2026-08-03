@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+ARG APP_UID=1000
+ARG APP_GID=1000
+
 WORKDIR /app
 
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/null; \
@@ -20,7 +23,10 @@ COPY skills ./skills
 
 RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
 
-RUN mkdir -p /opt/wittyhub
+RUN groupadd --gid "${APP_GID}" wittyhub \
+    && useradd --uid "${APP_UID}" --gid wittyhub --create-home --shell /usr/sbin/nologin wittyhub \
+    && mkdir -p /opt/wittyhub \
+    && chown -R wittyhub:wittyhub /app /opt/wittyhub
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8081
@@ -29,5 +35,7 @@ EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8081/api/v1/health').raise_for_status()"
+
+USER wittyhub
 
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8081"]

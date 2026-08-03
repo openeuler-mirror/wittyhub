@@ -10,8 +10,18 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-COPY deploy/web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/dist /usr/share/nginx/html
+RUN mkdir -p /var/cache/nginx /var/run/nginx \
+    && sed -i -E '/^user[[:space:]]+nginx;/d; s|^pid[[:space:]]+[^;]+;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
+    && chown -R nginx:nginx \
+        /var/cache/nginx \
+        /var/run/nginx \
+        /etc/nginx/conf.d \
+        /usr/share/nginx/html
+
+COPY --chown=nginx:nginx deploy/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chown=nginx:nginx --from=builder /app/dist /usr/share/nginx/html
+
+USER nginx
 
 EXPOSE 8080 8443
 

@@ -4,7 +4,7 @@ pipeline {
     options {
         timestamps()
         skipDefaultCheckout()
-        buildDiscarder(logRotator(numToKeepStr: '30'))
+        buildDiscarder(logRotator(daysToKeepStr: '30'))
     }
 
     environment {
@@ -26,8 +26,20 @@ pipeline {
     stages {
         stage("Checkout") {
             steps {
-                git url: "${params.GIT_URL}",
-                    branch: "${params.REF}"
+                script {
+ 	                def ref = params.REF?.trim()
+ 	                if (ref =~ /^[0-9a-f]{40}$/) {
+ 	                // Commit SHA: clone and checkout specific commit directly
+ 	                    sh """
+ 	                        git init
+ 	                        git remote add origin ${params.GIT_URL}
+ 	                        git fetch --depth 1 origin ${ref}
+ 	                        git checkout FETCH_HEAD
+ 	                    """
+ 	                } else {
+ 	                    git url: params.GIT_URL, branch: ref
+ 	                }
+ 	            }
             }
         }
 

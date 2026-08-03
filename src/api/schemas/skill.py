@@ -53,6 +53,7 @@ class SkillResponse(SkillBase):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
+    repo_url: str | None = None
     content: str | None = None
     risk_score: int | None = None
     download_count: int = 0

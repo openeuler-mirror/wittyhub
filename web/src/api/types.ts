@@ -8,6 +8,7 @@ export interface Skill {
   author: string | null
   source: string
   source_url: string
+  repo_url: string | null
   category: string | null
   tags: string[] | null
   platform: string | null

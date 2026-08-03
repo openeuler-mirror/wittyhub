@@ -2,9 +2,9 @@
 # SkillSpector + Jenkins 镜像 (自包含版本)
 # ============================================================================
 # 用法:
-#   docker build -f deploy/Dockerfile.jenkins -t skillspector-jenkins:latest deploy/
+#   docker build -f deploy/skillspector/Dockerfile -t skillspector-jenkins:latest .
 #   docker run -d --name skillspector-jenkins \
-#     -p 8080:8080 -p 50000:50000 \
+#     -p 8083:8083 -p 50000:50000 \
 #     -v jenkins_home:/var/jenkins_home \
 #     skillspector-jenkins:latest
 #
@@ -66,8 +66,8 @@ RUN jenkins-plugin-cli --plugins \
     "timestamper:latest"
 
 # 初始化脚本
-COPY jenkins-init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy
-COPY jenkins-pipeline.groovy /usr/share/jenkins/ref/jenkins-pipeline.groovy
+COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy
+COPY deploy/skillspector/pipeline.groovy /usr/share/jenkins/ref/jenkins-pipeline.groovy
 
 # 替换 admin 密码占位符
 ARG JENKINS_ADMIN_PASS=admin@123456

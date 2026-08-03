@@ -10,7 +10,7 @@ from src.core.config import get_settings
 settings = get_settings()
 
 async_engine = create_async_engine(
-    settings.database.url,
+    settings.postgres.url,
     echo=False,
     pool_pre_ping=True,
     pool_size=10,
@@ -25,7 +25,7 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 sync_engine = create_engine(
-    settings.database.sync_url,
+    settings.postgres.sync_url,
     echo=False,
     pool_pre_ping=True,
 )

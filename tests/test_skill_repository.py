@@ -134,7 +134,7 @@ class TestSkillRepositoryUnit:
         config_path = tmp_path / "config.yaml"
         config_path.write_text(
             """
-database:
+postgres:
   host: localhost
 ai:
   embedding_host: http://localhost:8081
@@ -145,14 +145,14 @@ model:
 """,
             encoding="utf-8",
         )
-        monkeypatch.setenv("DATABASE__HOST", "db")
+        monkeypatch.setenv("POSTGRES__HOST", "db")
         monkeypatch.setenv("AI__EMBEDDING_HOST", "http://embedding:8081")
         monkeypatch.setenv("SECURITY__ENABLE_AUDIT", "false")
         monkeypatch.setenv("MODEL__API_KEY", "")
 
         settings = Settings.from_yaml(config_path)
 
-        assert settings.database.host == "db"
+        assert settings.postgres.host == "db"
         assert settings.ai.embedding_host == "http://embedding:8081"
         assert settings.security.enable_audit is False
         assert settings.model.api_key == ""
@@ -457,7 +457,7 @@ class TestConfig:
         ):
             settings = get_settings()
             assert settings is not None
-            assert "postgresql" in settings.database.url
+            assert "postgresql" in settings.postgres.url
 
 
 class TestAPIRoutes:

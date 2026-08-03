@@ -11,13 +11,14 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
+COPY src ./src
+COPY scripts ./scripts
+COPY migrations ./migrations
+COPY alembic.ini ./
+COPY skillcrawler ./skillcrawler
+COPY skills ./skills
 
 RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
-
-COPY src ./src
-COPY migrations ./migrations
-COPY scripts ./scripts
-COPY alembic.ini ./
 
 RUN mkdir -p /opt/wittyhub
 

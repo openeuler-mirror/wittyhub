@@ -8,21 +8,21 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
-class DatabaseConfig(BaseSettings):
+class PostgresConfig(BaseSettings):
     host: str = "localhost"
     port: int = 5432
-    user: str = "wittyhub"
-    password: str = "wittyhub_secret"
-    dbname: str = "wittyhub"
+    user: str = ""
+    password: str = ""
+    db: str = ""
     sslmode: str = "disable"
 
     @property
     def url(self) -> str:
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
+        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
     @property
     def sync_url(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class StorageConfig(BaseSettings):
@@ -32,9 +32,9 @@ class StorageConfig(BaseSettings):
 
 
 class ModelConfig(BaseSettings):
-    name: str = "deepseek-v4-flash"
-    base_url: str = "https://api.deepseek.com"
-    api_key: str = "sk-9767243ba0364f52ab5bb7878ad2d42a"
+    name: str = ""
+    base_url: str = ""
+    api_key: str = ""
     timeout: float = 30
 
 
@@ -52,9 +52,9 @@ class SkillRepoEntry(BaseSettings):
 class SecurityConfig(BaseSettings):
     # Skillspector (Jenkins-based scanner)
     enable_audit: bool = False
-    skillspector_jenkins_url: str = ""
-    skillspector_jenkins_user: str = ""  # env: SKILLSPECTOR_JENKINS_USER
-    skillspector_jenkins_token: str = ""  # env: SKILLSPECTOR_JENKINS_TOKEN
+    skillspector_jenkins_url: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_URL
+    skillspector_jenkins_user: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_USER
+    skillspector_jenkins_token: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_TOKEN
 
 
 class AppConfig(BaseSettings):
@@ -76,7 +76,7 @@ class AIConfig(BaseSettings):
 
 
 class Settings(BaseSettings):
-    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     model: ModelConfig = Field(default_factory=ModelConfig)
     crawler: CrawlerConfig = Field(default_factory=CrawlerConfig)
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
         _apply_env_overrides(data)
 
         return cls(
-            database=DatabaseConfig(**data.get("database", {})),
+            postgres=PostgresConfig(**data.get("postgres", {})),
             storage=StorageConfig(**data.get("storage", {})),
             model=ModelConfig(**data.get("model", {})),
             crawler=CrawlerConfig(**data.get("crawler", {})),

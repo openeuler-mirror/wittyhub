@@ -21,7 +21,7 @@ coverage.html
 docs/
 
 # Docker
-deploy/docker/docker-compose.yaml
+deploy/compose*.yaml
 
 # Local data
 data/

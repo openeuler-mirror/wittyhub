@@ -553,7 +553,7 @@ def main():
     parser.add_argument("--host", default="localhost", help="Database host")
     parser.add_argument("--port", type=int, default=5432, help="Database port")
     parser.add_argument("--user", default="wittyhub", help="Database user")
-    parser.add_argument("--dbname", default="wittyhub", help="Database name")
+    parser.add_argument("--db", default="wittyhub", help="Database name")
     parser.add_argument("--password", default="wittyhub123", help="Database password")
     args = parser.parse_args()
 
@@ -565,7 +565,7 @@ def main():
             host=args.host,
             port=args.port,
             user=args.user,
-            dbname=args.dbname,
+            dbname=args.db,
             password=args.password
         )
         print(f"Connected to database at {args.host}:{args.port}")

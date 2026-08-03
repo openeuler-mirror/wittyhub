@@ -38,23 +38,21 @@ WittyHub 的爬取阶段已经将 Skill 所属 Git 仓库克隆到本地，并�
 
 ```mermaid
 flowchart TD
-    A[前端点击下载 ZIP] --> B[GET /api/v1/skills/{skill_id}/download]
-    B --> C[后端按 skill_id 查询 Skill]
-    C --> D[同时加载 skill_repo]
-    D --> E[读取 skill_repo.local_path]
-    E --> F[从 skill_id 解析 Skill 相对路径]
-    F --> G[校验本地 Git 仓库]
-    G --> H[校验 commit_id]
-    H --> I[校验 commit 下存在 Skill/SKILL.md]
-    I --> J{ZIP 缓存是否存在}
-    J -->|存在| K[复用缓存 ZIP]
-    J -->|不存在| L[git archive 生成 ZIP]
-    L --> M[写入缓存目录]
-    K --> N[记录 download_history]
+    A["前端点击下载 ZIP"] --> B["GET /api/v1/skills/{skill_id}/download"]
+    B --> C["按 skill_id 查询 Skill，并预加载关联的 skill_repo"]
+    C --> D["校验 skill_repo.local_path 对应的本地 Git 仓库"]
+    D --> E["从 skill_id 解析 Skill 相对路径"]
+    E --> F["校验 commit_id"]
+    F --> I["校验 commit 下存在 Skill/SKILL.md"]
+    I --> J{"ZIP 缓存是否存在"}
+    J -->|存在| K["复用缓存 ZIP"]
+    J -->|不存在| L["git archive 生成 ZIP"]
+    L --> M["写入缓存目录"]
+    K --> N["记录 download_history"]
     M --> N
-    N --> O[增加 download_count]
-    O --> P[FileResponse 返回 application/zip]
-    P --> Q[前端 Blob 触发浏览器保存]
+    N --> O["增加 download_count"]
+    O --> P["FileResponse 返回 application/zip"]
+    P --> Q["前端 Blob 触发浏览器保存"]
 ```
 
 核心代码位置：

@@ -353,11 +353,21 @@ wittyhub/
 │   ├── import_skills.py
 │   └── ...
 │
-├── deploy/docker/            # Docker 部署
-│   ├── Dockerfile
-│   ├── docker-compose.yaml
-│   ├── nginx.conf
-│   └── config.yaml
+├── deploy/                    # Docker 部署
+│   ├── api/
+│   │   └── Dockerfile
+│   ├── embedding/
+│   │   ├── Dockerfile
+│   │   └── app.py
+│   ├── web/
+│   │   ├── Dockerfile
+│   │   └── nginx.conf
+│   ├── skillspector/
+│   │   ├── Dockerfile
+│   │   ├── init.groovy
+│   │   └── pipeline.groovy
+│   ├── compose.yaml
+│   └── compose.override.yaml
 │
 ├── alembic.ini
 ├── config.yaml
@@ -740,7 +750,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./deploy/docker/nginx.conf:/etc/nginx/nginx.conf
+      - ./deploy/web/nginx.conf:/etc/nginx/nginx.conf
     depends_on:
       - api
       - web
@@ -750,12 +760,12 @@ services:
 
 ```yaml
 # config.yaml
-database:
+postgres:
   host: "localhost"
   port: 5432
   user: "wittyhub"
-  password: "wittyhub_secret"
-  dbname: "wittyhub"
+  password: ""
+  db: "wittyhub"
 
 storage:
   local_path: /opt/wittyhub

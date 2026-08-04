@@ -61,6 +61,7 @@ def skill_to_response(skill) -> SkillResponse:
         author=skill.author,
         source=skill.source,
         source_url=skill.source_url,
+        repo_url=skill.repo_url,
         category=skill.category,
         tags=skill.tags,
         platform=skill.platform,

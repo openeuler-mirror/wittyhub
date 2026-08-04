@@ -149,6 +149,11 @@ function getSecurityLevel(score: number | null): { label: string; class: string 
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
+const installCommand = computed(() => {
+  if (!skill.value) return ''
+  const repository = skill.value.repo_url || skill.value.source_url
+  return `npx wittyhub install ${repository} --skill ${skill.value.name}`
+})
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-'
@@ -161,7 +166,7 @@ function formatDate(dateStr: string | null): string {
 
 async function copyCliCommand() {
   if (!skill.value) return
-  const command = `npx wittyhub install ${skill.value.skill_id}`
+  const command = installCommand.value
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(command)
@@ -183,8 +188,8 @@ async function copyCliCommand() {
   }
 }
 
-function copyVersionCmd(skillId: string) {
-  const command = `npx wittyhub install ${skillId}`
+function copyVersionCmd() {
+  const command = installCommand.value
   try {
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(command)
@@ -390,12 +395,12 @@ onMounted(async () => {
                 <div v-for="v in versions" :key="v.version" class="version-row">
                   <span class="version-badge">{{ v.version }}</span>
                   <div class="version-cli-group">
-                    <code class="version-install-cmd">npx wittyhub install {{ skill?.skill_id }}</code>
+                    <code class="version-install-cmd">{{ installCommand }}</code>
                     <button
                       class="version-copy-btn"
                       :class="{ 'is-copied': copiedVersion }"
                       aria-label="复制"
-                      @click="copyVersionCmd(skill?.skill_id ?? '')"
+                      @click="copyVersionCmd"
                     >
                       <span v-if="!copiedVersion" class="btn-icon-sm" v-html="copySvg"></span>
                       <span v-else class="btn-icon-sm copied-icon">
@@ -423,7 +428,7 @@ onMounted(async () => {
                 <h3 class="cli-label">CLI 安装</h3>
                 <div class="cli-divider"></div>
                 <div class="cli-input-group">
-                  <code class="cli-command">npx wittyhub install {{ skill.skill_id }}</code>
+                  <code class="cli-command">{{ installCommand }}</code>
                   <button class="cli-copy-btn" :class="{ 'is-copied': cliCopied }" @click="copyCliCommand" :aria-label="cliCopied ? '已复制' : '复制'">
                     <span v-if="!cliCopied" class="btn-icon-sm" v-html="copySvg"></span>
                     <span v-else class="btn-icon-sm copied-icon">

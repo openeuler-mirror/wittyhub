@@ -96,7 +96,7 @@ const hasActiveFilter = computed(() => {
 </script>
 
 <template>
-  <aside class="w-56 flex-shrink-0 hidden lg:block">
+  <aside class="w-56 flex-shrink-0">
     <div class="space-y-6">
       <div>
         <h3 class="filter-section-title">贡献者</h3>

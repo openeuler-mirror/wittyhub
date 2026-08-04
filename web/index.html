@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 固定 1488px 布局视口：移动端由浏览器整页等比缩小至屏宽（无横向滚动）；
+         避免 transform 缩放导致挂到 body 的弹层（下拉框等）定位坐标错乱。
+         桌面端浏览器会忽略 viewport meta，不受影响 -->
+    <meta name="viewport" content="width=1488" />
     <title>Skill Hub - 探索、评估和获取可复用的 Skills</title>
   </head>
   <body>

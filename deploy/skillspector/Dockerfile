@@ -20,7 +20,7 @@ FROM python:3.13-slim AS skillspector-builder
 ARG GIT_REPO_URL=https://github.com/JunchengDwain/SkillSpector.git
 ARG GIT_REF=main
 
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources && \
+RUN sed -i 's|http://deb.debian.org|https://repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
@@ -29,7 +29,7 @@ RUN git clone --depth 1 --branch "${GIT_REF}" "${GIT_REPO_URL}" /tmp/skillspecto
 
 WORKDIR /tmp/skillspector
 RUN pip config set global.timeout 120 && \
-    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.index-url https://repo.huaweicloud.com/repository/pypi/simple && \
     pip install pip --upgrade && \
     pip wheel . -w /tmp/wheels
 
@@ -38,7 +38,7 @@ FROM jenkins/jenkins:lts
 
 USER root
 
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources && \
+RUN sed -i 's|http://deb.debian.org|https://repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         python3 python3-pip git curl ca-certificates && \
@@ -49,7 +49,7 @@ COPY --from=skillspector-builder /tmp/wheels /tmp/wheels
 
 # 安装 SkillSpector
 RUN pip config set global.timeout 120 && \
-    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.index-url https://repo.huaweicloud.com/repository/pypi/simple && \
     pip install --no-cache-dir --break-system-packages --ignore-installed /tmp/wheels/*.whl && \
     rm -rf /tmp/wheels
 

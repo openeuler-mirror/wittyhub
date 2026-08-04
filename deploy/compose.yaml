@@ -14,7 +14,7 @@ services:
     networks:
       - wittyhub-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES__USER} -d $${POSTGRES__DB}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -99,13 +99,12 @@ services:
     build:
       context: ..
       dockerfile: deploy/skillspector/Dockerfile
-      args:
-        JENKINS_ADMIN_PASS: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:?SECURITY__SKILLSPECTOR_JENKINS_TOKEN is required}
     ports:
       - "8083:8083"
       - "50000:50000"
     environment:
       JENKINS_OPTS: --httpPort=8083
+      JENKINS_ADMIN_PASS: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:?SECURITY__SKILLSPECTOR_JENKINS_TOKEN is required}
     volumes:
       - jenkins-data:/var/jenkins_home
     networks:

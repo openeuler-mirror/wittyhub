@@ -119,7 +119,7 @@ function truncate(text: string | null, length: number): string {
   line-height: 24px;
   letter-spacing: 0px;
   text-align: left;
-  color: #000000;
+  color: var(--o-color-info1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -127,7 +127,7 @@ function truncate(text: string | null, length: number): string {
 }
 
 .group:hover .skill-list-name {
-  color: #002FA7;
+  color: var(--o-color-primary1);
 }
 
 .skill-list-desc {

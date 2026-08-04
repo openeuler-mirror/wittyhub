@@ -1185,12 +1185,12 @@ onMounted(async () => {
   }
 
   :deep(pre) {
-    background: #F3F3F5;
+    background: var(--o-color-control2-light);
     border-radius: 4px;
     padding: 16px;
     overflow-x: auto;
     margin-bottom: 16px;
-    color: #000000;
+    color: var(--o-color-info1);
     font-family: HarmonyHeiTi;
     font-weight: regular;
     font-size: 14px;

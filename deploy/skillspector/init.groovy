@@ -6,6 +6,10 @@ import hudson.model.ParametersDefinitionProperty
 import hudson.model.StringParameterDefinition
 
 def instance = Jenkins.get()
+def adminPassword = System.getenv("JENKINS_ADMIN_PASS")
+if (!adminPassword) {
+    throw new IllegalStateException("JENKINS_ADMIN_PASS is required")
+}
 
 // 0. 跳过 setup wizard
 instance.installState = InstallState.INITIAL_SETUP_COMPLETED
@@ -13,14 +17,8 @@ println "[init] Setup wizard disabled"
 
 // 1. 创建/重置 admin 用户
 def hudsonRealm = new HudsonPrivateSecurityRealm(false)
-def adminUser = hudsonRealm.getUser("admin")
-if (adminUser == null) {
-    hudsonRealm.createAccount("admin", "ADMIN_PASS_PLACEHOLDER")
-    println "[init] admin user created"
-} else {
-    hudsonRealm.createAccount("admin", "ADMIN_PASS_PLACEHOLDER")
-    println "[init] admin password reset"
-}
+hudsonRealm.createAccount("admin", adminPassword)
+println "[init] admin user created or password reset"
 instance.setSecurityRealm(hudsonRealm)
 
 // 2. 设置授权策略

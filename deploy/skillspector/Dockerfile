@@ -65,14 +65,9 @@ RUN jenkins-plugin-cli --plugins \
     "build-token-root:latest" \
     "timestamper:latest"
 
-# 初始化脚本
-COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy
+# .override 确保已有 Jenkins 数据卷也使用最新初始化脚本
+COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy.override
 COPY deploy/skillspector/pipeline.groovy /usr/share/jenkins/ref/jenkins-pipeline.groovy
-
-# 替换 admin 密码占位符
-ARG JENKINS_ADMIN_PASS=admin@123456
-RUN sed -i "s/ADMIN_PASS_PLACEHOLDER/${JENKINS_ADMIN_PASS}/g" \
-    /usr/share/jenkins/ref/init.groovy.d/01-init.groovy
 
 ENV SKILLSPECTOR_LOG_LEVEL=WARNING
 ENV SKILLSPECTOR_PROVIDER=openai

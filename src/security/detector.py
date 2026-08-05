@@ -143,6 +143,7 @@ class SkillspectorClient:
         scanners: str = "skillspector",
     ) -> int | None:
         """Trigger a build via buildWithParameters; return the build number."""
+        trigger_started_at = time.perf_counter()
         url = f"{self.base_url}{self.JOB_PATH}/buildWithParameters"
         params = {
             "GIT_URL": git_url,
@@ -153,15 +154,23 @@ class SkillspectorClient:
 
         with httpx.Client(timeout=30.0) as client:
             headers: dict[str, str] = {}
+            crumb_started_at = time.perf_counter()
             crumb = self._get_crumb(client)
+            crumb_elapsed = time.perf_counter() - crumb_started_at
             if crumb is not None:
                 headers[crumb[0]] = crumb[1]
 
+            submit_started_at = time.perf_counter()
             try:
                 resp = client.post(url, data=params, auth=self.auth, headers=headers)
             except httpx.RequestError as exc:
-                logger.error("Failed to reach Jenkins: %s", exc)
+                logger.error(
+                    "Failed to reach Jenkins after %.3fs: %s",
+                    time.perf_counter() - trigger_started_at,
+                    exc,
+                )
                 return None
+            submit_elapsed = time.perf_counter() - submit_started_at
 
         if resp.status_code not in (200, 201, 302, 303):
             logger.error(
@@ -174,7 +183,19 @@ class SkillspectorClient:
             logger.warning("No Location header in Jenkins response")
             return None
 
-        return self._resolve_queue_item(location)
+        queue_started_at = time.perf_counter()
+        build_number = self._resolve_queue_item(location)
+        queue_elapsed = time.perf_counter() - queue_started_at
+        logger.info(
+            "Jenkins trigger timing: build_number=%s crumb=%.3fs submit=%.3fs "
+            "queue=%.3fs total=%.3fs",
+            build_number,
+            crumb_elapsed,
+            submit_elapsed,
+            queue_elapsed,
+            time.perf_counter() - trigger_started_at,
+        )
+        return build_number
 
     def wait_for_build(
         self,

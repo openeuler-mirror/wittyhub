@@ -66,8 +66,14 @@ function stripFrontmatter(content: string): string {
   return content
 }
 
+// 根据当前选中版本展示对应的 content（未选中时回退到 Skill 默认 content）
+const displayContent = computed(() => {
+  const selected = versions.value.find(v => v.version === selectedVersion.value)
+  return selected?.content ?? skill.value?.content ?? null
+})
+
 const renderedContent = computed(() => {
-  if (!skill.value?.content) return ''
+  if (!displayContent.value) return ''
   // 触发响应式：highlighterReady 变化时重新计算
   const ready = highlighterReady.value
 
@@ -101,7 +107,7 @@ const renderedContent = computed(() => {
     }
     return `<${tag}>${text}</${tag}>\n`
   }
-  return marked(stripFrontmatter(skill.value.content), { renderer })
+  return marked(stripFrontmatter(displayContent.value), { renderer })
 })
 
 function escapeHtml(str: string): string {
@@ -371,7 +377,7 @@ onMounted(async () => {
 
           <!-- ========== 使用描述 Tab ========== -->
           <div v-show="activeTab === 'usage'" class="tab-content">
-            <div v-if="skill.content" class="usage-content">
+            <div v-if="displayContent" class="usage-content">
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div class="markdown-body" v-html="renderedContent" @click="copyMarkdownCode"></div>
             </div>
@@ -1185,12 +1191,12 @@ onMounted(async () => {
   }
 
   :deep(pre) {
-    background: #F3F3F5;
+    background: var(--o-color-control2-light);
     border-radius: 4px;
     padding: 16px;
     overflow-x: auto;
     margin-bottom: 16px;
-    color: #000000;
+    color: var(--o-color-info1);
     font-family: HarmonyHeiTi;
     font-weight: regular;
     font-size: 14px;
@@ -1370,73 +1376,6 @@ onMounted(async () => {
     margin-top: 8px;
     font-size: 13px;
     color: var(--o-color-info4);
-  }
-}
-
-/* ===== 响应式 ===== */
-@include respond-to('<=pad_v') {
-  .detail-page {
-    padding-bottom: 40px;
-  }
-
-  .hero-section {
-    padding-bottom: 20px;
-  }
-
-  .container-wide {
-    padding: 0 16px;
-  }
-
-  .info-card-hero {
-    padding: 24px;
-
-    .skill-name {
-      font-size: 24px;
-      line-height: 32px;
-    }
-  }
-
-  .detail-body {
-    flex-direction: column;
-
-    .detail-body-sidebar {
-      width: 100%;
-    }
-
-    .sidebar-sticky {
-      position: static;
-    }
-  }
-
-  .cli-section {
-    flex-direction: column;
-    align-items: stretch;
-
-    .cli-input-group {
-      flex-direction: column;
-
-      .cli-command {
-        height: 40px;
-        padding: 0 12px;
-      }
-
-      .cli-copy-btn {
-        justify-content: center;
-        padding: 8px;
-      }
-    }
-  }
-
-  .tab-content {
-    padding: 16px;
-  }
-
-  .version-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-    height: auto;
-    padding: 10px 0;
   }
 }
 </style>

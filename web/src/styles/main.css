@@ -22,6 +22,9 @@
 
 html, body {
   height: 100%;
+  /* 固定 1488px 基准宽度（与 ContentWrapper 内容宽度一致）：
+     移动端由浏览器按 viewport width=1488 整页等比缩小占满屏宽（见 index.html），桌面端保持原布局 */
+  min-width: 1488px;
 }
 
 body {
@@ -41,6 +44,7 @@ body {
 
 #app {
   min-height: 100vh;
+  min-width: 1488px;
   display: flex;
   flex-direction: column;
 }

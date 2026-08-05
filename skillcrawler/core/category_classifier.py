@@ -143,7 +143,7 @@ class DeepSeekCategoryClassifier:
                 response.raise_for_status()
                 data = response.json()
         finally:
-            _logger.info(
+            _logger.debug(
                 "Category model timing: model=%s status=%s elapsed=%.3fs",
                 self.model_name,
                 status,

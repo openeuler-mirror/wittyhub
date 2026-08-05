@@ -25,9 +25,10 @@ settings = get_settings()
 
 _LOG_DIR = Path(settings.storage.local_path).expanduser().resolve() / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
+_LOG_LEVEL = getattr(logging, settings.logging.level.strip().upper(), logging.INFO)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
     handlers=[
         logging.StreamHandler(),

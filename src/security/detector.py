@@ -186,7 +186,7 @@ class SkillspectorClient:
         queue_started_at = time.perf_counter()
         build_number = self._resolve_queue_item(location)
         queue_elapsed = time.perf_counter() - queue_started_at
-        logger.info(
+        logger.debug(
             "Jenkins trigger timing: build_number=%s crumb=%.3fs submit=%.3fs "
             "queue=%.3fs total=%.3fs",
             build_number,

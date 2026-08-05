@@ -65,7 +65,7 @@ class SkillScanner:
 
         discovery_started_at = time.perf_counter()
         skill_files = find_scannable_skill_files(repo_root)
-        _logger.info(
+        _logger.debug(
             'Skill file discovery timing: repo=%s files=%d elapsed=%.3fs',
             getattr(repo, 'repo_name', None) or repo.url,
             len(skill_files),
@@ -130,7 +130,7 @@ class SkillScanner:
                 scan_started_at=scan_started_at,
                 input_elapsed=input_elapsed,
             )
-            _logger.info(
+            _logger.debug(
                 'Discovered skill: skill_id=%s version=%s source=%s',
                 skill.skill_id, skill.version or '-', relative_path,
             )
@@ -165,7 +165,7 @@ class SkillScanner:
             skill_paths = self.git_ops.list_skill_paths_for_ref(
                 repo_root, ref, should_skip_relative_path,
             )
-            _logger.info(
+            _logger.debug(
                 'Tag skill path listing timing: repo=%s ref=%s paths=%d elapsed=%.3fs',
                 getattr(repo, 'repo_name', None) or repo.url,
                 ref,
@@ -203,7 +203,7 @@ class SkillScanner:
                 version_key = (skill.skill_id, skill.version) if skill.version else None
                 commit_key = (skill.skill_id, skill.commit_id) if skill.commit_id else None
                 if version_key is not None and version_key in seen_versions:
-                    _logger.info(
+                    _logger.debug(
                         'Skipped duplicate skill version: skill_id=%s version=%s commit_id=%s',
                         skill.skill_id,
                         skill.version or '-',
@@ -211,7 +211,7 @@ class SkillScanner:
                     )
                     continue
                 if commit_key is not None and commit_key in seen_commits:
-                    _logger.info(
+                    _logger.debug(
                         'Skipped duplicate skill commit: skill_id=%s version=%s commit_id=%s',
                         skill.skill_id,
                         skill.version or '-',
@@ -338,7 +338,7 @@ class SkillScanner:
             + security_elapsed
             + assemble_elapsed
         )
-        _logger.info(
+        _logger.debug(
             'Skill timing: skill_id=%s version=%s input=%.3fs prepare=%.3fs '
             'git_commit=%.3fs category=%.3fs security=%.3fs assemble=%.3fs '
             'other=%.3fs total=%.3fs',

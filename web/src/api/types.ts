@@ -77,6 +77,7 @@ export interface SkillVersion {
   released_at: string | null
   download_count: number
   install_command?: string
+  content: string | null
 }
 
 export interface Stats {

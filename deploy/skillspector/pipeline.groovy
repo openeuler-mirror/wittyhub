@@ -4,6 +4,7 @@ pipeline {
     options {
         timestamps()
         skipDefaultCheckout()
+        quietPeriod(0)
         buildDiscarder(logRotator(daysToKeepStr: '30'))
     }
 

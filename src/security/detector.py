@@ -329,6 +329,29 @@ class SkillspectorClient:
 # ═══════════════════════════════════════════════════════════════════════════
 
 DEFAULT_POLL_INTERVAL_SECONDS = 30
+MAX_REPORT_FETCH_ATTEMPTS = 3
+
+
+def _record_unavailable_report_attempt(
+    details: dict[str, Any] | None,
+    status: str,
+) -> tuple[dict[str, Any], bool]:
+    """Record one missing-report attempt and finalize after the retry limit."""
+    updated = dict(details or {})
+    raw_attempts = updated.get("skillspector_report_fetch_attempts", 0)
+    try:
+        attempts = int(raw_attempts) + 1
+    except (TypeError, ValueError):
+        attempts = 1
+
+    exhausted = attempts >= MAX_REPORT_FETCH_ATTEMPTS
+    updated["skillspector_report_fetch_attempts"] = attempts
+    updated["skillspector_status"] = status
+    if exhausted:
+        updated["skillspector_collected"] = True
+        updated["skillspector_error"] = "report_unavailable"
+
+    return updated, exhausted
 
 
 class SkillspectorCollector:
@@ -464,10 +487,34 @@ class SkillspectorCollector:
         # statuses, including SUCCESS, FAILURE, and UNSTABLE.
         report = await asyncio.to_thread(self._client.fetch_report, build_number)
         if report is None:
+            details, exhausted = _record_unavailable_report_attempt(
+                audit.details,
+                status,
+            )
+            await session.execute(
+                update(SecurityAudit)
+                .where(SecurityAudit.id == audit.id)
+                .values(details=details)
+            )
+            await session.commit()
+
+            attempts = details["skillspector_report_fetch_attempts"]
+            if exhausted:
+                logger.error(
+                    "Build #%d ended with %s but report is unavailable after %d attempts; "
+                    "marking audit as collected",
+                    build_number,
+                    status,
+                    attempts,
+                )
+                return True
+
             logger.warning(
-                "Build #%d ended with %s but report is unavailable; will retry",
+                "Build #%d ended with %s but report is unavailable; will retry (%d/%d)",
                 build_number,
                 status,
+                attempts,
+                MAX_REPORT_FETCH_ATTEMPTS,
             )
             return False
 

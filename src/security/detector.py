@@ -81,7 +81,7 @@ class SkillspectorClient:
         user: str = "",
         token: str = "",
         timeout: float = 150.0,
-        poll_interval: float = 5.0,
+        poll_interval: float = 1.0,
     ):
         self.base_url = jenkins_url.rstrip("/")
         self.auth = (user, token) if user and token else None

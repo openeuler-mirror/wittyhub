@@ -243,37 +243,63 @@ class SkillspectorClient:
     ) -> str | None:
         """Poll build status until it finishes.  Returns SUCCESS/FAILURE/ABORTED/UNSTABLE/None."""
         max_wait = max_wait if max_wait is not None else self.timeout
-        url = f"{self.base_url}{self.JOB_PATH}/{build_number}/api/json"
-
         deadline = time.monotonic() + max_wait
 
-        with httpx.Client(timeout=10.0) as client:
-            while time.monotonic() < deadline:
-                try:
-                    resp = client.get(url, auth=self.auth)
-                except httpx.RequestError as exc:
-                    logger.warning("Polling Jenkins failed: %s", exc)
-                    time.sleep(self.poll_interval)
-                    continue
-
-                if resp.status_code != 200:
-                    time.sleep(self.poll_interval)
-                    continue
-
-                data = resp.json()
-                building = data.get("building", False)
-                result = data.get("result")
-
-                if not building and result is not None:
-                    return result
-
-                time.sleep(self.poll_interval)
+        while time.monotonic() < deadline:
+            status = self.get_build_status(build_number)
+            if status not in (None, "BUILDING"):
+                return status
+            if status is None:
+                logger.warning("Build #%d status unavailable; retrying", build_number)
+            time.sleep(self.poll_interval)
 
         logger.error("Build %d did not finish within %.0f s", build_number, max_wait)
         return None
 
+    def get_build_status(self, build_number: int) -> str | None:
+        """Fetch build state once without waiting.
+
+        Returns ``BUILDING`` while Jenkins is running the build, a terminal
+        Jenkins result when complete, and ``None`` for transient lookup errors.
+        """
+        url = f"{self.base_url}{self.JOB_PATH}/{build_number}/api/json"
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(url, auth=self.auth)
+        except httpx.RequestError as exc:
+            logger.warning("Failed to fetch status for build #%d: %s", build_number, exc)
+            return None
+
+        if resp.status_code != 200:
+            if resp.status_code == 404:
+                return "NOT_FOUND"
+            logger.warning(
+                "Build status fetch failed: build_number=%s status_code=%s",
+                build_number,
+                resp.status_code,
+            )
+            return None
+
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.warning("Invalid JSON in status response for build #%d", build_number)
+            return None
+
+        if data.get("building", False):
+            return "BUILDING"
+        result = data.get("result")
+        return str(result) if result is not None else None
+
     def fetch_report(self, build_number: int) -> dict[str, Any] | None:
         """Fetch the JSON report artifact from a completed build."""
+        report, _ = self.fetch_report_with_status(build_number)
+        return report
+
+    def fetch_report_with_status(
+        self, build_number: int,
+    ) -> tuple[dict[str, Any] | None, int | None]:
+        """Fetch a report and expose HTTP status for retry decisions."""
         url = (
             f"{self.base_url}{self.JOB_PATH}/{build_number}"
             "/artifact/reports/skillspector/report.json"
@@ -283,23 +309,22 @@ class SkillspectorClient:
                 resp = client.get(url, auth=self.auth)
             except httpx.RequestError as exc:
                 logger.error("Failed to fetch report: %s", exc)
-                return None
+                return None, None
 
         if resp.status_code != 200:
-            logger.error(
-                "Report fetch failed: build_number=%s status_code=%s url=%s response=%s",
+            logger.warning(
+                "Report fetch failed: build_number=%s status_code=%s url=%s",
                 build_number,
                 resp.status_code,
                 url,
-                resp.text[:500],
             )
-            return None
+            return None, resp.status_code
 
         try:
-            return resp.json()
+            return resp.json(), resp.status_code
         except ValueError as exc:
             logger.error("Invalid JSON in report: %s", exc)
-            return None
+            return None, resp.status_code
 
     # ------------------------------------------------------------------
     # Report parsing
@@ -388,13 +413,15 @@ class SkillspectorClient:
 # Background collector — polls Jenkins for async scan results
 # ═══════════════════════════════════════════════════════════════════════════
 
-DEFAULT_POLL_INTERVAL_SECONDS = 30
+DEFAULT_POLL_INTERVAL_SECONDS = 10
 MAX_REPORT_FETCH_ATTEMPTS = 3
 
 
 def _record_unavailable_report_attempt(
     details: dict[str, Any] | None,
     status: str,
+    *,
+    terminal: bool = False,
 ) -> tuple[dict[str, Any], bool]:
     """Record one missing-report attempt and finalize after the retry limit."""
     updated = dict(details or {})
@@ -404,7 +431,7 @@ def _record_unavailable_report_attempt(
     except (TypeError, ValueError):
         attempts = 1
 
-    exhausted = attempts >= MAX_REPORT_FETCH_ATTEMPTS
+    exhausted = terminal or attempts >= MAX_REPORT_FETCH_ATTEMPTS
     updated["skillspector_report_fetch_attempts"] = attempts
     updated["skillspector_status"] = status
     if exhausted:
@@ -513,7 +540,7 @@ class SkillspectorCollector:
                 SecurityAudit.details["skillspector_async"].as_boolean() == True,  # noqa: E712
                 SecurityAudit.details["skillspector_collected"].is_(None),
             )
-            .limit(10)
+            .limit(100)
         )
         return list(result.scalars().all())
 
@@ -567,7 +594,7 @@ class SkillspectorCollector:
         )
 
         # These terminal states normally cannot produce a complete report.
-        if status in {"ABORTED", "NOT_BUILT"}:
+        if status in {"ABORTED", "NOT_BUILT", "NOT_FOUND"}:
             details = dict(audit.details or {})
             details["skillspector_collected"] = True
             details["skillspector_status"] = status
@@ -604,11 +631,15 @@ class SkillspectorCollector:
         # Jenkins may report FAILURE when findings make the scanner exit 1,
         # while still archiving a complete report. Fetch for all other terminal
         # statuses, including SUCCESS, FAILURE, and UNSTABLE.
-        report = await asyncio.to_thread(self._client.fetch_report, build_number)
+        report, report_status = await asyncio.to_thread(
+            self._client.fetch_report_with_status,
+            build_number,
+        )
         if report is None:
             details, exhausted = _record_unavailable_report_attempt(
                 audit.details,
                 status,
+                terminal=report_status == 404,
             )
             await session.execute(
                 update(SecurityAudit)
@@ -699,14 +730,17 @@ class SkillspectorCollector:
             .values(risk_level=risk_level, risk_signals=merged_signals, details=details)
         )
 
+        score_write_target = None
         if score is not None:
             skill = await session.get(Skill, audit.resource_id)
             if skill is not None:
                 skill.risk_score = score
+                score_write_target = "skills.risk_score"
             else:
                 skill_version = await session.get(SkillVersion, audit.resource_id)
                 if skill_version is not None:
                     skill_version.risk_score = score
+                    score_write_target = "skill_versions.risk_score"
                 else:
                     logger.warning(
                         "Security audit resource not found: resource_id=%s",

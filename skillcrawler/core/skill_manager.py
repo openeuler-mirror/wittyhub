@@ -99,6 +99,10 @@ class SkillManager:
     async def list_skill_repositories(self) -> list[SkillRepoModel]:
         return await self.skill_repo_repository.list_skill_repositories()
 
+    async def rollback(self) -> None:
+        """Restore the shared database session after a failed repository scan."""
+        await self.skill_repository.session.rollback()
+
     async def create_skill_repository(
         self, request: SkillRepositoryRequest
     ) -> SkillRepoModel | None:
@@ -168,6 +172,7 @@ class SkillManager:
                 'Failed to discover skills from skill repo %s (%s): %s',
                 repository.id, repository.repo_name, error_summary,
             )
+            await self.rollback()
             await self.skill_repo_repository.update_skill_repository(
                 repository.id,
                 skill_discover_status=SkillDiscoverStatus.FAILED,
@@ -247,6 +252,7 @@ class SkillManager:
                 'Failed to discover skills from skill repo %s (%s): %s',
                 repository.id, repository.repo_name, error_summary,
             )
+            await self.rollback()
             await self.skill_repo_repository.update_skill_repository(
                 repository.id,
                 skill_discover_status=SkillDiscoverStatus.FAILED,

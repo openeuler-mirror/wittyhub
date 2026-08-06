@@ -410,6 +410,7 @@ async def _discover_repositories_from_requests(
                     }
                 )
         except Exception as exc:
+            await manager.rollback()
             failed_count += 1
             fatal_error = isinstance(exc, CategoryClassificationError)
             error = _format_exception(exc)
@@ -571,6 +572,7 @@ async def _refresh_existing_repositories(
                 _successful_existing_repository_row(str(index), refreshed)
             )
         except Exception as exc:
+            await manager.rollback()
             failed_count += 1
             fatal_error = isinstance(exc, CategoryClassificationError)
             error = _format_exception(exc)

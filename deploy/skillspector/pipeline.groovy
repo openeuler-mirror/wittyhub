@@ -11,6 +11,7 @@ pipeline {
     environment {
         PATH = "/opt/venv/bin:/usr/local/bin:${env.PATH}"
         REPORT_DIR = "${WORKSPACE}/reports"
+        LOCAL_REPO_ROOT = "${env.WITTYHUB_REPOSITORY_ROOT ?: '/opt/wittyhub/skill-repositories'}"
     }
 
     parameters {
@@ -28,19 +29,15 @@ pipeline {
         stage("Checkout") {
             steps {
                 script {
- 	                def ref = params.REF?.trim()
- 	                if (ref =~ /^[0-9a-f]{40}$/) {
- 	                // Commit SHA: clone and checkout specific commit directly
- 	                    sh """
- 	                        git init
- 	                        git remote add origin ${params.GIT_URL}
- 	                        git fetch --depth 1 origin ${ref}
- 	                        git checkout FETCH_HEAD
- 	                    """
- 	                } else {
- 	                    git url: params.GIT_URL, branch: ref
- 	                }
- 	            }
+                    deleteDir()
+                    withEnv([
+                        "SCAN_GIT_URL=${params.GIT_URL?.trim()}",
+                        "SCAN_GIT_REF=${params.REF?.trim() ?: 'main'}",
+                        "SCAN_SKILL_PATH=${params.SKILL_PATH?.trim() ?: ''}",
+                    ]) {
+                        sh "wittyhub-skillspector-checkout"
+                    }
+                }
             }
         }
 

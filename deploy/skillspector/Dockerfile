@@ -68,6 +68,8 @@ RUN jenkins-plugin-cli --plugins \
 # .override 确保已有 Jenkins 数据卷也使用最新初始化脚本
 COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy.override
 COPY deploy/skillspector/pipeline.groovy /usr/share/jenkins/ref/jenkins-pipeline.groovy
+COPY deploy/skillspector/checkout.sh /usr/local/bin/wittyhub-skillspector-checkout
+RUN chmod 755 /usr/local/bin/wittyhub-skillspector-checkout
 
 ENV SKILLSPECTOR_LOG_LEVEL=WARNING
 ENV SKILLSPECTOR_PROVIDER=openai

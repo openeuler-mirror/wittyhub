@@ -336,6 +336,7 @@ async def _discover_repositories_from_requests(
     total = len(requests)
     created_count = 0
     rediscovered_count = 0
+    security_retried_count = 0
     unchanged_count = 0
     removed_count = 0
     skipped_no_skill = 0
@@ -376,6 +377,21 @@ async def _discover_repositories_from_requests(
                         "name": _display_skill_repo_name(result),
                         "url": result.url or label,
                         "error": "SKILL.md not found",
+                    }
+                )
+            elif getattr(result, "_security_retry_candidates", 0):
+                security_retried_count += 1
+                candidates = int(getattr(result, "_security_retry_candidates", 0))
+                triggered = int(getattr(result, "_security_retriggered", 0))
+                result_rows.append(
+                    {
+                        "#": str(index),
+                        "result": "security_retried",
+                        "status": str(result.skill_discover_status or "-"),
+                        "skills": str(result.skill_num),
+                        "name": _display_skill_repo_name(result),
+                        "url": result.url or label,
+                        "error": f"commit unchanged; triggered {triggered}/{candidates}",
                     }
                 )
             elif getattr(result, "_unchanged", False):
@@ -445,8 +461,9 @@ async def _discover_repositories_from_requests(
     _print_failure_details(failure_details)
     print()
     logger.info(
-        "Discover summary: total=%d created=%d rediscovered=%d unchanged=%d removed=%d no_skill=%d failed=%d",
-        total, created_count, rediscovered_count, unchanged_count,
+        "Discover summary: total=%d created=%d rediscovered=%d security_retried=%d "
+        "unchanged=%d removed=%d no_skill=%d failed=%d",
+        total, created_count, rediscovered_count, security_retried_count, unchanged_count,
         removed_count, skipped_no_skill, failed_count,
     )
 

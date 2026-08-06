@@ -322,6 +322,27 @@ class SkillRepository:
         )
         return {commit_id for commit_id in result.scalars().all() if commit_id}
 
+    async def list_unscored_by_skill_repo(
+        self,
+        skill_repo_id: uuid.UUID,
+    ) -> tuple[list[Skill], list[SkillVersion]]:
+        skills_result = await self.session.execute(
+            select(Skill).where(
+                Skill.skill_repo_id == skill_repo_id,
+                Skill.risk_score.is_(None),
+            )
+        )
+        versions_result = await self.session.execute(
+            select(SkillVersion).where(
+                SkillVersion.skill_repo_id == skill_repo_id,
+                SkillVersion.risk_score.is_(None),
+            )
+        )
+        return (
+            list(skills_result.scalars().all()),
+            list(versions_result.scalars().all()),
+        )
+
     async def store_skills_and_versions(
         self,
         skill_repo_id: uuid.UUID,

@@ -455,6 +455,22 @@ class SkillScanner:
 
         return report
 
+    async def audit_existing_skill(
+        self,
+        *,
+        repo: SkillRepoModel,
+        relative_path: str,
+        commit_id: str | None,
+        skill_id: str,
+    ) -> SecurityReport | None:
+        """Trigger security detection for an already persisted skill record."""
+        return await self._audit_skill_security(
+            repo=repo,
+            relative_path=relative_path,
+            commit_id=commit_id,
+            skill_id=skill_id,
+        )
+
     @staticmethod
     def _extract_audit_artifacts(
         report: SecurityReport | None,

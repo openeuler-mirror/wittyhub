@@ -1,7 +1,7 @@
 from collections import defaultdict
 import re
 
-from sqlalchemy import func, select, text, desc
+from sqlalchemy import desc, func, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
@@ -121,6 +121,16 @@ class SearchService:
         embedding: list[float] | None = None,
         mode: str = "hybrid",
     ) -> dict[str, Any]:
+        if embedding and mode == "semantic":
+            return await self._vector_search(
+                embedding=embedding,
+                limit=limit,
+                offset=offset,
+                category=category,
+                platform=platform,
+                tags=tags,
+            )
+
         text_results = await self._text_search(
             query=query,
             limit=limit * 2,
@@ -152,25 +162,15 @@ class SearchService:
                 "limit": limit,
                 "mode": "hybrid",
             }
-        elif embedding and mode == "semantic":
-            return await self._vector_search(
-                embedding=embedding,
-                limit=limit,
-                offset=offset,
-                category=category,
-                platform=platform,
-                tags=tags,
-            )
-        else:
-            deduped = self._dedupe_skill_results(text_results["results"])
-            return {
-                "results": deduped[offset:offset + limit],
-                "total": text_results["total"],
-                "query": query,
-                "skip": offset,
-                "limit": limit,
-                "mode": "text",
-            }
+        deduped = self._dedupe_skill_results(text_results["results"])
+        return {
+            "results": deduped[offset:offset + limit],
+            "total": text_results["total"],
+            "query": query,
+            "skip": offset,
+            "limit": limit,
+            "mode": "text",
+        }
 
     async def _text_search(
         self,
@@ -181,29 +181,31 @@ class SearchService:
         platform: str | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        def concat_fields(*args):
-            return func.concat(*args)
-
-        search_text = concat_fields(
-            Skill.name, " ",
-            func.coalesce(Skill.description, ""), " ",
-            func.coalesce(Skill.content, "")
+        # Keep this expression in sync with the GIN index created by migration 009.
+        # String concatenation (||) is immutable in PostgreSQL and can be indexed,
+        # unlike concat(), which is only STABLE.
+        search_text = (
+            func.coalesce(Skill.name, "") + " "
+            + func.coalesce(Skill.description, "") + " "
+            + func.coalesce(Skill.content, "")
         )
+        search_config = literal_column("'zhcfg'::regconfig")
 
         base_query = select(
             Skill,
             func.ts_rank(
-                func.to_tsvector("zhcfg", search_text),
-                func.plainto_tsquery("zhcfg", query)
+                func.to_tsvector(search_config, search_text),
+                func.plainto_tsquery(search_config, query)
             ).label("rank")
         )
 
-        ts_query = func.plainto_tsquery("zhcfg", query)
-        base_query = base_query.where(
-            (func.to_tsvector("zhcfg", search_text).op("@@")(ts_query)) |
+        ts_query = func.plainto_tsquery(search_config, query)
+        search_predicate = (
+            (func.to_tsvector(search_config, search_text).op("@@")(ts_query)) |
             (Skill.name.ilike(f"%{query}%")) |
             (Skill.description.ilike(f"%{query}%"))
         )
+        base_query = base_query.where(search_predicate)
 
         base_query = self._apply_skill_filters(
             base_query,
@@ -212,9 +214,14 @@ class SearchService:
             tags=tags,
         )
 
-        count_subquery = base_query.subquery()
-        count_query = select(func.count(func.distinct(count_subquery.c.skill_id))).select_from(
-            count_subquery
+        count_query = select(func.count(func.distinct(Skill.skill_id))).where(
+            search_predicate
+        )
+        count_query = self._apply_skill_filters(
+            count_query,
+            category=category,
+            platform=platform,
+            tags=tags,
         )
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0

@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -295,7 +296,9 @@ openeuler_repos:
     async def test_configured_discover_force_does_not_skip_commit_unchanged_check(self):
         from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
 
-        manager = SkillManager(MagicMock(), MagicMock())
+        skill_repository = MagicMock()
+        skill_repository.list_unscored_by_skill_repo = AsyncMock(return_value=([], []))
+        manager = SkillManager(skill_repository, MagicMock())
         discover_mock = AsyncMock()
         with (
             patch.object(SkillManager, "_sync_git_repository"),
@@ -314,6 +317,102 @@ openeuler_repos:
 
         assert getattr(result, "_unchanged") is True
         discover_mock.assert_not_called()
+
+    async def test_commit_unchanged_retries_unscored_security_audits(self):
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        manager = SkillManager(MagicMock(), MagicMock())
+        retry_mock = AsyncMock(return_value=(3, 2))
+        discover_mock = AsyncMock()
+        repository = SimpleNamespace(id=uuid.uuid4())
+        with (
+            patch.object(SkillManager, "_sync_git_repository"),
+            patch.object(SkillManager, "_has_skill_md", return_value=True),
+            patch.object(SkillManager, "_is_commit_unchanged", return_value=True),
+            patch.object(
+                SkillManager,
+                "_get_or_create_skill_repository",
+                AsyncMock(return_value=(repository, False)),
+            ),
+            patch.object(
+                SkillManager,
+                "_retry_unscored_security_audits",
+                retry_mock,
+            ),
+            patch.object(SkillManager, "_discover_and_store_skills", discover_mock),
+        ):
+            result = await manager.discover_configured_skill_repository(
+                SkillRepositoryRequest(url="https://github.com/acme/agent-skills")
+            )
+
+        assert getattr(result, "_security_retry_candidates") == 3
+        assert getattr(result, "_security_retriggered") == 2
+        retry_mock.assert_awaited_once_with(repository)
+        discover_mock.assert_not_called()
+
+    async def test_retry_unscored_security_audits_updates_pending_audit(self):
+        from skillcrawler.core.skill_manager import SkillManager, settings
+
+        session = MagicMock()
+        session.commit = AsyncMock()
+        skill_repository = MagicMock()
+        skill_repository.session = session
+        record = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_id="github/acme/agent-skills/skills/example",
+            version="latest",
+            commit_id="a" * 40,
+            source_url=(
+                "https://github.com/acme/agent-skills/"
+                "blob/main/skills/example/SKILL.md"
+            ),
+            extra_metadata={},
+        )
+        skill_repository.list_unscored_by_skill_repo = AsyncMock(
+            return_value=([record], []),
+        )
+        manager = SkillManager(skill_repository, MagicMock())
+        manager._scanner.security_detector = SimpleNamespace(has_skillspector=True)
+        manager._scanner.audit_existing_skill = AsyncMock(
+            return_value=SimpleNamespace(
+                details={
+                    "skillspector_async": True,
+                    "skillspector_build_number": 123,
+                    "source": "skillspector",
+                }
+            )
+        )
+        repository = SimpleNamespace(
+            id=uuid.uuid4(),
+            repo_name="github.com_acme_agent-skills",
+            source="github",
+            url="https://github.com/acme/agent-skills",
+            branch="main",
+        )
+        audit_repository = MagicMock()
+        audit_repository.upsert_by_resource = AsyncMock()
+
+        with (
+            patch.object(settings.security, "enable_audit", True),
+            patch(
+                "skillcrawler.core.skill_manager.SecurityAuditRepository",
+                return_value=audit_repository,
+            ),
+        ):
+            candidates, triggered = await manager._retry_unscored_security_audits(
+                repository,
+            )
+
+        assert (candidates, triggered) == (1, 1)
+        manager._scanner.audit_existing_skill.assert_awaited_once_with(
+            repo=repository,
+            relative_path="skills/example/SKILL.md",
+            commit_id="a" * 40,
+            skill_id=record.skill_id,
+        )
+        assert record.extra_metadata["security_audit"]["skillspector_build_number"] == 123
+        audit_repository.upsert_by_resource.assert_awaited_once()
+        session.commit.assert_awaited_once()
 
     def test_skill_manager_commit_unchanged_uses_skill_repo_commit_field(self, tmp_path):
         from skillcrawler.core.skill_manager import SkillManager
@@ -443,6 +542,29 @@ class TestSearchService:
         service = SearchService(mock_session)
         assert service is not None
         assert service.session == mock_session
+
+    def test_semantic_search_skips_text_search(self):
+        from unittest.mock import AsyncMock
+
+        from src.indexer.search import SearchService
+
+        service = SearchService(MagicMock())
+        service._text_search = AsyncMock()
+        service._vector_search = AsyncMock(
+            return_value={"results": [], "total": 0, "mode": "semantic"}
+        )
+
+        result = asyncio.run(
+            service.search_skills(
+                query="rocm-kernels",
+                embedding=[0.1, 0.2],
+                mode="semantic",
+            )
+        )
+
+        service._text_search.assert_not_awaited()
+        service._vector_search.assert_awaited_once()
+        assert result["mode"] == "semantic"
 
 
 class TestConfig:

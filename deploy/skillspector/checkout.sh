@@ -33,28 +33,44 @@ fi
 
 archive_ref=''
 archive_repository=''
+resolved_commit=''
 
 if [ -n "$local_repository" ] && [ -d "${local_repository}/.git" ] && \
     git -c safe.directory="$local_repository" -C "$local_repository" \
         cat-file -e "${git_ref}^{commit}" 2>/dev/null; then
     echo "Using local repository cache: $local_repository"
-    archive_repository=$local_repository
-    archive_ref=$git_ref
+    resolved_commit=$(git -c safe.directory="$local_repository" \
+        -C "$local_repository" rev-parse "${git_ref}^{commit}")
+
+    # The host cache is mounted read-only. Reuse its existing objects through
+    # alternates, but let lazy blob fetches write into this Jenkins workspace.
+    git init -q
+    git remote add origin "$git_url"
+    mkdir -p .git/objects/info
+    printf '%s\n' "${local_repository}/.git/objects" > .git/objects/info/alternates
+    git config remote.origin.promisor true
+    git config remote.origin.partialclonefilter blob:none
+    git update-ref refs/wittyhub/scan "$resolved_commit"
+
+    archive_repository=.
+    archive_ref=refs/wittyhub/scan
 else
     if [ -n "$local_repository" ] && [ -d "${local_repository}/.git" ]; then
         echo "Reference is not available locally; fetching from origin: $git_ref"
     else
         echo "Local repository cache not found; using remote repository: $git_url"
     fi
-    git init
+    git init -q
     git remote add origin "$git_url"
     git fetch --depth 1 origin "$git_ref"
     archive_repository=.
     archive_ref=FETCH_HEAD
 fi
 
-resolved_commit=$(git -c safe.directory="$archive_repository" \
-    -C "$archive_repository" rev-parse "${archive_ref}^{commit}")
+if [ -z "$resolved_commit" ]; then
+    resolved_commit=$(git -c safe.directory="$archive_repository" \
+        -C "$archive_repository" rev-parse "${archive_ref}^{commit}")
+fi
 echo "Resolved commit: $resolved_commit"
 
 archive_file="${PWD}/.wittyhub-scan.tar"

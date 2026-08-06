@@ -120,6 +120,7 @@ class SearchService:
         tags: list[str] | None = None,
         embedding: list[float] | None = None,
         mode: str = "hybrid",
+        scope: str = "summary",
     ) -> dict[str, Any]:
         if embedding and mode == "semantic":
             return await self._vector_search(
@@ -131,16 +132,18 @@ class SearchService:
                 tags=tags,
             )
 
+        is_hybrid = bool(embedding and mode == "hybrid")
         text_results = await self._text_search(
             query=query,
-            limit=limit * 2,
-            offset=0,
+            limit=limit * 2 if is_hybrid else limit,
+            offset=0 if is_hybrid else offset,
             category=category,
             platform=platform,
             tags=tags,
+            scope=scope,
         )
 
-        if embedding and mode == "hybrid":
+        if is_hybrid:
             vector_results = await self._vector_search(
                 embedding=embedding,
                 limit=limit * 2,
@@ -162,9 +165,8 @@ class SearchService:
                 "limit": limit,
                 "mode": "hybrid",
             }
-        deduped = self._dedupe_skill_results(text_results["results"])
         return {
-            "results": deduped[offset:offset + limit],
+            "results": text_results["results"],
             "total": text_results["total"],
             "query": query,
             "skip": offset,
@@ -180,23 +182,22 @@ class SearchService:
         category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
+        scope: str = "summary",
     ) -> dict[str, Any]:
-        # Keep this expression in sync with the GIN index created by migration 009.
+        # Keep these expressions in sync with migrations 009 and 010.
         # String concatenation (||) is immutable in PostgreSQL and can be indexed,
         # unlike concat(), which is only STABLE.
         search_text = (
             func.coalesce(Skill.name, "") + " "
-            + func.coalesce(Skill.description, "") + " "
-            + func.coalesce(Skill.content, "")
+            + func.coalesce(Skill.description, "")
         )
+        if scope == "full":
+            search_text = search_text + " " + func.coalesce(Skill.content, "")
         search_config = literal_column("'zhcfg'::regconfig")
 
-        base_query = select(
-            Skill,
-            func.ts_rank(
-                func.to_tsvector(search_config, search_text),
-                func.plainto_tsquery(search_config, query)
-            ).label("rank")
+        rank_expression = func.ts_rank(
+            func.to_tsvector(search_config, search_text),
+            func.plainto_tsquery(search_config, query),
         )
 
         ts_query = func.plainto_tsquery(search_config, query)
@@ -205,7 +206,28 @@ class SearchService:
             (Skill.name.ilike(f"%{query}%")) |
             (Skill.description.ilike(f"%{query}%"))
         )
-        base_query = base_query.where(search_predicate)
+        # Select only fields returned by the API. Loading content, metadata,
+        # and the 768-dimensional embedding for every candidate makes common
+        # queries such as "code" unnecessarily expensive.
+        base_query = select(
+            Skill.id,
+            Skill.skill_id,
+            Skill.name,
+            Skill.description,
+            Skill.version,
+            Skill.author,
+            Skill.source,
+            Skill.source_url,
+            Skill.category,
+            Skill.tags,
+            Skill.platform,
+            Skill.risk_score,
+            Skill.download_count,
+            Skill.rating,
+            Skill.created_at,
+            Skill.updated_at,
+            rank_expression.label("rank"),
+        ).where(search_predicate)
 
         base_query = self._apply_skill_filters(
             base_query,
@@ -214,7 +236,9 @@ class SearchService:
             tags=tags,
         )
 
-        count_query = select(func.count(func.distinct(Skill.skill_id))).where(
+        # skills.skill_id is unique; DISTINCT adds sorting/hash work without
+        # changing the result.
+        count_query = select(func.count(Skill.id)).where(
             search_predicate
         )
         count_query = self._apply_skill_filters(
@@ -226,40 +250,40 @@ class SearchService:
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
 
-        # Pull a bounded candidate set, then choose the representative version per skill_id
-        # in Python so search cards use the same "latest version" rule as the detail page.
+        # skills.skill_id is unique, so fetch only the requested page. The old
+        # 10x candidate overfetch loaded up to 240 rows for a 12-card page.
         candidate_query = (
             base_query
             .order_by(text("rank desc"), Skill.download_count.desc(), desc(Skill.updated_at), desc(Skill.created_at))
-            .limit(max(limit * 10, offset + limit * 5, 100))
+            .limit(limit)
+            .offset(offset)
         )
         result = await self.session.execute(candidate_query)
-        rows = result.all()
+        rows = result.mappings().all()
 
         results = []
-        for skill, rank in rows:
+        for row in rows:
             results.append({
-                "id": str(skill.id),
-                "skill_id": skill.skill_id,
-                "name": skill.name,
-                "description": skill.description,
-                "version": skill.version,
-                "author": skill.author,
-                "source": skill.source,
-                "source_url": skill.source_url,
-                "category": skill.category,
-                "tags": skill.tags or [],
-                "platform": skill.platform,
-                "risk_score": skill.risk_score,
-                "download_count": skill.download_count,
-                "rating": skill.rating,
-                "created_at": skill.created_at.isoformat() if skill.created_at else None,
-                "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
-                "text_rank": float(rank) if rank else 0,
+                "id": str(row["id"]),
+                "skill_id": row["skill_id"],
+                "name": row["name"],
+                "description": row["description"],
+                "version": row["version"],
+                "author": row["author"],
+                "source": row["source"],
+                "source_url": row["source_url"],
+                "category": row["category"],
+                "tags": row["tags"] or [],
+                "platform": row["platform"],
+                "risk_score": row["risk_score"],
+                "download_count": row["download_count"],
+                "rating": row["rating"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "text_rank": float(row["rank"]) if row["rank"] else 0,
             })
 
-        deduped = self._dedupe_skill_results(results)
-        return {"results": deduped[offset:offset + limit], "total": total}
+        return {"results": results, "total": total}
 
     async def _vector_search(
         self,
@@ -289,8 +313,8 @@ class SearchService:
         where_sql = " AND ".join(where_clauses)
 
         sql = text(f"""
-            SELECT id, skill_id, name, description, version, commit_id, author, source,
-                   source_url, category, tags, platform, extra_metadata, content,
+            SELECT id, skill_id, name, description, version, author, source,
+                   source_url, category, tags, platform,
                    risk_score, download_count, rating, created_at, updated_at,
                    embedding <-> CAST(:embedding AS vector) AS distance
             FROM skills

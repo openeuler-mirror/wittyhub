@@ -414,6 +414,28 @@ openeuler_repos:
         audit_repository.upsert_by_resource.assert_awaited_once()
         session.commit.assert_awaited_once()
 
+    def test_security_retry_resolves_path_from_commit_source_url(self):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        commit_id = "bdf484685eb2a3e13eb223cbf52adf957a98ffb6"
+        repository = SimpleNamespace(
+            source="github",
+            url="https://github.com/github/gh-aw",
+            branch="main",
+        )
+        record = SimpleNamespace(
+            commit_id=commit_id,
+            source_url=(
+                "https://github.com/github/gh-aw/blob/"
+                f"{commit_id}/.github/skills/agentic-workflows/SKILL.md"
+            ),
+            skill_id="github/github/gh-aw/agentic-workflows",
+        )
+
+        assert SkillManager._relative_skill_path(repository, record) == (
+            ".github/skills/agentic-workflows/SKILL.md"
+        )
+
     def test_skill_manager_commit_unchanged_uses_skill_repo_commit_field(self, tmp_path):
         from skillcrawler.core.skill_manager import SkillManager
 
@@ -565,6 +587,36 @@ class TestSearchService:
         service._text_search.assert_not_awaited()
         service._vector_search.assert_awaited_once()
         assert result["mode"] == "semantic"
+
+    def test_text_search_fetches_only_requested_page(self):
+        from src.indexer.search import SearchService
+
+        service = SearchService(MagicMock())
+        service._text_search = AsyncMock(
+            return_value={"results": [{"skill_id": "skill-1"}], "total": 1}
+        )
+        service._vector_search = AsyncMock()
+
+        result = asyncio.run(
+            service.search_skills(
+                query="code",
+                limit=12,
+                offset=24,
+                mode="text",
+            )
+        )
+
+        service._text_search.assert_awaited_once_with(
+            query="code",
+            limit=12,
+            offset=24,
+            category=None,
+            platform=None,
+            tags=None,
+            scope="summary",
+        )
+        service._vector_search.assert_not_awaited()
+        assert result["results"] == [{"skill_id": "skill-1"}]
 
 
 class TestConfig:

@@ -58,6 +58,7 @@ export const api = {
     platform?: string
     tags?: string
     mode?: 'text' | 'semantic' | 'hybrid'
+    scope?: 'summary' | 'full'
   } = {}): Promise<SearchResponse> {
     const { data } = await client.get('/index/search', { params })
     return data

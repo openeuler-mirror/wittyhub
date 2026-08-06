@@ -5,6 +5,7 @@ Components
 * Skillspector       — Jenkins‑based deep code audit (sync + async)
 """
 import asyncio
+import json
 import logging
 import re
 import time
@@ -56,6 +57,44 @@ def _sanitize_json_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_sanitize_json_value(item) for item in value]
     return value
+
+
+def _log_skillspector_final_result(
+    *,
+    audit_id: Any,
+    build_number: int,
+    status: str,
+    outcome: str,
+    risk_level: str | None = None,
+    score: Any = None,
+    signal_count: int = 0,
+    error: str | None = None,
+) -> None:
+    """Write one searchable JSON log entry for every terminal scan result."""
+    result = {
+        "event": "skillspector_final_result",
+        "audit_id": str(audit_id),
+        "build_number": build_number,
+        "jenkins_status": status,
+        "outcome": outcome,
+        "risk_level": risk_level,
+        "score": score,
+        "signal_count": signal_count,
+        "error": error,
+    }
+    logger.info(
+        "Skillspector final result: %s",
+        json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _log_collector_event(event: str, **fields: Any) -> None:
+    """Write one structured trace entry for an async collector decision."""
+    payload = {"event": event, **fields}
+    logger.debug(
+        "Skillspector collector: %s",
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -416,10 +455,22 @@ class SkillspectorCollector:
         processed = 0
         async with self._session_factory() as session:
             pending = await self._fetch_pending(session)
+            _log_collector_event(
+                "batch_started",
+                pending_count=len(pending),
+                batch_limit=100,
+            )
             for audit in pending:
                 audit_id = audit.id
                 build_number = (audit.details or {}).get("skillspector_build_number")
                 if build_number is None:
+                    _log_collector_event(
+                        "item_skipped",
+                        audit_id=audit_id,
+                        resource_id=audit.resource_id,
+                        reason="missing_build_number",
+                        next_action="leave_pending",
+                    )
                     continue
                 try:
                     if await self._collect_one(session, audit, build_number):
@@ -431,6 +482,11 @@ class SkillspectorCollector:
                         "Failed to collect result for audit %s (build #%s)",
                         audit_id, build_number,
                     )
+            _log_collector_event(
+                "batch_completed",
+                pending_count=len(pending),
+                completed_count=processed,
+            )
         return processed
 
     # ------------------------------------------------------------------
@@ -467,28 +523,48 @@ class SkillspectorCollector:
         """Collect a single Jenkins result.  Returns True if collected."""
         from src.models.orm import SecurityAudit, Skill, SkillVersion
 
-        logger.info(
+        logger.debug(
             "Collecting Skillspector result: audit_id=%s build_number=%s",
             audit.id,
             build_number,
         )
+        _log_collector_event(
+            "item_started",
+            audit_id=audit.id,
+            resource_id=audit.resource_id,
+            resource_type=audit.resource_type,
+            build_number=build_number,
+        )
 
-        # 1. Wait for build (offload sync HTTP polling to a worker thread)
-        status = await asyncio.to_thread(self._client.wait_for_build, build_number)
+        # Probe once instead of waiting here. A long-running build must not
+        # block collection of every completed build behind it.
+        status = await asyncio.to_thread(self._client.get_build_status, build_number)
+        if status in (None, "BUILDING"):
+            _log_collector_event(
+                "item_deferred",
+                audit_id=audit.id,
+                resource_id=audit.resource_id,
+                build_number=build_number,
+                jenkins_status=status or "STATUS_UNAVAILABLE",
+                action="retry_next_poll",
+                poll_interval_seconds=self._poll_interval,
+            )
+            return False
+
+        _log_collector_event(
+            "status_resolved",
+            audit_id=audit.id,
+            resource_id=audit.resource_id,
+            build_number=build_number,
+            jenkins_status=status,
+            action="collect_terminal_result",
+        )
+
         logger.info(
             "Jenkins build completed: build_number=%s status=%s",
             build_number,
             status,
         )
-
-        # A polling timeout or transient Jenkins error must remain pending so a
-        # later collector pass can retry it.
-        if status is None:
-            logger.warning(
-                "Build #%d status unavailable; will retry",
-                build_number,
-            )
-            return False
 
         # These terminal states normally cannot produce a complete report.
         if status in {"ABORTED", "NOT_BUILT"}:
@@ -501,6 +577,28 @@ class SkillspectorCollector:
                 .values(details=details)
             )
             await session.commit()
+            _log_collector_event(
+                "item_persisted",
+                audit_id=audit.id,
+                resource_id=audit.resource_id,
+                build_number=build_number,
+                outcome="completed_without_report",
+                writes={
+                    "table": "security_audits",
+                    "fields": {
+                        "details.skillspector_collected": True,
+                        "details.skillspector_status": status,
+                    },
+                },
+                next_action="stop_collecting",
+            )
+            _log_skillspector_final_result(
+                audit_id=audit.id,
+                build_number=build_number,
+                status=status,
+                outcome="completed_without_report",
+                error=status.lower(),
+            )
             return True
 
         # Jenkins may report FAILURE when findings make the scanner exit 1,
@@ -528,8 +626,44 @@ class SkillspectorCollector:
                     status,
                     attempts,
                 )
+                _log_skillspector_final_result(
+                    audit_id=audit.id,
+                    build_number=build_number,
+                    status=status,
+                    outcome="completed_without_report",
+                    error="report_unavailable",
+                )
+                _log_collector_event(
+                    "item_persisted",
+                    audit_id=audit.id,
+                    resource_id=audit.resource_id,
+                    build_number=build_number,
+                    outcome="completed_without_report",
+                    report_http_status=report_status,
+                    writes={
+                        "table": "security_audits",
+                        "fields": {
+                            "details.skillspector_collected": True,
+                            "details.skillspector_status": status,
+                            "details.skillspector_error": "report_unavailable",
+                            "details.skillspector_report_fetch_attempts": attempts,
+                        },
+                    },
+                    next_action="stop_collecting",
+                )
                 return True
 
+            _log_collector_event(
+                "item_deferred",
+                audit_id=audit.id,
+                resource_id=audit.resource_id,
+                build_number=build_number,
+                jenkins_status=status,
+                report_http_status=report_status,
+                report_fetch_attempts=attempts,
+                action="retry_next_poll",
+                poll_interval_seconds=self._poll_interval,
+            )
             logger.warning(
                 "Build #%d ended with %s but report is unavailable; will retry (%d/%d)",
                 build_number,
@@ -580,6 +714,40 @@ class SkillspectorCollector:
                     )
 
         await session.commit()
+        _log_collector_event(
+            "item_persisted",
+            audit_id=audit.id,
+            resource_id=audit.resource_id,
+            build_number=build_number,
+            outcome="report_collected",
+            writes={
+                "table": "security_audits",
+                "fields": [
+                    "risk_level",
+                    "risk_signals",
+                    "details.skillspector_collected",
+                    "details.skillspector_status",
+                    "details.skillspector_score",
+                    "details.skillspector_version",
+                    "details.recommendation",
+                    "details.skillspector_report",
+                ],
+                "risk_level": risk_level,
+                "signal_count": len(signals),
+                "score_target": score_write_target,
+                "score": score,
+            },
+            next_action="stop_collecting",
+        )
+        _log_skillspector_final_result(
+            audit_id=audit.id,
+            build_number=build_number,
+            status=status,
+            outcome="report_collected",
+            risk_level=risk_level,
+            score=score,
+            signal_count=len(signals),
+        )
         logger.info(
             "Collected build #%d → score=%s risk=%s signals=%d",
             build_number, score, risk_level, len(signals),

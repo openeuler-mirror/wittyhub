@@ -324,6 +324,21 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_version_by_skill_id_and_version(
+        self,
+        skill_id: str,
+        version: str | None,
+    ) -> SkillVersion | None:
+        result = await self.session.execute(
+            select(SkillVersion)
+            .where(
+                SkillVersion.skill_id == skill_id,
+                SkillVersion.version == version,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def get_category_by_source_url(self, source_url: str) -> str | None:
         result = await self.session.execute(
             select(Skill.category)

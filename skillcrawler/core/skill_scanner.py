@@ -265,13 +265,11 @@ class SkillScanner:
         prepare_elapsed = time.perf_counter() - prepare_started_at
 
         git_commit_started_at = time.perf_counter()
-        skill_dir_commit_id = self._get_skill_directory_commit_id(
+        effective_commit_id = self._get_skill_directory_commit_id(
             repo_root=repo_root,
             relative_path=relative_path,
             ref=ref,
-        )
-        if skill_dir_commit_id:
-            merged_metadata['skill_directory_commit_id'] = skill_dir_commit_id
+        ) or commit_id
         git_commit_elapsed = time.perf_counter() - git_commit_started_at
 
         context_started_at = time.perf_counter()
@@ -291,26 +289,26 @@ class SkillScanner:
         category_elapsed = time.perf_counter() - category_started_at
 
         security_started_at = time.perf_counter()
-        report = await self._audit_skill_security(
+        risk_score, audit_details = await self._resolve_security_result(
             repo=repo,
             relative_path=relative_path,
-            commit_id=commit_id,
             skill_id=skill_id,
+            version=version,
+            commit_id=effective_commit_id,
+            return_skill_model=return_skill_model,
         )
+        if audit_details:
+            merged_metadata['security_audit'] = audit_details
         security_elapsed = time.perf_counter() - security_started_at
 
         assemble_started_at = time.perf_counter()
-        risk_score, audit_details = self._extract_audit_artifacts(report)
-        if audit_details:
-            merged_metadata['security_audit'] = audit_details
-
         common = {
             'skill_repo_id': repo.id,
             'skill_id': skill_id,
             'name': derive_repository_skill_name(skill_file, metadata),
             'description': as_optional_str(metadata.get('description')),
             'version': version or as_optional_str(metadata.get('version')),
-            'commit_id': commit_id or skill_dir_commit_id,
+            'commit_id': effective_commit_id,
             'author': author,
             'source': host,
             'source_url': source_url,
@@ -324,10 +322,8 @@ class SkillScanner:
             'created_at': datetime.now(timezone.utc),
             'updated_at': datetime.now(timezone.utc),
         }
-        if return_skill_model:
-            record: Skill | SkillVersion = Skill(**common)
-        else:
-            record = SkillVersion(**common)
+        model_class = Skill if return_skill_model else SkillVersion
+        record = model_class(**common)
         assemble_elapsed = time.perf_counter() - assemble_started_at
         total_elapsed = time.perf_counter() - scan_started_at
         accounted_elapsed = (
@@ -354,6 +350,56 @@ class SkillScanner:
             total_elapsed,
         )
         return record
+
+    async def _resolve_security_result(
+        self,
+        *,
+        repo: SkillRepoModel,
+        relative_path: str,
+        skill_id: str,
+        version: str | None,
+        commit_id: str | None,
+        return_skill_model: bool,
+    ) -> tuple[int | None, dict[str, Any] | None]:
+        if return_skill_model:
+            existing_record = await self.skill_repository.get_by_skill_id(skill_id)
+        else:
+            existing_record = await self.skill_repository.get_version_by_skill_id_and_version(
+                skill_id,
+                version,
+            )
+
+        existing_metadata = (
+            dict(existing_record.extra_metadata or {})
+            if existing_record is not None
+            else {}
+        )
+        if (
+            existing_record is not None
+            and commit_id is not None
+            and commit_id == existing_record.commit_id
+            and existing_record.risk_score is not None
+        ):
+            audit_details = existing_metadata.get('security_audit')
+            reused_audit_details = dict(audit_details) if audit_details else None
+            if reused_audit_details is not None:
+                reused_audit_details['skillspector_reused'] = True
+            _logger.debug(
+                'Reused security result: skill_id=%s version=%s commit_id=%s score=%s',
+                skill_id,
+                version or '-',
+                commit_id,
+                existing_record.risk_score,
+            )
+            return existing_record.risk_score, reused_audit_details
+
+        report = await self._audit_skill_security(
+            repo=repo,
+            relative_path=relative_path,
+            commit_id=commit_id,
+            skill_id=skill_id,
+        )
+        return self._extract_audit_artifacts(report)
 
     def _get_skill_directory_commit_id(
         self,

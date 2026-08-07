@@ -6,6 +6,7 @@ import logging
 import shutil
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,7 @@ from skillcrawler.core.skill_parser import (
     as_optional_str,
     as_optional_str_list,
     derive_skill_source,
+    extract_owner_repo,
     find_scannable_skill_files,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
@@ -99,6 +101,10 @@ class SkillManager:
     async def list_skill_repositories(self) -> list[SkillRepoModel]:
         return await self.skill_repo_repository.list_skill_repositories()
 
+    async def rollback(self) -> None:
+        """Restore the shared database session after a failed repository scan."""
+        await self.skill_repository.session.rollback()
+
     async def create_skill_repository(
         self, request: SkillRepositoryRequest
     ) -> SkillRepoModel | None:
@@ -168,6 +174,7 @@ class SkillManager:
                 'Failed to discover skills from skill repo %s (%s): %s',
                 repository.id, repository.repo_name, error_summary,
             )
+            await self.rollback()
             await self.skill_repo_repository.update_skill_repository(
                 repository.id,
                 skill_discover_status=SkillDiscoverStatus.FAILED,
@@ -231,6 +238,11 @@ class SkillManager:
             repo_name,
         )
         if not created_new and self._is_commit_unchanged(repository, clone_dir):
+            candidates, triggered = await self._retry_unscored_security_audits(repository)
+            if candidates:
+                setattr(repository, "_security_retry_candidates", candidates)
+                setattr(repository, "_security_retriggered", triggered)
+                return repository
             setattr(repository, "_unchanged", True)
             return repository
 
@@ -247,6 +259,7 @@ class SkillManager:
                 'Failed to discover skills from skill repo %s (%s): %s',
                 repository.id, repository.repo_name, error_summary,
             )
+            await self.rollback()
             await self.skill_repo_repository.update_skill_repository(
                 repository.id,
                 skill_discover_status=SkillDiscoverStatus.FAILED,
@@ -374,6 +387,108 @@ class SkillManager:
             'Upserted %d/%d SecurityAudit records',
             upserted, len(pending),
         )
+
+    async def _retry_unscored_security_audits(
+        self,
+        repo: SkillRepoModel,
+    ) -> tuple[int, int]:
+        """Re-trigger audits for unchanged records that still have no score."""
+        if not settings.security.enable_audit:
+            return 0, 0
+
+        latest_skills, tagged_skills = await self.skill_repository.list_unscored_by_skill_repo(
+            repo.id,
+        )
+        records: list[Skill | SkillVersion] = [*latest_skills, *tagged_skills]
+        if not records:
+            return 0, 0
+
+        detector = self._scanner.security_detector
+        if detector is None or not detector.has_skillspector:
+            _logger.warning(
+                'Security retry skipped for repo %s: %d unscored records but '
+                'Skillspector is unavailable',
+                repo.repo_name,
+                len(records),
+            )
+            return len(records), 0
+
+        audit_repo = SecurityAuditRepository(self.skill_repository.session)
+        triggered = 0
+        for record in records:
+            relative_path = self._relative_skill_path(repo, record)
+            report = await self._scanner.audit_existing_skill(
+                repo=repo,
+                relative_path=relative_path,
+                commit_id=record.commit_id,
+                skill_id=record.skill_id,
+            )
+            details = dict(report.details) if report is not None else {}
+            if details.get('skillspector_build_number') is None:
+                _logger.warning(
+                    'Security retry failed to trigger: skill_id=%s version=%s',
+                    record.skill_id,
+                    record.version or '-',
+                )
+                continue
+
+            metadata = dict(record.extra_metadata or {})
+            metadata['security_audit'] = details
+            record.extra_metadata = metadata
+            await audit_repo.upsert_by_resource(
+                resource_type='skill',
+                resource_id=record.id,
+                audit_data={
+                    'resource_type': 'skill',
+                    'resource_id': record.id,
+                    'version': record.version,
+                    'commit_id': record.commit_id,
+                    'audit_type': 'skillspector',
+                    'risk_level': 'unknown',
+                    'risk_signals': [],
+                    'details': details,
+                    'audited_at': datetime.now(timezone.utc),
+                },
+            )
+            triggered += 1
+
+        await self.skill_repository.session.commit()
+        _logger.info(
+            'Security retry for unchanged repo %s: triggered=%d candidates=%d',
+            repo.repo_name,
+            triggered,
+            len(records),
+        )
+        return len(records), triggered
+
+    @staticmethod
+    def _relative_skill_path(
+        repo: SkillRepoModel,
+        record: Skill | SkillVersion,
+    ) -> str:
+        refs = []
+        if record.commit_id:
+            refs.append(record.commit_id)
+        if isinstance(record, SkillVersion) and record.version:
+            refs.append(record.version)
+        if repo.branch:
+            refs.append(repo.branch)
+        refs.extend(['HEAD', 'master', 'main'])
+
+        for ref in dict.fromkeys(refs):
+            marker = f'/blob/{ref}/'
+            if marker in record.source_url:
+                relative_path = record.source_url.split(marker, 1)[1]
+                if relative_path.endswith('SKILL.md'):
+                    return relative_path
+
+        owner_repo = extract_owner_repo(repo.url)
+        prefix = f'{repo.source}/{owner_repo}/'
+        skill_path = record.skill_id.removeprefix(prefix)
+        repository_name = owner_repo.rsplit('/', 1)[-1]
+        if skill_path == repository_name:
+            return 'SKILL.md'
+        return f'{skill_path.strip("/")}/SKILL.md'
 
     # ── Internal: helpers ──────────────────────────────────────────
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -62,7 +63,14 @@ class SkillScanner:
                 f'Repository root does not exist for repository {repo.id}: {repo_root}'
             )
 
+        discovery_started_at = time.perf_counter()
         skill_files = find_scannable_skill_files(repo_root)
+        _logger.debug(
+            'Skill file discovery timing: repo=%s files=%d elapsed=%.3fs',
+            getattr(repo, 'repo_name', None) or repo.url,
+            len(skill_files),
+            time.perf_counter() - discovery_started_at,
+        )
 
         repository_git_metadata = repository_git_metadata or {}
         repository_commit_id = as_optional_str(repository_git_metadata.get('commit_id'))
@@ -102,13 +110,16 @@ class SkillScanner:
         discovered: list[Skill] = []
         category_cache: dict[str, str | None] = {}
         for skill_file in skill_files:
+            scan_started_at = time.perf_counter()
             relative_path = to_repository_relative_path(repo_root, skill_file)
+            metadata_content = load_skill_frontmatter(skill_file)
+            input_elapsed = time.perf_counter() - scan_started_at
             skill = await self._build_skill_record(
                 repo=repo,
                 repo_root=repo_root,
                 skill_file=skill_file,
                 relative_path=relative_path,
-                metadata_content=load_skill_frontmatter(skill_file),
+                metadata_content=metadata_content,
                 ref=repo.branch or None,
                 version='latest',
                 commit_id=repository_commit_id,
@@ -116,8 +127,10 @@ class SkillScanner:
                 category_cache=category_cache,
                 version_source='branch_head',
                 author=author,
+                scan_started_at=scan_started_at,
+                input_elapsed=input_elapsed,
             )
-            _logger.info(
+            _logger.debug(
                 'Discovered skill: skill_id=%s version=%s source=%s',
                 skill.skill_id, skill.version or '-', relative_path,
             )
@@ -148,17 +161,28 @@ class SkillScanner:
             version = snapshot.get('version')
             commit_id = snapshot.get('commit_id') or repository_commit_id
             version_source_val = as_optional_str(snapshot.get('version_source'))
-            for relative_path in self.git_ops.list_skill_paths_for_ref(
+            path_listing_started_at = time.perf_counter()
+            skill_paths = self.git_ops.list_skill_paths_for_ref(
                 repo_root, ref, should_skip_relative_path,
-            ):
+            )
+            _logger.debug(
+                'Tag skill path listing timing: repo=%s ref=%s paths=%d elapsed=%.3fs',
+                getattr(repo, 'repo_name', None) or repo.url,
+                ref,
+                len(skill_paths),
+                time.perf_counter() - path_listing_started_at,
+            )
+            for relative_path in skill_paths:
                 if relative_path not in current_skill_paths:
                     continue
+                scan_started_at = time.perf_counter()
                 virtual_skill_file = repo_root / relative_path
                 metadata_content = self.git_ops.load_skill_frontmatter_from_git_ref(
                     repo_root, ref, relative_path, parse_skill_frontmatter_text,
                 )
                 if metadata_content is None:
                     continue
+                input_elapsed = time.perf_counter() - scan_started_at
                 skill = await self._build_skill_record(
                     repo=repo,
                     repo_root=repo_root,
@@ -172,13 +196,27 @@ class SkillScanner:
                     category_cache=category_cache,
                     version_source=version_source_val,
                     author=author,
+                    scan_started_at=scan_started_at,
+                    input_elapsed=input_elapsed,
                     return_skill_model=False,
                 )
                 version_key = (skill.skill_id, skill.version) if skill.version else None
                 commit_key = (skill.skill_id, skill.commit_id) if skill.commit_id else None
                 if version_key is not None and version_key in seen_versions:
+                    _logger.debug(
+                        'Skipped duplicate skill version: skill_id=%s version=%s commit_id=%s',
+                        skill.skill_id,
+                        skill.version or '-',
+                        skill.commit_id or '-',
+                    )
                     continue
                 if commit_key is not None and commit_key in seen_commits:
+                    _logger.debug(
+                        'Skipped duplicate skill commit: skill_id=%s version=%s commit_id=%s',
+                        skill.skill_id,
+                        skill.version or '-',
+                        skill.commit_id or '-',
+                    )
                     continue
                 if version_key is not None:
                     seen_versions.add(version_key)
@@ -206,9 +244,12 @@ class SkillScanner:
         category_cache: dict[str, str | None],
         version_source: str | None,
         author: str | None,
+        scan_started_at: float,
+        input_elapsed: float,
         *,
         return_skill_model: bool = True,
     ) -> Skill | SkillVersion:
+        prepare_started_at = time.perf_counter()
         metadata, content = metadata_content
         merged_metadata = dict(metadata)
         if repository_latest_tags and 'repository_latest_tags' not in merged_metadata:
@@ -221,6 +262,9 @@ class SkillScanner:
                 f'Failed to build source_url for repository {repo.id}: {relative_path}'
             )
         skill_id = build_public_skill_id(repo, repo_root, skill_file)
+        prepare_elapsed = time.perf_counter() - prepare_started_at
+
+        git_commit_started_at = time.perf_counter()
         skill_dir_commit_id = self._get_skill_directory_commit_id(
             repo_root=repo_root,
             relative_path=relative_path,
@@ -228,8 +272,14 @@ class SkillScanner:
         )
         if skill_dir_commit_id:
             merged_metadata['skill_directory_commit_id'] = skill_dir_commit_id
+        git_commit_elapsed = time.perf_counter() - git_commit_started_at
+
+        context_started_at = time.perf_counter()
         host, source_author = derive_skill_source(repo.url)
         author = author or source_author
+        prepare_elapsed += time.perf_counter() - context_started_at
+
+        category_started_at = time.perf_counter()
         category = await self._classify_skill_category(
             skill_file=skill_file,
             metadata=merged_metadata,
@@ -238,12 +288,18 @@ class SkillScanner:
             skill_id=skill_id,
             category_cache=category_cache,
         )
+        category_elapsed = time.perf_counter() - category_started_at
+
+        security_started_at = time.perf_counter()
         report = await self._audit_skill_security(
             repo=repo,
             relative_path=relative_path,
             commit_id=commit_id,
             skill_id=skill_id,
         )
+        security_elapsed = time.perf_counter() - security_started_at
+
+        assemble_started_at = time.perf_counter()
         risk_score, audit_details = self._extract_audit_artifacts(report)
         if audit_details:
             merged_metadata['security_audit'] = audit_details
@@ -269,8 +325,35 @@ class SkillScanner:
             'updated_at': datetime.now(timezone.utc),
         }
         if return_skill_model:
-            return Skill(**common)
-        return SkillVersion(**common)
+            record: Skill | SkillVersion = Skill(**common)
+        else:
+            record = SkillVersion(**common)
+        assemble_elapsed = time.perf_counter() - assemble_started_at
+        total_elapsed = time.perf_counter() - scan_started_at
+        accounted_elapsed = (
+            input_elapsed
+            + prepare_elapsed
+            + git_commit_elapsed
+            + category_elapsed
+            + security_elapsed
+            + assemble_elapsed
+        )
+        _logger.debug(
+            'Skill timing: skill_id=%s version=%s input=%.3fs prepare=%.3fs '
+            'git_commit=%.3fs category=%.3fs security=%.3fs assemble=%.3fs '
+            'other=%.3fs total=%.3fs',
+            skill_id,
+            version or 'latest',
+            input_elapsed,
+            prepare_elapsed,
+            git_commit_elapsed,
+            category_elapsed,
+            security_elapsed,
+            assemble_elapsed,
+            max(0.0, total_elapsed - accounted_elapsed),
+            total_elapsed,
+        )
+        return record
 
     def _get_skill_directory_commit_id(
         self,
@@ -371,6 +454,22 @@ class SkillScanner:
             )
 
         return report
+
+    async def audit_existing_skill(
+        self,
+        *,
+        repo: SkillRepoModel,
+        relative_path: str,
+        commit_id: str | None,
+        skill_id: str,
+    ) -> SecurityReport | None:
+        """Trigger security detection for an already persisted skill record."""
+        return await self._audit_skill_security(
+            repo=repo,
+            relative_path=relative_path,
+            commit_id=commit_id,
+            skill_id=skill_id,
+        )
 
     @staticmethod
     def _extract_audit_artifacts(

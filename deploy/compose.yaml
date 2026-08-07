@@ -14,7 +14,7 @@ services:
     networks:
       - wittyhub-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES__USER} -d $${POSTGRES__DB}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,6 +59,7 @@ services:
       POSTGRES__USER: ${POSTGRES__USER:?POSTGRES__USER is required}
       POSTGRES__PASSWORD: ${POSTGRES__PASSWORD:?POSTGRES__PASSWORD is required}
       POSTGRES__DB: ${POSTGRES__DB:?POSTGRES__DB is required}
+      AI__EMBEDDING_HOST: http://embedding:8082
       SECURITY__SKILLSPECTOR_JENKINS_URL: ${SECURITY__SKILLSPECTOR_JENKINS_URL:-http://skillspector:8083}
       SECURITY__SKILLSPECTOR_JENKINS_USER: ${SECURITY__SKILLSPECTOR_JENKINS_USER:-admin}
       SECURITY__SKILLSPECTOR_JENKINS_TOKEN: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:-}
@@ -99,15 +100,17 @@ services:
     build:
       context: ..
       dockerfile: deploy/skillspector/Dockerfile
-      args:
-        JENKINS_ADMIN_PASS: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:?SECURITY__SKILLSPECTOR_JENKINS_TOKEN is required}
     ports:
       - "8083:8083"
       - "50000:50000"
     environment:
       JENKINS_OPTS: --httpPort=8083
+      JENKINS_ADMIN_PASS: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:?SECURITY__SKILLSPECTOR_JENKINS_TOKEN is required}
+      JENKINS_NUM_EXECUTORS: ${JENKINS_NUM_EXECUTORS:-20}
+      WITTYHUB_REPOSITORY_ROOT: /opt/wittyhub/skill-repositories
     volumes:
       - jenkins-data:/var/jenkins_home
+      - /opt/wittyhub:/opt/wittyhub:ro
     networks:
       - wittyhub-network
     healthcheck:

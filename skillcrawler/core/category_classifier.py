@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -129,14 +130,25 @@ class DeepSeekCategoryClassifier:
             "Content-Type": "application/json",
         }
 
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
+        started_at = time.perf_counter()
+        status: int | str = "request_error"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                status = response.status_code
+                response.raise_for_status()
+                data = response.json()
+        finally:
+            _logger.debug(
+                "Category model timing: model=%s status=%s elapsed=%.3fs",
+                self.model_name,
+                status,
+                time.perf_counter() - started_at,
             )
-            response.raise_for_status()
-            data = response.json()
 
         return (
             data.get("choices", [{}])[0]

@@ -13,6 +13,37 @@ settings = get_settings()
 
 
 def configure_logging() -> None:
+    level_name = settings.logging.level.strip().upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    # Use logging.level as the single switch for standard Python, Uvicorn,
+    # application, and third-party loggers that already exist at startup.
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    if not root_logger.handlers:
+        root_handler = logging.StreamHandler(sys.stdout)
+        root_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)s %(name)s %(message)s"
+            )
+        )
+        root_logger.addHandler(root_handler)
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(logger_name)
+        uvicorn_logger.setLevel(level)
+        for handler in uvicorn_logger.handlers:
+            handler.setLevel(level)
+
+    for registered_logger in logging.Logger.manager.loggerDict.values():
+        if not isinstance(registered_logger, logging.Logger):
+            continue
+        registered_logger.setLevel(level)
+        for handler in registered_logger.handlers:
+            handler.setLevel(level)
+
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
@@ -20,6 +51,7 @@ def configure_logging() -> None:
             structlog.dev.ConsoleRenderer(),
         ],
         context_class=dict,
+        wrapper_class=structlog.make_filtering_bound_logger(level),
         logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
         cache_logger_on_first_use=True,
     )

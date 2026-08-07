@@ -18,6 +18,7 @@ COPY src ./src
 COPY scripts ./scripts
 COPY migrations ./migrations
 COPY alembic.ini ./
+COPY deploy/api/entrypoint.sh /usr/local/bin/wittyhub-api-entrypoint
 COPY skillcrawler ./skillcrawler
 COPY skills ./skills
 
@@ -26,7 +27,8 @@ RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --defau
 RUN groupadd --gid "${APP_GID}" wittyhub \
     && useradd --uid "${APP_UID}" --gid wittyhub --create-home --shell /usr/sbin/nologin wittyhub \
     && mkdir -p /opt/wittyhub \
-    && chown -R wittyhub:wittyhub /app /opt/wittyhub
+    && chown -R wittyhub:wittyhub /app /opt/wittyhub \
+    && chmod 755 /usr/local/bin/wittyhub-api-entrypoint
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8081
@@ -38,4 +40,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 USER wittyhub
 
+ENTRYPOINT ["wittyhub-api-entrypoint"]
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8081"]

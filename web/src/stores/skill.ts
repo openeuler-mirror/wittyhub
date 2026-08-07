@@ -58,6 +58,8 @@ export const useSkillStore = defineStore('skill', () => {
         const { security_level: _, ...searchParams } = params
         const res = await api.searchSkills({
           q: filter.value.keyword,
+          mode: 'text',
+          scope: 'summary',
           ...searchParams
         })
         skills.value = res.results

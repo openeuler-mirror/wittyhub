@@ -20,7 +20,7 @@ FROM python:3.13-slim AS skillspector-builder
 ARG GIT_REPO_URL=https://github.com/JunchengDwain/SkillSpector.git
 ARG GIT_REF=main
 
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources && \
+RUN sed -i 's|http://deb.debian.org|https://repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends git && \
     rm -rf /var/lib/apt/lists/*
@@ -29,7 +29,7 @@ RUN git clone --depth 1 --branch "${GIT_REF}" "${GIT_REPO_URL}" /tmp/skillspecto
 
 WORKDIR /tmp/skillspector
 RUN pip config set global.timeout 120 && \
-    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.index-url https://repo.huaweicloud.com/repository/pypi/simple && \
     pip install pip --upgrade && \
     pip wheel . -w /tmp/wheels
 
@@ -38,7 +38,7 @@ FROM jenkins/jenkins:lts
 
 USER root
 
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources && \
+RUN sed -i 's|http://deb.debian.org|https://repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         python3 python3-pip git curl ca-certificates && \
@@ -49,7 +49,7 @@ COPY --from=skillspector-builder /tmp/wheels /tmp/wheels
 
 # 安装 SkillSpector
 RUN pip config set global.timeout 120 && \
-    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.index-url https://repo.huaweicloud.com/repository/pypi/simple && \
     pip install --no-cache-dir --break-system-packages --ignore-installed /tmp/wheels/*.whl && \
     rm -rf /tmp/wheels
 
@@ -65,14 +65,11 @@ RUN jenkins-plugin-cli --plugins \
     "build-token-root:latest" \
     "timestamper:latest"
 
-# 初始化脚本
-COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy
+# .override 确保已有 Jenkins 数据卷也使用最新初始化脚本
+COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-init.groovy.override
 COPY deploy/skillspector/pipeline.groovy /usr/share/jenkins/ref/jenkins-pipeline.groovy
-
-# 替换 admin 密码占位符
-ARG JENKINS_ADMIN_PASS=admin@123456
-RUN sed -i "s/ADMIN_PASS_PLACEHOLDER/${JENKINS_ADMIN_PASS}/g" \
-    /usr/share/jenkins/ref/init.groovy.d/01-init.groovy
+COPY deploy/skillspector/checkout.sh /usr/local/bin/wittyhub-skillspector-checkout
+RUN chmod 755 /usr/local/bin/wittyhub-skillspector-checkout
 
 ENV SKILLSPECTOR_LOG_LEVEL=WARNING
 ENV SKILLSPECTOR_PROVIDER=openai

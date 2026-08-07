@@ -20,6 +20,7 @@ async def search(
     platform: str | None = None,
     tags: str | None = None,
     mode: str = Query("hybrid", pattern="^(text|semantic|hybrid)$"),
+    scope: str = Query("summary", pattern="^(summary|full)$"),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     tag_list = tags.split(",") if tags else None
@@ -50,6 +51,7 @@ async def search(
         tags=tag_list,
         embedding=embedding,
         mode=mode,
+        scope=scope,
     )
 
     return results

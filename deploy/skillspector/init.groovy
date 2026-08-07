@@ -6,6 +6,15 @@ import hudson.model.ParametersDefinitionProperty
 import hudson.model.StringParameterDefinition
 
 def instance = Jenkins.get()
+def adminPassword = System.getenv("JENKINS_ADMIN_PASS")
+if (!adminPassword) {
+    throw new IllegalStateException("JENKINS_ADMIN_PASS is required")
+}
+def executorCountValue = System.getenv("JENKINS_NUM_EXECUTORS") ?: "4"
+if (!(executorCountValue ==~ /[1-9][0-9]*/)) {
+    throw new IllegalStateException("JENKINS_NUM_EXECUTORS must be a positive integer")
+}
+def executorCount = executorCountValue.toInteger()
 
 // 0. 跳过 setup wizard
 instance.installState = InstallState.INITIAL_SETUP_COMPLETED
@@ -13,23 +22,21 @@ println "[init] Setup wizard disabled"
 
 // 1. 创建/重置 admin 用户
 def hudsonRealm = new HudsonPrivateSecurityRealm(false)
-def adminUser = hudsonRealm.getUser("admin")
-if (adminUser == null) {
-    hudsonRealm.createAccount("admin", "ADMIN_PASS_PLACEHOLDER")
-    println "[init] admin user created"
-} else {
-    hudsonRealm.createAccount("admin", "ADMIN_PASS_PLACEHOLDER")
-    println "[init] admin password reset"
-}
+hudsonRealm.createAccount("admin", adminPassword)
+println "[init] admin user created or password reset"
 instance.setSecurityRealm(hudsonRealm)
 
-// 2. 设置授权策略
+// 2. 设置内置节点 executor 数量
+instance.setNumExecutors(executorCount)
+println "[init] Jenkins executors set to ${executorCount}"
+
+// 3. 设置授权策略
 def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
 strategy.setAllowAnonymousRead(false)
 instance.setAuthorizationStrategy(strategy)
 instance.save()
 
-// 3. 创建 skill-scanner Pipeline Job
+// 4. 创建 skill-scanner Pipeline Job
 def jobName = "skill-scanner"
 def job = instance.getItem(jobName)
 

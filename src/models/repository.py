@@ -74,6 +74,10 @@ class SkillRepoRepository:
         repository_commit_id: str | None = None,
         skill_discover_status: str | None = None,
         skill_num: int | None = None,
+        stars_count: int | None = None,
+        forks_count: int | None = None,
+        watchers_count: int | None = None,
+        popularity_updated_at: datetime | None = None,
     ) -> SkillRepoModel:
         values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if source is not None:
@@ -92,6 +96,14 @@ class SkillRepoRepository:
             values["skill_discover_status"] = skill_discover_status
         if skill_num is not None:
             values["skill_num"] = skill_num
+        if stars_count is not None:
+            values["stars_count"] = stars_count
+        if forks_count is not None:
+            values["forks_count"] = forks_count
+        if watchers_count is not None:
+            values["watchers_count"] = watchers_count
+        if popularity_updated_at is not None:
+            values["popularity_updated_at"] = popularity_updated_at
 
         await self.session.execute(
             update(SkillRepoModel)
@@ -134,6 +146,15 @@ class SkillRepoRepository:
             select(SkillRepoModel).where(
                 SkillRepoModel.repo_name == repo_name
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_skill_repository_by_url(
+        self,
+        url: str,
+    ) -> SkillRepoModel | None:
+        result = await self.session.execute(
+            select(SkillRepoModel).where(SkillRepoModel.url == url)
         )
         return result.scalar_one_or_none()
 
@@ -255,6 +276,24 @@ class SkillRepository:
         await self.session.refresh(skill)
         return skill
 
+    async def update_download_count_by_skill_id(
+        self,
+        skill_id: str,
+        download_count: int,
+    ) -> int:
+        """Set download_count for a single skill (matched by skill_id).
+
+        Returns the number of rows updated (0 or 1).
+        """
+        result = await self.session.execute(
+            update(Skill)
+            .where(Skill.skill_id == skill_id)
+            .values(download_count=download_count)
+        )
+        await self.session.flush()
+        await self.session.commit()
+        return result.rowcount or 0
+
     def _select_skill_by_version(
         self, skills: list[SkillVersion], version: str | None = None
     ) -> SkillVersion | None:
@@ -321,6 +360,12 @@ class SkillRepository:
             )
         )
         return {commit_id for commit_id in result.scalars().all() if commit_id}
+
+    async def list_by_skill_repo_id(self, skill_repo_id: uuid.UUID) -> list[Skill]:
+        result = await self.session.execute(
+            select(Skill).where(Skill.skill_repo_id == skill_repo_id)
+        )
+        return list(result.scalars().all())
 
     async def list_unscored_by_skill_repo(
         self,

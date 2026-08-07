@@ -45,18 +45,6 @@
     font-size: 18px;
     line-height: 26px;
   }
-  @include respond-to('pad_h') {
-    font-size: 16px;
-    line-height: 24px;
-  }
-  @include respond-to('pad_v') {
-    font-size: 16px;
-    line-height: 24px;
-  }
-  @include respond-to('phone') {
-    font-size: 14px;
-    line-height: 22px;
-  }
 }
 
 // 提示文本1
@@ -67,18 +55,6 @@
     font-size: 12px;
     line-height: 18px;
   }
-  @include respond-to('pad_h') {
-    font-size: 12px;
-    line-height: 18px;
-  }
-  @include respond-to('pad_v') {
-    font-size: 12px;
-    line-height: 18px;
-  }
-  @include respond-to('phone') {
-    font-size: 10px;
-    line-height: 16px;
-  }
 }
 
 // 提示文本2
@@ -88,17 +64,5 @@
   @include respond-to('laptop') {
     font-size: 12px;
     line-height: 18px;
-  }
-  @include respond-to('pad_h') {
-    font-size: 12px;
-    line-height: 18px;
-  }
-  @include respond-to('pad_v') {
-    font-size: 12px;
-    line-height: 18px;
-  }
-  @include respond-to('phone') {
-    font-size: 10px;
-    line-height: 16px;
   }
 }

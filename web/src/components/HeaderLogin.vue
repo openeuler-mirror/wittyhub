@@ -27,10 +27,6 @@ const goLogin = () => {
   align-items: center;
   position: relative;
   margin-left: var(--o-gap-2);
-
-  @include respond-to('<=pad_v') {
-    margin-left: var(--o-gap-1);
-  }
 }
 
 .login {

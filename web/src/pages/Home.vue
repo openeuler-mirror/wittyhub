@@ -159,7 +159,7 @@ function onPaginationChange(
     <section class="container-wide py-6">
       <div class="flex gap-8">
         <!-- 左侧筛选侧栏 -->
-        <div class="w-60 flex-shrink-0 hidden lg:block sticky bottom-0 self-start">
+        <div class="w-60 flex-shrink-0 sticky bottom-0 self-start">
           <FilterSidebar />
         </div>
 
@@ -238,23 +238,23 @@ function onPaginationChange(
 
           <!-- 空态 -->
           <div v-else-if="!skillStore.loading && skillStore.skills.length === 0" class="text-center py-16">
-            <div class="empty-state-svg w-48 sm:w-56 md:w-64 mx-auto mb-6" v-html="emptyStateSvg"></div>
+            <div class="empty-state-svg w-64 mx-auto mb-6" v-html="emptyStateSvg"></div>
             <p class="text-[var(--o-color-text3)]">暂无相关 Skill</p>
           </div>
 
           <!-- Skill 列表 -->
           <template v-else-if="!skillStore.loading">
-            <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-3 gap-4">
               <SkillCard v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
             </div>
             <div v-else class="border border-gray-200 rounded-lg dark:border-gray-700 overflow-hidden">
               <!-- 列表视图表头 -->
               <div class="flex items-center gap-8 px-6 py-4 bg-white dark:bg-gray-800 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px; border-bottom: 1px solid #002FA7;">
                 <div class="flex-1 min-w-0 max-w-[560px]">名称</div>
-                <div class="hidden md:block w-[100px]">分类</div>
-                <div class="hidden sm:block w-[100px]">风险等级</div>
-                <div class="hidden sm:block w-[100px]">下载量</div>
-                <div class="hidden lg:block w-36">贡献者</div>
+                <div class="w-[100px]">分类</div>
+                <div class="w-[100px]">风险等级</div>
+                <div class="w-[100px]">下载量</div>
+                <div class="w-36">贡献者</div>
               </div>
               <SkillListItem v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
             </div>
@@ -289,7 +289,7 @@ function onPaginationChange(
             Fork <a href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[var(--o-color-link1)] hover:text-[var(--o-color-link1-hover)]"><code class="px-1.5 py-0.5 rounded bg-transparent text-[var(--o-color-link1)] hover:font-semibold" style="font-family: inherit">openeuler/wittyhub</code></a> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
           </p>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-8 submit-methods-grid">
+          <div class="grid grid-cols-2 gap-8 submit-methods-grid">
             <div>
               <h3 class="method-title">方式1</h3>
               <p class="method-sub-label">
@@ -377,12 +377,6 @@ function onPaginationChange(
 .hero-stats-number {
   font-weight: var(--o-font_weight-medium);
   color: var(--o-color-text3);
-}
-
-@media (max-width: 768px) {
-  .container-wide {
-    padding: 0 16px;
-  }
 }
 
 /* 列表视图表头 */
@@ -518,18 +512,16 @@ function onPaginationChange(
   position: relative;
 }
 
-@media (min-width: 768px) {
-  .submit-methods-grid::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 1px;
-    background: var(--o-color-control4);
-    transform: translateX(-50%);
-    pointer-events: none;
-  }
+.submit-methods-grid::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--o-color-control4);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 /* OTab button variant: 排序切换 (热门/最新) */

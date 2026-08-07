@@ -213,20 +213,12 @@ $color: #fff;
     .atom-logo {
       height: 32px;
       margin-top: 12px;
-      @include respond-to('<=pad_v') {
-        margin-top: 16px;
-        height: 30px;
-      }
     }
   }
 
   .footer-content {
     background: var(--footer-bg) no-repeat bottom center;
     background-size: cover;
-    @include respond-to('<=pad_v') {
-      background: var(--footer-bg-mo) no-repeat bottom center;
-      background-size: cover;
-    }
     @include tip1;
 
     .quick-nav {
@@ -234,9 +226,6 @@ $color: #fff;
       display: flex;
       justify-content: space-between;
       max-width: 1140px;
-      @include respond-to('<=pad_v') {
-        display: none;
-      }
 
       .category {
         .category-title {
@@ -270,32 +259,15 @@ $color: #fff;
       border-bottom: 1px solid rgba(229, 229, 229, 0.12);
       @include tip2;
 
-      @include respond-to('<=pad_v') {
-        flex-direction: column;
-        padding-bottom: 16px;
-        .friendship-link-box {
-          margin-top: 12px;
-          display: flex;
-          flex-wrap: wrap;
-        }
-      }
-
       .friendship-link-title {
         color: var(--o-color-white);
         margin-right: 38px;
-        @include respond-to('<=pad') {
-          margin-right: 24px;
-          min-width: 48px;
-        }
       }
       .friendship-link-item {
         white-space: nowrap;
         color: rgba(255, 255, 255, 0.6);
         &:not(:last-of-type) {
           margin-right: 24px;
-          @include respond-to('<=pad') {
-            margin-right: 12px;
-          }
         }
         @include hover {
           color: rgba(255, 255, 255, 1);
@@ -309,13 +281,6 @@ $color: #fff;
       justify-content: space-between;
       padding: 8px 0 32px;
       position: relative;
-      @include respond-to('<=pad_v') {
-        margin: 0 auto;
-        padding: 12px 0 24px;
-        flex-direction: column;
-        justify-content: space-between;
-        align-items: center;
-      }
     }
   }
 
@@ -330,27 +295,10 @@ $color: #fff;
     .show-mo {
       display: none;
     }
-    @include respond-to('<=pad_v') {
-      text-align: center;
-      margin: 16px 0;
-      .show-pc {
-        display: none;
-      }
-      .show-mo {
-        display: inline-block;
-        height: 20px;
-      }
-      p {
-        margin-top: 4px;
-      }
-    }
   }
 
   .footer-option {
     text-align: center;
-    @include respond-to('<=pad_v') {
-      order: -1;
-    }
     @include tip1;
 
     .link {
@@ -367,11 +315,6 @@ $color: #fff;
       justify-content: center;
       gap: var(--o-gap-4);
       margin-top: 8px;
-
-      @include respond-to('<=pad') {
-        flex-direction: column;
-        gap: 4px;
-      }
     }
 
     .copyright-text {
@@ -384,11 +327,6 @@ $color: #fff;
       align-items: center;
       gap: var(--o-gap-2);
       color: rgba(255, 255, 255, 0.6);
-
-      @include respond-to('<=pad') {
-        flex-wrap: wrap;
-        justify-content: center;
-      }
 
       .filing-link {
         color: rgba(255, 255, 255, 0.6);
@@ -409,9 +347,6 @@ $color: #fff;
     margin-top: 6px;
     span {
       color: rgba(255, 255, 255, 0.6);
-    }
-    @include respond-to('<=pad_v') {
-      margin-top: 4px;
     }
   }
 
@@ -457,37 +392,12 @@ $color: #fff;
             transform: translateX(-50%);
             display: block;
           }
-          @include respond-to('<=pad_v') {
-            display: block;
-            position: initial;
-            background: none;
-            padding: 0;
-            text-align: center;
-            &::after {
-              display: none !important;
-            }
-            .txt {
-              display: block;
-            }
-          }
         }
         @include hover {
           .code-layer {
             display: block;
           }
         }
-        @include respond-to('pad_h') {
-          height: 18px;
-        }
-        @include respond-to('<=pad_v') {
-          height: auto;
-          > img {
-            display: none;
-          }
-        }
-      }
-      @include respond-to('<=pad_v') {
-        justify-content: space-between;
       }
     }
   }

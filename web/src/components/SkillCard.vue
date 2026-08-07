@@ -96,6 +96,7 @@ function truncate(text: string | null, length: number): string {
   color: #000000;
   text-align: left;
   margin: 0;
+  min-height: 60px; /* 标题区固定两行高度（2 × 30px），单行标题时简介下移对齐 */
   display: block;
 }
 

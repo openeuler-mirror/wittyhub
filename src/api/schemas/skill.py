@@ -57,6 +57,7 @@ class SkillResponse(SkillBase):
     content: str | None = None
     risk_score: int | None = None
     download_count: int = 0
+    period_downloads: int | None = None
     rating: str | None = None
     created_at: datetime
     updated_at: datetime

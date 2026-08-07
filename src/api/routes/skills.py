@@ -69,6 +69,7 @@ def skill_to_response(skill) -> SkillResponse:
         content=skill.content,
         risk_score=skill.risk_score,
         download_count=skill.download_count,
+        period_downloads=getattr(skill, "_period_downloads", None),
         rating=skill.rating,
         created_at=skill.created_at,
         updated_at=skill.updated_at,

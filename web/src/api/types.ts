@@ -17,6 +17,7 @@ export interface Skill {
   risk_score: number | null
   security_level?: string
   download_count: number
+  period_downloads?: number | null
   rating: number | null
   created_at: string
   updated_at: string

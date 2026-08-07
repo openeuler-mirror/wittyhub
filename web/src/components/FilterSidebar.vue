@@ -88,19 +88,17 @@ function selectCategory(name: string) {
 
 function selectProvider(name: string) {
   const current = skillStore.filter.provider
-  skillStore.setFilter(
-    'provider',
-    current.length === 1 && current[0] === name ? [] : [name]
-  )
+  // 单选语义：再次点击已选中的项保持选中不变
+  if (current.length === 1 && current[0] === name) return
+  skillStore.setFilter('provider', [name])
   skillStore.fetchSkills()
 }
 
 function selectSecurityLevel(name: string) {
   const current = skillStore.filter.securityLevel
-  skillStore.setFilter(
-    'securityLevel',
-    current.length === 1 && current[0] === name ? [] : [name]
-  )
+  // 单选语义：再次点击已选中的项保持选中不变
+  if (current.length === 1 && current[0] === name) return
+  skillStore.setFilter('securityLevel', [name])
   skillStore.fetchSkills()
 }
 

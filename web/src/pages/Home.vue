@@ -146,8 +146,15 @@ function setSortBy(sort: 'hot' | 'latest' | 'downloads') {
   skillStore.fetchSkills()
 }
 
+// 切换排序（热门/最新）时回到第一页
+function onSortByChange() {
+  skillStore.setFilter('page', 1)
+  skillStore.fetchSkills()
+}
+
 function setSortPeriod(period: string) {
   skillStore.setFilter('sortPeriod', period)
+  skillStore.setFilter('page', 1)
   skillStore.fetchSkills()
 }
 
@@ -230,7 +237,7 @@ function onPaginationChange(
                 round="4px"
                 size="large"
                 header-class="sort-tab"
-                @change="skillStore.fetchSkills()"
+                @change="onSortByChange"
               >
                 <OTabPane value="hot" label="热门" />
                 <OTabPane value="latest" label="最新" />

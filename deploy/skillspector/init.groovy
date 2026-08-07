@@ -10,7 +10,7 @@ def adminPassword = System.getenv("JENKINS_ADMIN_PASS")
 if (!adminPassword) {
     throw new IllegalStateException("JENKINS_ADMIN_PASS is required")
 }
-def executorCountValue = System.getenv("JENKINS_NUM_EXECUTORS") ?: "4"
+def executorCountValue = System.getenv("JENKINS_NUM_EXECUTORS") ?: "10"
 if (!(executorCountValue ==~ /[1-9][0-9]*/)) {
     throw new IllegalStateException("JENKINS_NUM_EXECUTORS must be a positive integer")
 }

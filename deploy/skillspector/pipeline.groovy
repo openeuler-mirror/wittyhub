@@ -4,8 +4,8 @@ pipeline {
     options {
         timestamps()
         skipDefaultCheckout()
-        quietPeriod(0)
-        buildDiscarder(logRotator(daysToKeepStr: '30'))
+        quietPeriod(1)
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '10000'))
     }
 
     environment {

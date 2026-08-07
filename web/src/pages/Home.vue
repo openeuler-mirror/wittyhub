@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAppStore } from '@/stores/app'
-import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading } from '@opensig/opendesign'
+import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading, OLink } from '@opensig/opendesign'
 import FilterSidebar from '@/components/FilterSidebar.vue'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillListItem from '@/components/SkillListItem.vue'
@@ -286,7 +286,7 @@ function onPaginationChange(
         <div class="relative p-8 submit-card">
           <h3 class="text-lg font-semibold text-[var(--o-color-info1)] mb-4">在仓库中提交PR</h3>
           <p class="submit-desc">
-            Fork <a href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[var(--o-color-link1)] hover:text-[var(--o-color-link1-hover)]"><code class="px-1.5 py-0.5 rounded bg-transparent text-[var(--o-color-link1)] hover:font-semibold" style="font-family: inherit">openeuler/wittyhub</code></a> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
+            Fork <OLink href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" color="normal" size="auto">openeuler/wittyhub</OLink> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
           </p>
 
           <div class="grid grid-cols-2 gap-8 submit-methods-grid">
@@ -687,6 +687,11 @@ function onPaginationChange(
   border-radius: 4px !important;
   background: var(--o-color-white) !important;
   border: 1px solid #0000003F !important;
+  transition: border-color var(--o-duration-s) var(--o-easing-standard);
+
+  &:hover {
+    border-color: #002FA7 !important;
+  }
 }
 
 :deep(.o-pagination-input.o-input-number) {
@@ -790,6 +795,10 @@ function onPaginationChange(
 .dark .o-pagination-select.o-select {
   background: #242427 !important;
   border-color: rgba(255, 255, 255, 0.15) !important;
+
+  &:hover {
+    border-color: var(--o-color-primary1) !important;
+  }
 }
 
 [data-o-theme="e.dark"] .o-pagination-select .o-select-input,

@@ -1,7 +1,7 @@
 from collections import defaultdict
 import re
 
-from sqlalchemy import desc, func, literal_column, select, text
+from sqlalchemy import desc, func, literal_column, select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
@@ -39,13 +39,44 @@ class SearchService:
         category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
+        security_level: list[str] | None = None,
     ):
         if category:
-            query = query.where(Skill.category.in_(category))
+            conditions = []
+            normal_cats = []
+            for c in category:
+                if c.lower() == "others":
+                    conditions.append(
+                        or_(
+                            Skill.category.is_(None),
+                            Skill.category == "",
+                            func.lower(Skill.category).in_(["others", "other"]),
+                        )
+                    )
+                else:
+                    normal_cats.append(c)
+            if normal_cats:
+                conditions.append(Skill.category.in_(normal_cats))
+            if conditions:
+                query = query.where(or_(*conditions))
         if platform:
-            query = query.where(Skill.platform == platform)
+            platforms = [p for p in platform.split(",") if p] if isinstance(platform, str) else platform
+            query = query.where(Skill.platform.in_(platforms))
         if tags:
             query = query.where(Skill.tags.contains(tags))
+        if security_level:
+            conditions = []
+            for level in security_level:
+                if level == "安全":
+                    conditions.append(Skill.risk_score <= 20)
+                elif level == "低风险":
+                    conditions.append(Skill.risk_score.between(21, 50))
+                elif level == "中风险":
+                    conditions.append(Skill.risk_score.between(51, 80))
+                elif level == "高风险":
+                    conditions.append(Skill.risk_score >= 81)
+            if conditions:
+                query = query.where(or_(*conditions))
         return query
 
     def _item_version_sort_key(self, item: dict[str, Any]) -> tuple[int, tuple[int, ...], int, str, str, str]:
@@ -118,6 +149,7 @@ class SearchService:
         category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
+        security_level: list[str] | None = None,
         embedding: list[float] | None = None,
         mode: str = "hybrid",
         scope: str = "summary",
@@ -130,6 +162,7 @@ class SearchService:
                 category=category,
                 platform=platform,
                 tags=tags,
+                security_level=security_level,
             )
 
         is_hybrid = bool(embedding and mode == "hybrid")
@@ -141,6 +174,7 @@ class SearchService:
             platform=platform,
             tags=tags,
             scope=scope,
+            security_level=security_level,
         )
 
         if is_hybrid:
@@ -151,6 +185,7 @@ class SearchService:
                 category=category,
                 platform=platform,
                 tags=tags,
+                security_level=security_level,
             )
             combined = reciprocal_rank_fusion(
                 text_results.get("results", []),
@@ -165,14 +200,26 @@ class SearchService:
                 "limit": limit,
                 "mode": "hybrid",
             }
-        return {
-            "results": text_results["results"],
-            "total": text_results["total"],
-            "query": query,
-            "skip": offset,
-            "limit": limit,
-            "mode": "text",
-        }
+        elif embedding and mode == "semantic":
+            return await self._vector_search(
+                embedding=embedding,
+                limit=limit,
+                offset=offset,
+                category=category,
+                platform=platform,
+                tags=tags,
+                security_level=security_level,
+            )
+        else:
+            deduped = self._dedupe_skill_results(text_results["results"])
+            return {
+                "results": deduped[offset:offset + limit],
+                "total": text_results["total"],
+                "query": query,
+                "skip": offset,
+                "limit": limit,
+                "mode": "text",
+            }
 
     async def _text_search(
         self,
@@ -183,6 +230,7 @@ class SearchService:
         platform: str | None = None,
         tags: list[str] | None = None,
         scope: str = "summary",
+        security_level: list[str] | None = None,
     ) -> dict[str, Any]:
         # Keep these expressions in sync with migrations 009 and 010.
         # String concatenation (||) is immutable in PostgreSQL and can be indexed,
@@ -234,6 +282,7 @@ class SearchService:
             category=category,
             platform=platform,
             tags=tags,
+            security_level=security_level,
         )
 
         # skills.skill_id is unique; DISTINCT adds sorting/hash work without
@@ -246,6 +295,7 @@ class SearchService:
             category=category,
             platform=platform,
             tags=tags,
+            security_level=security_level,
         )
         total_result = await self.session.execute(count_query)
         total = total_result.scalar() or 0
@@ -293,22 +343,51 @@ class SearchService:
         category: list[str] | None = None,
         platform: str | None = None,
         tags: list[str] | None = None,
+        security_level: list[str] | None = None,
         min_similarity: float = 0.47,
     ) -> dict[str, Any]:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
         where_clauses = ["embedding IS NOT NULL"]
-        params = {"limit": limit, "offset": offset, "embedding": embedding_str}
+        params: dict[str, Any] = {"limit": limit, "offset": offset, "embedding": embedding_str}
 
         if category:
-            where_clauses.append("category = :category")
-            params["category"] = category
+            placeholders = []
+            for idx, c in enumerate(category):
+                key = f"cat_{idx}"
+                placeholders.append(f":{key}")
+                params[key] = c
+            where_clauses.append(f"category IN ({', '.join(placeholders)})")
         if platform:
-            where_clauses.append("platform = :platform")
-            params["platform"] = platform
+            platforms = [p for p in platform.split(",") if p] if isinstance(platform, str) else [platform]
+            placeholders = []
+            for idx, p in enumerate(platforms):
+                key = f"plat_{idx}"
+                placeholders.append(f":{key}")
+                params[key] = p
+            where_clauses.append(f"platform IN ({', '.join(placeholders)})")
         if tags:
             where_clauses.append("tags @> :tags")
             params["tags"] = tags
+        if security_level:
+            sl_conditions = []
+            for idx, level in enumerate(security_level):
+                if level == "安全":
+                    sl_conditions.append(f"risk_score <= :sl_{idx}")
+                    params[f"sl_{idx}"] = 20
+                elif level == "低风险":
+                    sl_conditions.append(f"(risk_score >= :sl_low_{idx} AND risk_score <= :sl_high_{idx})")
+                    params[f"sl_low_{idx}"] = 21
+                    params[f"sl_high_{idx}"] = 50
+                elif level == "中风险":
+                    sl_conditions.append(f"(risk_score >= :sl_low_{idx} AND risk_score <= :sl_high_{idx})")
+                    params[f"sl_low_{idx}"] = 51
+                    params[f"sl_high_{idx}"] = 80
+                elif level == "高风险":
+                    sl_conditions.append(f"risk_score >= :sl_{idx}")
+                    params[f"sl_{idx}"] = 81
+            if sl_conditions:
+                where_clauses.append("(" + " OR ".join(sl_conditions) + ")")
 
         where_sql = " AND ".join(where_clauses)
 

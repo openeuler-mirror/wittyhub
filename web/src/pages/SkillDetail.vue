@@ -30,6 +30,12 @@ const categoryNames: Record<string, string> = {
   others: '其他'
 }
 
+const platformNames: Record<string, string> = {
+  openeuler: '社区官方',
+  enterprise: '企业组织',
+  personal: '个人'
+}
+
 const skill = ref<Skill | null>(null)
 const versions = ref<SkillVersion[]>([])
 const loading = ref(true)
@@ -99,12 +105,6 @@ const renderedContent = computed(() => {
   }
   renderer.heading = (text: string, level: number) => {
     const tag = `h${level}`
-    if (level === 1) {
-      return `<${tag}>${text}</${tag}><div class="heading-divider heading-divider--h1"></div>\n`
-    }
-    if (level === 2) {
-      return `<${tag}>${text}</${tag}><div class="heading-divider heading-divider--h2"></div>\n`
-    }
     return `<${tag}>${text}</${tag}>\n`
   }
   return marked(stripFrontmatter(displayContent.value), { renderer })
@@ -319,7 +319,7 @@ onMounted(async () => {
             <!-- 标签区 -->
             <div class="skill-tags">
               <span v-if="skill.category" class="tag tag-category">{{ categoryNames[skill.category] || skill.category }}</span>
-              <span v-if="skill.platform" class="tag tag-gray">{{ skill.platform }}</span>
+              <span v-if="skill.platform" class="tag tag-gray">{{ platformNames[skill.platform] || skill.platform }}</span>
               <span
                 v-for="tag in (skill.tags || []).slice(0, 5)"
                 :key="tag"
@@ -335,7 +335,7 @@ onMounted(async () => {
     <div v-if="skill" class="container-wide">
       <div class="detail-body">
         <div class="detail-body-main">
-          <!-- ========== Tab 导航 + 筛选 ========== -->
+          <!-- Tab 导航区（全部隐藏：OTab和版本下拉都不再需要，'使用描述'标题已移到文档卡片顶部）
           <div class="tab-header">
             <OTab
               v-model="activeTab"
@@ -345,10 +345,8 @@ onMounted(async () => {
               header-class="detail-tab"
             >
               <OTabPane value="usage" label="使用描述" />
-              <OTabPane value="versions" label="版本信息" />
             </OTab>
 
-            <!-- 版本筛选栏 -->
             <div class="version-toolbar">
               <div class="version-card">
                 <span class="version-card-label">版本</span>
@@ -374,9 +372,14 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+          -->
 
-          <!-- ========== 使用描述 Tab ========== -->
-          <div v-show="activeTab === 'usage'" class="tab-content">
+          <!-- ========== 使用文档 ========== -->
+          <div class="tab-content">
+            <!-- 文档标题：样式与原 OTab active 状态一致（HarmonyHeiTi + semibold + primary1） -->
+            <div class="doc-title">使用描述</div>
+            <div class="doc-title-divider"></div>
+
             <div v-if="displayContent" class="usage-content">
               <!-- eslint-disable-next-line vue/no-v-html -->
               <div class="markdown-body" v-html="renderedContent" @click="copyMarkdownCode"></div>
@@ -384,44 +387,6 @@ onMounted(async () => {
             <div v-else class="empty-tab">
               <p>暂无使用描述</p>
               <p class="empty-hint">内容将在本地安装后显示</p>
-            </div>
-          </div>
-
-          <!-- ========== 版本信息 Tab ========== -->
-          <div v-show="activeTab === 'versions'" class="tab-content">
-            <div v-if="versions.length > 0" class="version-list-card">
-              <h3 class="version-list-title">版本列表</h3>
-              <div class="version-list-divider"></div>
-              <div class="version-list-header">
-                <span class="header-label">版本</span>
-                <span class="header-label">安装命令</span>
-              </div>
-              <div class="version-header-divider"></div>
-              <div class="version-rows">
-                <div v-for="v in versions" :key="v.version" class="version-row">
-                  <span class="version-badge">{{ v.version }}</span>
-                  <div class="version-cli-group">
-                    <code class="version-install-cmd">{{ installCommand }}</code>
-                    <button
-                      class="version-copy-btn"
-                      :class="{ 'is-copied': copiedVersion }"
-                      aria-label="复制"
-                      @click="copyVersionCmd"
-                    >
-                      <span v-if="!copiedVersion" class="btn-icon-sm" v-html="copySvg"></span>
-                      <span v-else class="btn-icon-sm copied-icon">
-                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="12" cy="12" r="10" fill="currentColor"/>
-                          <path d="M8 12l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="empty-tab">
-              <p>暂无版本信息</p>
             </div>
           </div>
         </div>
@@ -966,6 +931,25 @@ onMounted(async () => {
   min-height: 200px;
 }
 
+/* 文档标题：字体与正文 h1 保持一致 */
+.doc-title {
+  margin-top: 0;
+  margin-bottom: 32px;
+  font-family: var(--o-font_family);
+  font-weight: var(--o-font_weight-semibold);
+  font-size: var(--o-font_size-h1);
+  line-height: var(--o-line_height-h1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+.doc-title-divider {
+  height: 2px;
+  background: #002FA7;
+  margin-bottom: 32px;
+}
+
 /* ===== 版本列表卡片 ===== */
 .version-list-card {
   display: flex;
@@ -1287,9 +1271,7 @@ onMounted(async () => {
   }
 
   :deep(hr) {
-    border: none;
-    border-top: 1px solid var(--o-color-control4);
-    margin: 20px 0;
+    display: none;
   }
 
   :deep(img) {

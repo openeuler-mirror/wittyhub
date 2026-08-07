@@ -18,9 +18,6 @@ export interface Skill {
   security_level?: string
   download_count: number
   rating: number | null
-  stars_count: number
-  forks_count: number
-  watchers_count: number
   created_at: string
   updated_at: string
   last_indexed_at: string | null

@@ -40,6 +40,21 @@ MAX_CONCURRENT_FETCHES = 5
 MAX_RATE_LIMIT_RETRIES = 2
 RATE_LIMIT_RETRY_BASE_SECONDS = 30
 
+# Weights used to estimate a skill's download count from repository
+# popularity metrics. Watchers typically mirror stars on GitHub, so its
+# weight is kept low to avoid double-counting.
+POPULARITY_DOWNLOAD_WEIGHTS = {"stars": 2.0, "forks": 1.0, "watchers": 0.5}
+
+
+def estimate_download_count(stars: int, forks: int, watchers: int) -> int:
+    """Estimate a skill's download count from repo popularity metrics."""
+    estimated = (
+        stars * POPULARITY_DOWNLOAD_WEIGHTS["stars"]
+        + forks * POPULARITY_DOWNLOAD_WEIGHTS["forks"]
+        + watchers * POPULARITY_DOWNLOAD_WEIGHTS["watchers"]
+    )
+    return int(round(estimated))
+
 
 class PopularityError(Exception):
     """Raised when a repository's popularity cannot be fetched."""

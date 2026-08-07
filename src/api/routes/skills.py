@@ -51,7 +51,6 @@ async def receive_telemetry(
 
 
 def skill_to_response(skill) -> SkillResponse:
-    skill_repo = skill.__dict__.get("skill_repo") if hasattr(skill, "__dict__") else None
     return SkillResponse(
         id=str(skill.id),
         skill_id=skill.skill_id,
@@ -71,9 +70,6 @@ def skill_to_response(skill) -> SkillResponse:
         risk_score=skill.risk_score,
         download_count=skill.download_count,
         rating=skill.rating,
-        stars_count=getattr(skill_repo, "stars_count", 0) or 0,
-        forks_count=getattr(skill_repo, "forks_count", 0) or 0,
-        watchers_count=getattr(skill_repo, "watchers_count", 0) or 0,
         created_at=skill.created_at,
         updated_at=skill.updated_at,
         last_indexed_at=skill.last_indexed_at,
@@ -288,7 +284,7 @@ async def download_skill(
 @router.get("/{skill_id:path}", response_model=SkillResponse | ErrorResponse)
 async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
-    skill = await repo.get_with_repository_by_skill_id(skill_id)
+    skill = await repo.get_by_skill_id(skill_id)
 
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")

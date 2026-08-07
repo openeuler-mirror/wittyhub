@@ -5,7 +5,7 @@ from sqlalchemy import desc, func, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
-from src.models.orm import Skill, SkillRepoModel
+from src.models.orm import Skill
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
@@ -224,13 +224,10 @@ class SearchService:
             Skill.risk_score,
             Skill.download_count,
             Skill.rating,
-            SkillRepoModel.stars_count,
-            SkillRepoModel.forks_count,
-            SkillRepoModel.watchers_count,
             Skill.created_at,
             Skill.updated_at,
             rank_expression.label("rank"),
-        ).outerjoin(SkillRepoModel, Skill.skill_repo_id == SkillRepoModel.id).where(search_predicate)
+        ).where(search_predicate)
 
         base_query = self._apply_skill_filters(
             base_query,
@@ -281,9 +278,6 @@ class SearchService:
                 "risk_score": row["risk_score"],
                 "download_count": row["download_count"],
                 "rating": row["rating"],
-                "stars_count": row["stars_count"] or 0,
-                "forks_count": row["forks_count"] or 0,
-                "watchers_count": row["watchers_count"] or 0,
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                 "text_rank": float(row["rank"]) if row["rank"] else 0,
@@ -319,15 +313,11 @@ class SearchService:
         where_sql = " AND ".join(where_clauses)
 
         sql = text(f"""
-            SELECT s.id, s.skill_id, s.name, s.description, s.version, s.author,
-                   s.source, s.source_url, s.category, s.tags, s.platform,
-                   s.risk_score, s.download_count, s.rating, s.created_at, s.updated_at,
-                   COALESCE(r.stars_count, 0) AS stars_count,
-                   COALESCE(r.forks_count, 0) AS forks_count,
-                   COALESCE(r.watchers_count, 0) AS watchers_count,
-                   s.embedding <-> CAST(:embedding AS vector) AS distance
-            FROM skills s
-            LEFT JOIN skill_repos r ON s.skill_repo_id = r.id
+            SELECT id, skill_id, name, description, version, author, source,
+                   source_url, category, tags, platform,
+                   risk_score, download_count, rating, created_at, updated_at,
+                   embedding <-> CAST(:embedding AS vector) AS distance
+            FROM skills
             WHERE {where_sql}
             ORDER BY distance ASC
             LIMIT :limit OFFSET :offset
@@ -356,9 +346,6 @@ class SearchService:
                 "risk_score": row.risk_score,
                 "download_count": row.download_count,
                 "rating": row.rating,
-                "stars_count": row.stars_count,
-                "forks_count": row.forks_count,
-                "watchers_count": row.watchers_count,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
                 "distance": float(row.distance) if row.distance else None,

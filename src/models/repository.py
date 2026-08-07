@@ -276,6 +276,27 @@ class SkillRepository:
         await self.session.refresh(skill)
         return skill
 
+    async def update_download_count_by_repo_id(
+        self,
+        skill_repo_id: str | uuid.UUID,
+        download_count: int,
+    ) -> int:
+        """Set download_count for every skill belonging to a repository.
+
+        Returns the number of skills updated.
+        """
+        result = await self.session.execute(
+            update(Skill)
+            .where(
+                Skill.skill_repo_id
+                == (skill_repo_id if isinstance(skill_repo_id, uuid.UUID) else uuid.UUID(str(skill_repo_id)))
+            )
+            .values(download_count=download_count)
+        )
+        await self.session.flush()
+        await self.session.commit()
+        return result.rowcount or 0
+
     def _select_skill_by_version(
         self, skills: list[SkillVersion], version: str | None = None
     ) -> SkillVersion | None:
@@ -500,7 +521,7 @@ class SkillRepository:
         security_level: list[str] | None = None,
     ) -> tuple[list[Skill], int]:
         filtered_query = self._apply_skill_filters(
-            select(Skill).options(selectinload(Skill.skill_repo)),
+            select(Skill),
             Skill,
             category=category,
             platform=platform,

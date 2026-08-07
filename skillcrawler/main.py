@@ -17,7 +17,11 @@ if __package__ in {None, ""}:
 
 from skillcrawler.config import load_crawler_config, normalize_dict_keys
 from skillcrawler.core.category_classifier import CategoryClassificationError
-from skillcrawler.core.popularity import PopularityCollector, RepoPopularity
+from skillcrawler.core.popularity import (
+    PopularityCollector,
+    RepoPopularity,
+    estimate_download_count,
+)
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
 from src.core.config import get_settings
 from src.core.database import get_db_context
@@ -785,6 +789,7 @@ POPULARITY_RESULT_COLUMNS = [
     ("stars", "stars", 10),
     ("forks", "forks", 10),
     ("watchers", "watchers", 12),
+    ("est_downloads", "est.downloads", 14),
     ("url", "url", 64),
 ]
 
@@ -795,8 +800,11 @@ async def _run_popularity(
 ) -> int:
     """Collect popularity (stars/forks/watchers) for configured repos.
 
-    Fetches metrics from the hosting platform API and stores them on the
-    matching ``skill_repos`` row when it exists (matched by URL).
+    Fetches metrics from the hosting platform API, stores them on the
+    matching ``skill_repos`` row (matched by URL), and updates every
+    skill of that repository with an estimated download count derived
+    from stars/forks/watchers. The frontend ranks popularity by the
+    existing ``download_count`` field, so no frontend changes are needed.
     """
     config_path = Path(args.config) if args.config else None
     collector = PopularityCollector()
@@ -808,8 +816,12 @@ async def _run_popularity(
 
     saved = 0
     not_found = 0
+    skills_updated = 0
     rows: list[dict[str, str]] = []
     for index, popularity in enumerate(results, start=1):
+        estimated = estimate_download_count(
+            popularity.stars, popularity.forks, popularity.watchers
+        )
         rows.append(
             {
                 "#": str(index),
@@ -817,6 +829,7 @@ async def _run_popularity(
                 "stars": str(popularity.stars),
                 "forks": str(popularity.forks),
                 "watchers": str(popularity.watchers),
+                "est_downloads": str(estimated),
                 "url": popularity.url,
             }
         )
@@ -837,6 +850,9 @@ async def _run_popularity(
             watchers_count=popularity.watchers,
             popularity_updated_at=datetime.now(timezone.utc),
         )
+        skills_updated += await manager.skill_repository.update_download_count_by_repo_id(
+            repository.id, estimated
+        )
         saved += 1
 
     print()
@@ -847,8 +863,8 @@ async def _run_popularity(
     )
     print()
     logger.info(
-        "Popularity summary: total=%d saved=%d not_registered=%d",
-        len(results), saved, not_found,
+        "Popularity summary: total=%d saved=%d not_registered=%d skills_updated=%d",
+        len(results), saved, not_found, skills_updated,
     )
     return 0
 

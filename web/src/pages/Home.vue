@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAppStore } from '@/stores/app'
@@ -62,6 +62,62 @@ watch(() => route.query.q, (newQ) => {
     skillStore.setFilter('keyword', newQ as string)
     skillStore.fetchSkills()
   }
+})
+
+// 卡片网格引用，用于行内标题对齐
+const cardGridRef = ref<HTMLElement | null>(null)
+
+// 同一行内取最大标题高度并应用到整行卡片，保证简介对齐。
+// 相比固定两行高度：全一行时无空余空间、超长标题（3行）也不会溢出破坏对齐。
+function alignCardTitles() {
+  const grid = cardGridRef.value
+  if (!grid) return
+  const cards = Array.from(grid.querySelectorAll<HTMLElement>('.card'))
+  if (!cards.length) return
+
+  // 按行分组：offsetTop 相近（容差 5px）视为同一行
+  const rows: HTMLElement[][] = []
+  for (const card of cards) {
+    const top = card.offsetTop
+    const row = rows.find(r => Math.abs(r[0].offsetTop - top) <= 5)
+    if (row) row.push(card)
+    else rows.push([card])
+  }
+
+  for (const row of rows) {
+    let maxTitleHeight = 0
+    for (const card of row) {
+      const title = card.querySelector<HTMLElement>('.skill-card-title')
+      if (title) maxTitleHeight = Math.max(maxTitleHeight, title.offsetHeight)
+    }
+    for (const card of row) {
+      const title = card.querySelector<HTMLElement>('.skill-card-title')
+      if (title) title.style.minHeight = `${maxTitleHeight}px`
+    }
+  }
+}
+
+// 数据/视图模式变化后重算标题对齐
+watch(
+  () => [skillStore.skills, skillStore.filter.viewMode],
+  async () => {
+    await nextTick()
+    alignCardTitles()
+  }
+)
+
+function onResizeAlign() {
+  alignCardTitles()
+}
+
+onMounted(() => {
+  // 字体加载完成（字体影响行高）后重算
+  document.fonts?.ready.then(() => alignCardTitles())
+  window.addEventListener('resize', onResizeAlign)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResizeAlign)
 })
 
 function handleSearch() {
@@ -244,7 +300,7 @@ function onPaginationChange(
 
           <!-- Skill 列表 -->
           <template v-else-if="!skillStore.loading">
-            <div v-if="skillStore.filter.viewMode === 'card'" class="grid grid-cols-3 gap-4">
+            <div v-if="skillStore.filter.viewMode === 'card'" ref="cardGridRef" class="grid grid-cols-3 gap-4">
               <SkillCard v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
             </div>
             <div v-else class="border border-gray-200 rounded-lg dark:border-gray-700 overflow-hidden">

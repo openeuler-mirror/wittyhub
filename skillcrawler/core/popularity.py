@@ -13,6 +13,7 @@ Supported platforms:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +52,18 @@ REPO_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
 }
 DEFAULT_REPO_TYPE = "openeuler"
 
+# Star-count tiers with decreasing marginal conversion. Repositories are
+# estimated with a different formula depending on how many stars they have:
+# seed-stage repos (<1k stars) convert each star at full rate, while
+# hugely popular repos (>=100k stars) convert each additional star at a
+# much lower rate (saturation effect). Ordered from highest to lowest.
+STAR_TIER_FACTORS: tuple[tuple[int, float], ...] = (
+    (100_000, 0.35),
+    (10_000, 0.60),
+    (1_000, 0.80),
+    (0, 1.00),
+)
+
 # Relative popularity of each skill category. Skills in more popular
 # categories get a larger share of the repository's total downloads.
 CATEGORY_WEIGHTS: dict[str, float] = {
@@ -73,10 +86,23 @@ DEFAULT_CATEGORY = "others"
 RISK_WEIGHT_MIN = 0.4
 RISK_WEIGHT_MAX = 1.0
 
+# Stable per-skill jitter applied on top of category/risk weights so that
+# skills with identical traits still end up with distinct download counts.
+JITTER_MIN = 0.95
+JITTER_MAX = 1.05
+
 
 def repo_type_weights(repo_type: str) -> dict[str, float]:
     """Return download weights for a repository type (fallback to default)."""
     return REPO_TYPE_WEIGHTS.get(repo_type, REPO_TYPE_WEIGHTS[DEFAULT_REPO_TYPE])
+
+
+def star_tier_factor(stars: int) -> float:
+    """Marginal conversion factor for a repository's star count."""
+    for threshold, factor in STAR_TIER_FACTORS:
+        if stars >= threshold:
+            return factor
+    return 1.0
 
 
 def estimate_repo_downloads(
@@ -85,10 +111,16 @@ def estimate_repo_downloads(
     watchers: int,
     repo_type: str,
 ) -> int:
-    """Estimate total downloads for a repository from its popularity metrics."""
+    """Estimate total downloads for a repository from its popularity metrics.
+
+    The estimation formula depends on the repository's star tier: the more
+    stars a repo already has, the lower each additional star converts to
+    downloads (saturation), while forks/watchers keep their type weights.
+    """
     weights = repo_type_weights(repo_type)
+    star_factor = star_tier_factor(stars)
     estimated = (
-        stars * weights["stars"]
+        stars * weights["stars"] * star_factor
         + forks * weights["forks"]
         + watchers * weights["watchers"]
     )
@@ -107,15 +139,32 @@ def risk_weight(risk_score: int | None) -> float:
     return max(RISK_WEIGHT_MIN, RISK_WEIGHT_MAX - (risk_score / 100.0) * (RISK_WEIGHT_MAX - RISK_WEIGHT_MIN))
 
 
+def _deterministic_jitter(skill_id: str) -> float:
+    """Stable per-skill jitter in [JITTER_MIN, JITTER_MAX).
+
+    Derived from the skill_id hash so the same skill always gets the same
+    factor across runs, but different skills get different factors.
+    """
+    digest = hashlib.md5(skill_id.encode("utf-8")).digest()
+    value = int.from_bytes(digest[:8], "big") / (2**64)
+    return JITTER_MIN + value * (JITTER_MAX - JITTER_MIN)
+
+
 def allocate_skill_downloads(
     repo_total_downloads: int,
     skills: list[Any],
 ) -> dict[str, int]:
     """Distribute a repository's total downloads across its skills.
 
-    Each skill gets a share proportional to ``category_weight * risk_weight``
-    so that more popular categories and lower-risk skills receive more
-    downloads. Returns a mapping of skill_id -> download_count.
+    Each skill's share is proportional to
+    ``category_weight * risk_weight * deterministic_jitter(skill_id)``, so
+    even skills with identical category/risk end up with distinct download
+    counts. The result is guaranteed to:
+
+    - never decrease a skill's existing ``download_count`` (monotonic), and
+    - keep every skill's download count unique within the repository.
+
+    Returns a mapping of skill_id -> download_count.
     """
     if not skills:
         return {}
@@ -125,23 +174,50 @@ def allocate_skill_downloads(
         skill_id = getattr(skill, "skill_id", None)
         if not skill_id:
             continue
-        weights[skill_id] = category_weight(getattr(skill, "category", None)) * risk_weight(
+        base = category_weight(getattr(skill, "category", None)) * risk_weight(
             getattr(skill, "risk_score", None)
         )
+        weights[skill_id] = base * _deterministic_jitter(skill_id)
 
     total_weight = sum(weights.values()) or 1.0
     allocations: dict[str, int] = {}
     remaining = repo_total_downloads
     items = list(weights.items())
 
+    # Largest remainder method keeps the sum exact across allocations.
     for index, (skill_id, weight) in enumerate(items):
-        # Largest remainder method keeps the sum exact across allocations.
         if index == len(items) - 1:
             allocations[skill_id] = remaining
         else:
             allocation = int(repo_total_downloads * weight / total_weight)
             allocations[skill_id] = allocation
             remaining -= allocation
+
+    # Never let a skill's download count drop below its current value.
+    for skill in skills:
+        skill_id = getattr(skill, "skill_id", None)
+        if not skill_id or skill_id not in allocations:
+            continue
+        current = getattr(skill, "download_count", 0) or 0
+        if allocations[skill_id] < current:
+            allocations[skill_id] = current
+
+    return _ensure_unique(allocations)
+
+
+def _ensure_unique(allocations: dict[str, int]) -> dict[str, int]:
+    """Resolve duplicate download counts so every skill is unique.
+
+    Duplicates are bumped by +1 in a deterministic (descending value, then
+    ascending skill_id) order until all values differ.
+    """
+    seen: set[int] = set()
+    for skill_id in sorted(allocations, key=lambda s: (-allocations[s], s)):
+        value = allocations[skill_id]
+        while value in seen:
+            value += 1
+        seen.add(value)
+        allocations[skill_id] = value
     return allocations
 
 

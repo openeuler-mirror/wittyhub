@@ -7,6 +7,7 @@ import logging
 import subprocess
 import sys
 from collections import OrderedDict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ if __package__ in {None, ""}:
 
 from skillcrawler.config import load_crawler_config, normalize_dict_keys
 from skillcrawler.core.category_classifier import CategoryClassificationError
+from skillcrawler.core.popularity import PopularityCollector, RepoPopularity
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
 from src.core.config import get_settings
 from src.core.database import get_db_context
@@ -777,6 +779,80 @@ async def _run_delete(manager: "SkillManager", args: argparse.Namespace) -> int:
     return 0
 
 
+POPULARITY_RESULT_COLUMNS = [
+    ("#", "#", 5),
+    ("source", "source", 10),
+    ("stars", "stars", 10),
+    ("forks", "forks", 10),
+    ("watchers", "watchers", 12),
+    ("url", "url", 64),
+]
+
+
+async def _run_popularity(
+    manager: "SkillManager",
+    args: argparse.Namespace,
+) -> int:
+    """Collect popularity (stars/forks/watchers) for configured repos.
+
+    Fetches metrics from the hosting platform API and stores them on the
+    matching ``skill_repos`` row when it exists (matched by URL).
+    """
+    config_path = Path(args.config) if args.config else None
+    collector = PopularityCollector()
+    results = await collector.collect(config_path, only=args.source)
+
+    if not results:
+        logger.info("No repos to collect popularity for")
+        return 0
+
+    saved = 0
+    not_found = 0
+    rows: list[dict[str, str]] = []
+    for index, popularity in enumerate(results, start=1):
+        rows.append(
+            {
+                "#": str(index),
+                "source": popularity.source,
+                "stars": str(popularity.stars),
+                "forks": str(popularity.forks),
+                "watchers": str(popularity.watchers),
+                "url": popularity.url,
+            }
+        )
+        repository = await manager.skill_repo_repository.get_skill_repository_by_url(
+            popularity.url
+        )
+        if repository is None:
+            not_found += 1
+            logger.info(
+                "No skill_repos row for %s (URL not registered); skip persist",
+                popularity.url,
+            )
+            continue
+        await manager.skill_repo_repository.update_skill_repository(
+            repository.id,
+            stars_count=popularity.stars,
+            forks_count=popularity.forks,
+            watchers_count=popularity.watchers,
+            popularity_updated_at=datetime.now(timezone.utc),
+        )
+        saved += 1
+
+    print()
+    _print_table(
+        rows,
+        POPULARITY_RESULT_COLUMNS,
+        empty_message="No popularity results.",
+    )
+    print()
+    logger.info(
+        "Popularity summary: total=%d saved=%d not_registered=%d",
+        len(results), saved, not_found,
+    )
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Manage skill repository discovery.",
@@ -786,6 +862,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_query_parser(subparsers)
     _add_discover_parser(subparsers)
     _add_delete_parser(subparsers)
+    _add_popularity_parser(subparsers)
     return parser
 
 
@@ -839,6 +916,30 @@ def _add_delete_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("-i", "--id", required=True, help="Skill repo ID to delete")
 
 
+def _add_popularity_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "popularity",
+        help="Collect popularity (stars/forks/watchers) for configured repos",
+        description=(
+            "Query GitHub/GitCode public APIs for repository popularity metrics "
+            "and persist them on the matching skill_repos rows."
+        ),
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        default=None,
+        help="Repo list YAML path (default: skills/skill-repos.yaml)",
+    )
+    parser.add_argument(
+        "-s",
+        "--source",
+        choices=("github", "gitcode"),
+        default=None,
+        help="Only collect from this platform (default: all)",
+    )
+
+
 async def _main() -> int:
     args = _build_parser().parse_args()
 
@@ -856,6 +957,8 @@ async def _main() -> int:
             return await _run_discover(manager, args)
         if args.action == "delete":
             return await _run_delete(manager, args)
+        if args.action == "popularity":
+            return await _run_popularity(manager, args)
     raise ValueError(f"Unsupported action: {args.action}")
 
 

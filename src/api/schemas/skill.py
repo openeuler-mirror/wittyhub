@@ -58,6 +58,9 @@ class SkillResponse(SkillBase):
     risk_score: int | None = None
     download_count: int = 0
     rating: str | None = None
+    stars_count: int = 0
+    forks_count: int = 0
+    watchers_count: int = 0
     created_at: datetime
     updated_at: datetime
     last_indexed_at: datetime | None = None

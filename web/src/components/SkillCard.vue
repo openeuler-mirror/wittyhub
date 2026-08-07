@@ -51,7 +51,7 @@ function truncate(text: string | null, length: number): string {
 
     <p class="skill-card-desc">{{ truncate(skill.description, 120) }}</p>
 
-    <div class="flex flex-wrap gap-1.5 mb-4 flex-1 items-start content-start">
+    <div class="flex flex-wrap gap-1.5 mb-6 mt-auto items-start content-start">
       <span
         v-if="skill.category"
         class="tag tag-category skill-card-tag"

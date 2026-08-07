@@ -276,21 +276,18 @@ class SkillRepository:
         await self.session.refresh(skill)
         return skill
 
-    async def update_download_count_by_repo_id(
+    async def update_download_count_by_skill_id(
         self,
-        skill_repo_id: str | uuid.UUID,
+        skill_id: str,
         download_count: int,
     ) -> int:
-        """Set download_count for every skill belonging to a repository.
+        """Set download_count for a single skill (matched by skill_id).
 
-        Returns the number of skills updated.
+        Returns the number of rows updated (0 or 1).
         """
         result = await self.session.execute(
             update(Skill)
-            .where(
-                Skill.skill_repo_id
-                == (skill_repo_id if isinstance(skill_repo_id, uuid.UUID) else uuid.UUID(str(skill_repo_id)))
-            )
+            .where(Skill.skill_id == skill_id)
             .values(download_count=download_count)
         )
         await self.session.flush()
@@ -363,6 +360,12 @@ class SkillRepository:
             )
         )
         return {commit_id for commit_id in result.scalars().all() if commit_id}
+
+    async def list_by_skill_repo_id(self, skill_repo_id: uuid.UUID) -> list[Skill]:
+        result = await self.session.execute(
+            select(Skill).where(Skill.skill_repo_id == skill_repo_id)
+        )
+        return list(result.scalars().all())
 
     async def list_unscored_by_skill_repo(
         self,

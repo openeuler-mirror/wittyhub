@@ -20,7 +20,8 @@ from skillcrawler.core.category_classifier import CategoryClassificationError
 from skillcrawler.core.popularity import (
     PopularityCollector,
     RepoPopularity,
-    estimate_download_count,
+    allocate_skill_downloads,
+    estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
 from src.core.config import get_settings
@@ -786,6 +787,7 @@ async def _run_delete(manager: "SkillManager", args: argparse.Namespace) -> int:
 POPULARITY_RESULT_COLUMNS = [
     ("#", "#", 5),
     ("source", "source", 10),
+    ("type", "type", 12),
     ("stars", "stars", 10),
     ("forks", "forks", 10),
     ("watchers", "watchers", 12),
@@ -801,9 +803,11 @@ async def _run_popularity(
     """Collect popularity (stars/forks/watchers) for configured repos.
 
     Fetches metrics from the hosting platform API, stores them on the
-    matching ``skill_repos`` row (matched by URL), and updates every
-    skill of that repository with an estimated download count derived
-    from stars/forks/watchers. The frontend ranks popularity by the
+    matching ``skill_repos`` row (matched by URL), then distributes each
+    repository's estimated total downloads across its skills. Repos are
+    weighted by type (enterprise / openeuler / personal) and individual
+    skills by category popularity and risk score, so every skill ends up
+    with a different download count. The frontend ranks popularity by the
     existing ``download_count`` field, so no frontend changes are needed.
     """
     config_path = Path(args.config) if args.config else None
@@ -819,17 +823,18 @@ async def _run_popularity(
     skills_updated = 0
     rows: list[dict[str, str]] = []
     for index, popularity in enumerate(results, start=1):
-        estimated = estimate_download_count(
-            popularity.stars, popularity.forks, popularity.watchers
+        repo_downloads = estimate_repo_downloads(
+            popularity.stars, popularity.forks, popularity.watchers, popularity.repo_type
         )
         rows.append(
             {
                 "#": str(index),
                 "source": popularity.source,
+                "type": popularity.repo_type,
                 "stars": str(popularity.stars),
                 "forks": str(popularity.forks),
                 "watchers": str(popularity.watchers),
-                "est_downloads": str(estimated),
+                "est_downloads": str(repo_downloads),
                 "url": popularity.url,
             }
         )
@@ -850,9 +855,13 @@ async def _run_popularity(
             watchers_count=popularity.watchers,
             popularity_updated_at=datetime.now(timezone.utc),
         )
-        skills_updated += await manager.skill_repository.update_download_count_by_repo_id(
-            repository.id, estimated
-        )
+        skills = await manager.skill_repository.list_by_skill_repo_id(repository.id)
+        allocations = allocate_skill_downloads(repo_downloads, skills)
+        for skill_id, download_count in allocations.items():
+            await manager.skill_repository.update_download_count_by_skill_id(
+                skill_id, download_count
+            )
+        skills_updated += len(allocations)
         saved += 1
 
     print()

@@ -40,20 +40,109 @@ MAX_CONCURRENT_FETCHES = 5
 MAX_RATE_LIMIT_RETRIES = 2
 RATE_LIMIT_RETRY_BASE_SECONDS = 30
 
-# Weights used to estimate a skill's download count from repository
-# popularity metrics. Watchers typically mirror stars on GitHub, so its
-# weight is kept low to avoid double-counting.
-POPULARITY_DOWNLOAD_WEIGHTS = {"stars": 2.0, "forks": 1.0, "watchers": 0.5}
+# Download-conversion weights per repository type. Different repo types
+# (openeuler community / enterprise / personal) convert popularity metrics
+# into downloads at different rates: enterprise repos are trusted more,
+# personal repos convert the least.
+REPO_TYPE_WEIGHTS: dict[str, dict[str, float]] = {
+    "enterprise": {"stars": 3.0, "forks": 1.5, "watchers": 1.0},
+    "openeuler": {"stars": 2.0, "forks": 1.2, "watchers": 0.8},
+    "personal": {"stars": 1.0, "forks": 0.5, "watchers": 0.3},
+}
+DEFAULT_REPO_TYPE = "openeuler"
+
+# Relative popularity of each skill category. Skills in more popular
+# categories get a larger share of the repository's total downloads.
+CATEGORY_WEIGHTS: dict[str, float] = {
+    "AI": 1.8,
+    "Security": 1.6,
+    "Data": 1.5,
+    "Frontend": 1.3,
+    "Backend": 1.3,
+    "Database": 1.3,
+    "DevOps": 1.2,
+    "Cloud": 1.2,
+    "Mobile": 1.1,
+    "Design": 1.0,
+    "Networking": 1.0,
+    "others": 1.0,
+}
+DEFAULT_CATEGORY = "others"
+
+# Risk penalty: skills with higher risk scores are downloaded less.
+RISK_WEIGHT_MIN = 0.4
+RISK_WEIGHT_MAX = 1.0
 
 
-def estimate_download_count(stars: int, forks: int, watchers: int) -> int:
-    """Estimate a skill's download count from repo popularity metrics."""
+def repo_type_weights(repo_type: str) -> dict[str, float]:
+    """Return download weights for a repository type (fallback to default)."""
+    return REPO_TYPE_WEIGHTS.get(repo_type, REPO_TYPE_WEIGHTS[DEFAULT_REPO_TYPE])
+
+
+def estimate_repo_downloads(
+    stars: int,
+    forks: int,
+    watchers: int,
+    repo_type: str,
+) -> int:
+    """Estimate total downloads for a repository from its popularity metrics."""
+    weights = repo_type_weights(repo_type)
     estimated = (
-        stars * POPULARITY_DOWNLOAD_WEIGHTS["stars"]
-        + forks * POPULARITY_DOWNLOAD_WEIGHTS["forks"]
-        + watchers * POPULARITY_DOWNLOAD_WEIGHTS["watchers"]
+        stars * weights["stars"]
+        + forks * weights["forks"]
+        + watchers * weights["watchers"]
     )
     return int(round(estimated))
+
+
+def category_weight(category: str | None) -> float:
+    return CATEGORY_WEIGHTS.get(category, CATEGORY_WEIGHTS[DEFAULT_CATEGORY])
+
+
+def risk_weight(risk_score: int | None) -> float:
+    """Lower risk scores convert to more downloads."""
+    if risk_score is None:
+        return RISK_WEIGHT_MAX
+    # risk_score is roughly 0..100; scale linearly into [MIN, MAX].
+    return max(RISK_WEIGHT_MIN, RISK_WEIGHT_MAX - (risk_score / 100.0) * (RISK_WEIGHT_MAX - RISK_WEIGHT_MIN))
+
+
+def allocate_skill_downloads(
+    repo_total_downloads: int,
+    skills: list[Any],
+) -> dict[str, int]:
+    """Distribute a repository's total downloads across its skills.
+
+    Each skill gets a share proportional to ``category_weight * risk_weight``
+    so that more popular categories and lower-risk skills receive more
+    downloads. Returns a mapping of skill_id -> download_count.
+    """
+    if not skills:
+        return {}
+
+    weights: dict[str, float] = {}
+    for skill in skills:
+        skill_id = getattr(skill, "skill_id", None)
+        if not skill_id:
+            continue
+        weights[skill_id] = category_weight(getattr(skill, "category", None)) * risk_weight(
+            getattr(skill, "risk_score", None)
+        )
+
+    total_weight = sum(weights.values()) or 1.0
+    allocations: dict[str, int] = {}
+    remaining = repo_total_downloads
+    items = list(weights.items())
+
+    for index, (skill_id, weight) in enumerate(items):
+        # Largest remainder method keeps the sum exact across allocations.
+        if index == len(items) - 1:
+            allocations[skill_id] = remaining
+        else:
+            allocation = int(repo_total_downloads * weight / total_weight)
+            allocations[skill_id] = allocation
+            remaining -= allocation
+    return allocations
 
 
 class PopularityError(Exception):
@@ -69,6 +158,7 @@ class RepoPopularity:
     stars: int = 0
     forks: int = 0
     watchers: int = 0
+    repo_type: str = DEFAULT_REPO_TYPE
 
 
 def _int_value(data: dict[str, Any], *keys: str) -> int:
@@ -182,20 +272,26 @@ class PopularityCollector:
     def __init__(self, fetcher: PopularityFetcher | None = None) -> None:
         self.fetcher = fetcher or PopularityFetcher()
 
-    def _parse_repo_list(self, config_path: Path | None) -> list[str]:
-        """Extract unique repo URLs from the crawler config file."""
+    def _parse_repo_list(self, config_path: Path | None) -> list[tuple[str, str]]:
+        """Extract (repo_url, repo_type) pairs from the crawler config file.
+
+        The repo type is derived from the config section the URL appears in:
+        ``openeuler_repos`` -> "openeuler", ``enterprise_repos`` -> "enterprise",
+        ``personal_repos`` -> "personal".
+        """
         from skillcrawler.config import load_crawler_config
 
         config = load_crawler_config(config_path)
-        urls: list[str] = []
+        repos: list[tuple[str, str]] = []
         seen: set[str] = set()
         for key in ("openeuler_repos", "personal_repos", "enterprise_repos"):
+            repo_type = key.removesuffix("_repos")
             for item in config.get(key, []) or []:
                 url = item.get("url") if isinstance(item, dict) else None
                 if isinstance(url, str) and url.strip() and url.strip() not in seen:
                     seen.add(url.strip())
-                    urls.append(url.strip())
-        return urls
+                    repos.append((url.strip(), repo_type))
+        return repos
 
     @staticmethod
     def _source_for_url(repo_url: str) -> str:
@@ -218,22 +314,24 @@ class PopularityCollector:
         only: str | None = None,
     ) -> list[RepoPopularity]:
         """Collect popularity for configured repos, with bounded concurrency."""
-        urls = self._parse_repo_list(config_path)
+        repos = self._parse_repo_list(config_path)
         if only:
-            urls = [u for u in urls if self._source_for_url(u) == only]
-        if not urls:
+            repos = [(url, repo_type) for url, repo_type in repos if self._source_for_url(url) == only]
+        if not repos:
             return []
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
 
-        async def _fetch_one(repo_url: str) -> RepoPopularity:
+        async def _fetch_one(repo_url: str, repo_type: str) -> RepoPopularity:
             async with semaphore:
                 source = self._source_for_url(repo_url)
                 try:
-                    return await self.fetcher.fetch(repo_url, source)
+                    result = await self.fetcher.fetch(repo_url, source)
+                    result.repo_type = repo_type
+                    return result
                 except PopularityError as exc:
                     _logger.warning("Failed to collect popularity for %s: %s", repo_url, exc)
-                    return RepoPopularity(url=repo_url, source=source)
+                    return RepoPopularity(url=repo_url, source=source, repo_type=repo_type)
 
-        results = await asyncio.gather(*(_fetch_one(u) for u in urls))
+        results = await asyncio.gather(*(_fetch_one(url, repo_type) for url, repo_type in repos))
         return list(results)

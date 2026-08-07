@@ -57,6 +57,7 @@ export const api = {
     category?: string
     platform?: string
     tags?: string
+    security_level?: string
     mode?: 'text' | 'semantic' | 'hybrid'
     scope?: 'summary' | 'full'
   } = {}): Promise<SearchResponse> {

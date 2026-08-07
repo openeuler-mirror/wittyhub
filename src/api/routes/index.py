@@ -19,12 +19,14 @@ async def search(
     category: str | None = None,
     platform: str | None = None,
     tags: str | None = None,
+    security_level: str | None = None,
     mode: str = Query("hybrid", pattern="^(text|semantic|hybrid)$"),
     scope: str = Query("summary", pattern="^(summary|full)$"),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     tag_list = tags.split(",") if tags else None
     category_list = category.split(",") if category else None
+    security_level_list = security_level.split(",") if security_level else None
     embedding = None
 
     settings = get_settings()
@@ -49,6 +51,7 @@ async def search(
         category=category_list,
         platform=platform,
         tags=tag_list,
+        security_level=security_level_list,
         embedding=embedding,
         mode=mode,
         scope=scope,

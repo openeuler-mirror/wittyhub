@@ -24,7 +24,10 @@ const providers = computed(() => {
   }))
 })
 
+const providerTotal = computed(() => providers.value.reduce((s, p) => s + p.count, 0))
+
 const allCategories = computed(() => skillStore.categories)
+const categoryTotal = computed(() => allCategories.value.reduce((s, c) => s + c.count, 0))
 
 const ALL_SECURITY_LEVELS = ['安全', '低风险', '中风险', '高风险']
 
@@ -40,6 +43,23 @@ const securityLevels = computed(() => {
     count: levelCounts[name] ?? 0
   }))
 })
+
+const securityLevelTotal = computed(() => securityLevels.value.reduce((s, l) => s + l.count, 0))
+
+function selectProviderAll() {
+  skillStore.setFilter('provider', [])
+  skillStore.fetchSkills()
+}
+
+function selectCategoryAll() {
+  skillStore.setFilter('category', [])
+  skillStore.fetchSkills()
+}
+
+function selectSecurityLevelAll() {
+  skillStore.setFilter('securityLevel', [])
+  skillStore.fetchSkills()
+}
 
 function toggleArrayItem(arr: string[], item: string): string[] {
   return arr.includes(item) ? arr.filter(i => i !== item) : [...arr, item]
@@ -102,6 +122,18 @@ const hasActiveFilter = computed(() => {
         <h3 class="filter-section-title">贡献者</h3>
         <div class="space-y-[1px]">
           <div
+            class="filter-item"
+            :class="{ 'filter-item-active': skillStore.filter.provider.length === 0 }"
+            @click="selectProviderAll"
+          >
+            <span class="filter-item-label">
+              <span class="filter-radio" :class="{ 'filter-radio-active': skillStore.filter.provider.length === 0 }">
+              </span>
+              全部
+            </span>
+            <span class="filter-count">{{ providerTotal }}</span>
+          </div>
+          <div
             v-for="p in providers"
             :key="p.value"
             class="filter-item"
@@ -121,6 +153,21 @@ const hasActiveFilter = computed(() => {
       <div>
         <h3 class="filter-section-title">分类</h3>
         <div class="space-y-[1px]">
+          <div
+            class="filter-item"
+            :class="{ 'filter-item-active': skillStore.filter.category.length === 0 }"
+            @click="selectCategoryAll"
+          >
+            <span class="filter-item-label">
+              <span class="filter-checkbox" :class="{ 'filter-checkbox-active': skillStore.filter.category.length === 0 }">
+                <svg v-if="skillStore.filter.category.length === 0" class="filter-checkbox-icon" viewBox="0 0 12 12" fill="none">
+                  <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              全部
+            </span>
+            <span class="filter-count">{{ categoryTotal }}</span>
+          </div>
           <div
             v-for="cat in allCategories"
             :key="cat.name"
@@ -144,6 +191,18 @@ const hasActiveFilter = computed(() => {
       <div>
         <h3 class="filter-section-title">安全等级</h3>
         <div class="space-y-[1px]">
+          <div
+            class="filter-item"
+            :class="{ 'filter-item-active': skillStore.filter.securityLevel.length === 0 }"
+            @click="selectSecurityLevelAll"
+          >
+            <span class="filter-item-label">
+              <span class="filter-radio" :class="{ 'filter-radio-active': skillStore.filter.securityLevel.length === 0 }">
+              </span>
+              全部
+            </span>
+            <span class="filter-count">{{ securityLevelTotal }}</span>
+          </div>
           <div
             v-for="level in securityLevels"
             :key="level.name"

@@ -578,6 +578,7 @@ class SkillRepository:
 
             query = (
                 filtered_query
+                .add_columns(dl_subquery.c.period_downloads)
                 .outerjoin(dl_subquery, Skill.id == dl_subquery.c.resource_id)
                 .order_by(
                     desc(func.coalesce(dl_subquery.c.period_downloads, 0)),
@@ -595,7 +596,15 @@ class SkillRepository:
             query = filtered_query.order_by(*order_by).offset(skip).limit(limit)
 
         result = await self.session.execute(query)
-        skills = list(result.scalars().all())
+        if sort_by == "download_count" and sort_period in ("week", "month"):
+            # 周期排序：查询结果同时包含 Skill 实体与周期下载量，挂载到实体上返回
+            skills = []
+            for row in result.all():
+                skill, period_downloads = row[0], row[1] or 0
+                skill._period_downloads = period_downloads
+                skills.append(skill)
+        else:
+            skills = list(result.scalars().all())
 
         return skills, total or 0
 

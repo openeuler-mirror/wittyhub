@@ -287,6 +287,7 @@ class PopularityFetcher:
             async with httpx.AsyncClient(
                 timeout=GITHUB_TIMEOUT_SECONDS,
                 headers=self._github_headers(),
+                follow_redirects=True,
             ) as client:
                 resp = await client.get(url)
         except httpx.RequestError as exc:
@@ -320,6 +321,7 @@ class PopularityFetcher:
             async with httpx.AsyncClient(
                 timeout=GITCODE_TIMEOUT_SECONDS,
                 headers=self._gitcode_headers(),
+                follow_redirects=True,
             ) as client:
                 resp = await client.get(url)
         except httpx.RequestError as exc:
@@ -398,7 +400,7 @@ class PopularityCollector:
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
 
-        async def _fetch_one(repo_url: str, repo_type: str) -> RepoPopularity:
+        async def _fetch_one(repo_url: str, repo_type: str) -> RepoPopularity | None:
             async with semaphore:
                 source = self._source_for_url(repo_url)
                 try:
@@ -407,7 +409,7 @@ class PopularityCollector:
                     return result
                 except PopularityError as exc:
                     _logger.warning("Failed to collect popularity for %s: %s", repo_url, exc)
-                    return RepoPopularity(url=repo_url, source=source, repo_type=repo_type)
+                    return None
 
         results = await asyncio.gather(*(_fetch_one(url, repo_type) for url, repo_type in repos))
-        return list(results)
+        return [result for result in results if result is not None]

@@ -533,18 +533,6 @@ def _build_configured_discover_requests(
     return requests, config_keys
 
 
-async def _get_refresh_target_repositories(
-    manager: "SkillManager",
-    platform: str | None,
-) -> list[Any]:
-    repositories = await manager.list_skill_repositories()
-    return [
-        repository
-        for repository in repositories
-        if platform is None or repository.platform == platform
-    ]
-
-
 async def _discover_single_existing_repository(
     manager: "SkillManager",
     repo_id: str,
@@ -562,71 +550,6 @@ async def _discover_single_existing_repository(
     return 0
 
 
-async def _refresh_existing_repositories(
-    manager: "SkillManager",
-    repositories: list[Any],
-    *,
-    force: bool,
-    source_label: str = "",
-) -> int:
-    total = len(repositories)
-    success_count = 0
-    failed_count = 0
-    skipped_count = 0
-    fatal_error = False
-    result_rows: list[dict[str, str]] = []
-    failure_details: list[dict[str, str]] = []
-
-    logger.info("Preparing to refresh existing skill repos%s: total=%d", source_label, total)
-
-    for index, repository in enumerate(repositories, start=1):
-        logger.info("[%d/%d] discover %s", index, total, _display_skill_repo_name(repository))
-        if not force and repository.skill_discover_status == "discovering":
-            skipped_count += 1
-            result_rows.append(_skipped_existing_repository_row(str(index), repository))
-            continue
-
-        try:
-            refreshed = await manager.discover_skills_from_single_existing_repository(
-                str(repository.id),
-                force=force,
-            )
-            success_count += 1
-            result_rows.append(
-                _successful_existing_repository_row(str(index), refreshed)
-            )
-        except Exception as exc:
-            await manager.rollback()
-            failed_count += 1
-            fatal_error = isinstance(exc, CategoryClassificationError)
-            error = _format_exception(exc)
-            _print_failure_detail(str(index), repository.url or "-", error)
-            result_rows.append(_failed_existing_repository_row(str(index), repository, error))
-            failure_details.append(
-                {
-                    "#": str(index),
-                    "url": repository.url or "-",
-                    "error": error,
-                }
-            )
-            if fatal_error:
-                break
-
-    print()
-    _print_table(
-        result_rows,
-        DISCOVER_RESULT_COLUMNS,
-        empty_message="No skill repos to discover.",
-    )
-    _print_failure_details(failure_details)
-    print()
-    logger.info(
-        "Discover summary: total=%d success=%d failed=%d skipped=%d",
-        total, success_count, failed_count, skipped_count,
-    )
-    return 1 if fatal_error else 0
-
-
 def _successful_existing_repository_row(index: str, repository: Any) -> dict[str, str]:
     return {
         "#": index,
@@ -639,41 +562,11 @@ def _successful_existing_repository_row(index: str, repository: Any) -> dict[str
     }
 
 
-def _skipped_existing_repository_row(index: str, repository: Any) -> dict[str, str]:
-    return {
-        "#": index,
-        "result": "skipped",
-        "status": str(repository.skill_discover_status or "-"),
-        "skills": str(repository.skill_num),
-        "name": _display_skill_repo_name(repository),
-        "url": repository.url or "-",
-        "error": "already discovering",
-    }
-
-
-def _failed_existing_repository_row(
-    index: str,
-    repository: Any,
-    error: str,
-) -> dict[str, str]:
-    return {
-        "#": index,
-        "result": "failed",
-        "status": str(repository.skill_discover_status or "-"),
-        "skills": str(repository.skill_num),
-        "name": _display_skill_repo_name(repository),
-        "url": repository.url or "-",
-        "error": error,
-    }
-
-
 async def _run_discover(manager: "SkillManager", args: argparse.Namespace) -> int:
     if args.id:
         return await _run_discover_existing_repo_by_id(manager, args)
     if args.url:
         return await _run_discover_single_url(manager, args)
-    if args.refresh:
-        return await _run_refresh_existing_repos(manager, args)
     return await _run_discover_from_config(manager, args)
 
 
@@ -681,12 +574,6 @@ async def _run_discover_single_url(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
-    if args.refresh:
-        raise _build_cli_error(
-            "discover",
-            "--refresh cannot be used with --url",
-            "python main.py discover --url \"https://example.com/repo\"",
-        )
     if args.config:
         raise _build_cli_error(
             "discover",
@@ -719,45 +606,10 @@ async def _run_discover_from_config(
     )
 
 
-async def _run_refresh_existing_repos(
-    manager: "SkillManager",
-    args: argparse.Namespace,
-) -> int:
-    if args.config:
-        raise _build_cli_error(
-            "discover",
-            "--config cannot be used with --refresh",
-            "python main.py discover --refresh",
-        )
-    if args.branch:
-        raise _build_cli_error(
-            "discover",
-            "--branch requires --url for discover",
-            "python main.py discover --url \"https://example.com/repo\" --branch main",
-        )
-
-    platform = _platform_from_cli_value(args.platform)
-    repositories = await _get_refresh_target_repositories(manager, platform)
-    source_label = f" platform={platform}" if platform else ""
-    return await _refresh_existing_repositories(
-        manager,
-        repositories,
-        force=args.force,
-        source_label=source_label,
-    )
-
-
 async def _run_discover_existing_repo_by_id(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
-    if args.refresh:
-        raise _build_cli_error(
-            "discover",
-            "--refresh cannot be used with --id",
-            "python main.py discover --id <repo_id>",
-        )
-
     if args.url or args.branch:
         raise _build_cli_error(
             "discover",
@@ -926,13 +778,6 @@ def _add_discover_parser(subparsers: argparse._SubParsersAction) -> None:
         dest="force",
         action="store_true",
         help="Force rediscover existing repos even when status is discovering",
-    )
-    parser.add_argument(
-        "-r",
-        "--refresh",
-        dest="refresh",
-        action="store_true",
-        help="Refresh existing skill repos from the database instead of reading config",
     )
 
 

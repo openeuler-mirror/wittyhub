@@ -210,10 +210,12 @@ class SkillScanner:
                 commit_cache,
             )
             _logger.debug(
-                'Tag skill path listing timing: repo=%s ref=%s paths=%d elapsed=%.3fs',
+                'Tag skill path listing timing: repo=%s ref=%s paths=%d '
+                'current_paths=%d elapsed=%.3fs',
                 getattr(repo, 'repo_name', None) or repo.url,
                 ref,
                 len(skill_paths),
+                len(current_tag_skill_paths),
                 time.perf_counter() - path_listing_started_at,
             )
             for relative_path in current_tag_skill_paths:

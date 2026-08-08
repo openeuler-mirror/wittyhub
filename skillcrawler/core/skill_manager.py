@@ -352,31 +352,26 @@ class SkillManager:
             return
 
         audit_repo = SecurityAuditRepository(self.skill_repository.session)
-        upserted = 0
-        for resource_id, version, commit_id, security_audit in pending:
+        for record in pending:
             await audit_repo.upsert_by_resource(
                 resource_type='skill',
-                resource_id=resource_id,
+                resource_id=record.id,
                 audit_data={
                     'resource_type': 'skill',
-                    'resource_id': resource_id,
-                    'version': version,
-                    'commit_id': commit_id,
+                    'resource_id': record.id,
+                    'version': record.version,
+                    'commit_id': record.commit_id,
                     'audit_type': 'skillspector',
                     'risk_level': 'unknown',
                     'risk_signals': [],
-                    'details': dict(security_audit),
+                    'details': dict(record.extra_metadata['security_audit']),
                 },
             )
-            upserted += 1
 
-        _logger.info(
-            'Upserted %d/%d SecurityAudit records',
-            upserted, len(pending),
-        )
+        _logger.info('Upserted %d SecurityAudit records', len(pending))
 
     @staticmethod
-    def _should_store_security_audit(record: Skill | SkillVersion) -> bool:
+    def _has_new_security_audit(record: Skill | SkillVersion) -> bool:
         """Return whether this scan triggered a new audit for the record."""
         return bool(getattr(record, '_security_audit_triggered', False))
 

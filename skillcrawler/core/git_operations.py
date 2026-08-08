@@ -66,11 +66,14 @@ class GitOperations:
         )
 
         target_branch = branch or self._get_cloned_repo_branch(clone_dir)
+        is_shallow = self.is_shallow_repository(clone_dir)
         if target_branch:
             fetch_command = [
                 'git', '-C', str(clone_dir), 'fetch',
-                '--depth', '1', 'origin', target_branch,
             ]
+            if is_shallow:
+                fetch_command.extend(['--depth', '1'])
+            fetch_command.extend(['origin', target_branch])
             self._run_git_command_with_auth_retry(
                 fetch_command, clone_url, repo_url, 'fetch',
             )
@@ -79,9 +82,12 @@ class GitOperations:
             )
             return
 
+        fetch_command = ['git', '-C', str(clone_dir), 'fetch']
+        if is_shallow:
+            fetch_command.extend(['--depth', '1'])
+        fetch_command.append('origin')
         self._run_git_command_with_auth_retry(
-            ['git', '-C', str(clone_dir), 'fetch', '--depth', '1', 'origin'],
-            clone_url, repo_url, 'fetch',
+            fetch_command, clone_url, repo_url, 'fetch',
         )
 
     def collect_repository_git_metadata(
@@ -123,17 +129,60 @@ class GitOperations:
     ) -> None:
         if not self.is_shallow_repository(clone_dir):
             return
+
+        partial_clone_settings = (
+            ('remote.origin.promisor', 'true'),
+            ('remote.origin.partialclonefilter', 'blob:none'),
+        )
+        for key, value in partial_clone_settings:
+            self._run_git_command_with_retries(
+                ['git', '-C', str(clone_dir), 'config', key, value]
+            )
+
         try:
-            _logger.info('Discover: fetching full git history for path-level commits: %s', clone_dir)
+            _logger.info(
+                'Discover: fetching full commit/tree history with blob:none for '
+                'path-level commits: %s',
+                clone_dir,
+            )
             self._run_git_command_with_auth_retry(
-                ['git', '-C', str(clone_dir), 'fetch', '--unshallow', 'origin'],
+                [
+                    'git', '-C', str(clone_dir), 'fetch',
+                    '--unshallow', '--filter=blob:none', 'origin',
+                ],
                 clone_url,
                 repo_url,
-                'fetch full history',
+                'fetch filtered full history',
             )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        except subprocess.CalledProcessError as exc:
             _logger.warning(
-                'Failed to unshallow skill repo %s; skill directory commits may use HEAD: %s',
+                'Filtered unshallow is unsupported for %s; retrying without '
+                'blob filter: %s',
+                clone_dir,
+                exc,
+            )
+            for key, _ in partial_clone_settings:
+                self._run_git_command_with_retries(
+                    ['git', '-C', str(clone_dir), 'config', '--unset-all', key]
+                )
+            try:
+                self._run_git_command_with_auth_retry(
+                    ['git', '-C', str(clone_dir), 'fetch', '--unshallow', 'origin'],
+                    clone_url,
+                    repo_url,
+                    'fetch full history',
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as fallback_exc:
+                _logger.warning(
+                    'Failed to unshallow skill repo %s; skill directory commits '
+                    'may use HEAD: %s',
+                    clone_dir,
+                    fallback_exc,
+                )
+        except subprocess.TimeoutExpired as exc:
+            _logger.warning(
+                'Filtered unshallow timed out for %s; skill directory commits '
+                'may use HEAD: %s',
                 clone_dir,
                 exc,
             )

@@ -74,7 +74,6 @@ src/models/
 | `commit_id` | `SKILL.md` 所在 skill 文件夹的最新 commit，不是 repo HEAD |
 | `platform` | 优先继承 `skill_repos.platform` |
 | `author` | 普通仓库来自仓库 owner；openEuler 仓库来自 SIG 名称 |
-| `extra_metadata.skill_directory_commit_id` | 与 `skills.commit_id` 相同，作为元数据保留 |
 
 注意：repo HEAD commit 存在 `skill_repos.repository_commit_id`，不要写入 `skills.extra_metadata.repository_commit_id`。
 

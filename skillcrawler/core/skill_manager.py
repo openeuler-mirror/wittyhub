@@ -112,8 +112,8 @@ class SkillManager:
         repo_name = self._derive_repo_name(normalized)
         existing = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
         if existing is not None:
-            _logger.warning(
-                f'Skill repo "{repo_name}" already exists with id "{existing.id}"'
+            _logger.info(
+                f'Skill repo "{repo_name}" already exists with id "{existing.id}", skipping creation'
             )
             return None
         source, _ = derive_skill_source(normalized.url)

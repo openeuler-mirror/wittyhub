@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -323,14 +322,14 @@ class SkillManager:
             repository_git_metadata, as_optional_str, as_optional_str_list,
         )
 
+        detected_branch: str | None = None
         if repo.branch is None:
             detected_branch = self._git_ops.get_cloned_repo_branch(clone_dir)
-            if detected_branch:
-                repo = await self.skill_repo_repository.update_skill_repository(
-                    repo.id, branch=detected_branch, commit=False,
-                )
         repo = await self.skill_repo_repository.update_skill_repository(
-            repo.id, local_path=str(clone_dir), commit=False,
+            repo.id,
+            branch=detected_branch,
+            local_path=str(clone_dir),
+            commit=False,
         )
         return await self._scanner.start_scan(
             repo=repo,

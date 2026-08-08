@@ -474,7 +474,7 @@ async def _discover_repositories_from_requests(
         removed_count, skipped_no_skill, failed_count,
     )
 
-    return 1 if fatal_error else 0
+    return 1 if failed_count else 0
 
 
 def _platform_from_cli_value(platform: str | None) -> str | None:

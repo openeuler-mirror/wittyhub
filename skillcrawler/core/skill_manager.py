@@ -311,7 +311,7 @@ class SkillManager:
         *,
         clone_dir: Path,
         author: str | None,
-    ) -> tuple[list[Skill], list[Skill]]:
+    ) -> tuple[list[Skill], list[SkillVersion]]:
         clone_url = normalize_clone_url_for_git(repo.url)
         self._git_ops.ensure_full_history(clone_dir, clone_url, repo.url)
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
@@ -346,33 +346,36 @@ class SkillManager:
         tagged_skills: list[SkillVersion],
     ) -> None:
         """Create ``SecurityAudit`` records for async-triggered skills."""
-        pending: list[tuple[uuid.UUID, str, str | None, str | None, dict]] = []
+        pending: list[
+            tuple[uuid.UUID, str, str | None, dict]
+        ] = []
 
         for skill in latest_skills:
-            sa = skill.extra_metadata.get('security_audit')
-            if sa and sa.get('skillspector_async') and sa.get('skillspector_build_number') is not None:
-                if skill.id is None:
-                    _logger.warning('Skip security audit: skill %s id is None', skill.skill_id)
-                    continue
-                pending.append((skill.id, skill.version, skill.commit_id, skill.skill_id, sa))
+            if not self._should_store_security_audit(skill):
+                continue
+            pending.append((
+                skill.id,
+                skill.version,
+                skill.commit_id,
+                skill.extra_metadata["security_audit"],
+            ))
 
         for skill_version in tagged_skills:
-            sa = skill_version.extra_metadata.get('security_audit')
-            if sa and sa.get('skillspector_async') and sa.get('skillspector_build_number') is not None:
-                if skill_version.id is None:
-                    _logger.warning(
-                        'Skip security audit for version: skill_version %s id is None',
-                        skill_version.version,
-                    )
-                    continue
-                pending.append((skill_version.id, skill_version.version, skill_version.commit_id, skill_version.skill_id, sa))
+            if not self._should_store_security_audit(skill_version):
+                continue
+            pending.append((
+                skill_version.id,
+                skill_version.version,
+                skill_version.commit_id,
+                skill_version.extra_metadata['security_audit'],
+            ))
 
         if not pending:
             return
 
         audit_repo = SecurityAuditRepository(self.skill_repository.session)
         upserted = 0
-        for resource_id, version, commit_id, _skill_id, sa in pending:
+        for resource_id, version, commit_id, security_audit in pending:
             await audit_repo.upsert_by_resource(
                 resource_type='skill',
                 resource_id=resource_id,
@@ -384,7 +387,7 @@ class SkillManager:
                     'audit_type': 'skillspector',
                     'risk_level': 'unknown',
                     'risk_signals': [],
-                    'details': dict(sa),
+                    'details': dict(security_audit),
                 },
             )
             upserted += 1
@@ -393,6 +396,11 @@ class SkillManager:
             'Upserted %d/%d SecurityAudit records',
             upserted, len(pending),
         )
+
+    @staticmethod
+    def _should_store_security_audit(record: Skill | SkillVersion) -> bool:
+        """Return whether this scan triggered a new audit for the record."""
+        return bool(getattr(record, '_security_audit_triggered', False))
 
     async def _retry_unscored_security_audits(
         self,

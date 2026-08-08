@@ -15,6 +15,10 @@ if (!(executorCountValue ==~ /[1-9][0-9]*/)) {
     throw new IllegalStateException("JENKINS_NUM_EXECUTORS must be a positive integer")
 }
 def executorCount = executorCountValue.toInteger()
+def quietPeriodValue = System.getenv("JENKINS_QUIET_PERIOD") ?: "1"
+if (!(quietPeriodValue ==~ /0|[1-9][0-9]*/)) {
+    throw new IllegalStateException("JENKINS_QUIET_PERIOD must be a non-negative integer")
+}
 
 // 0. 跳过 setup wizard
 instance.installState = InstallState.INITIAL_SETUP_COMPLETED
@@ -63,7 +67,10 @@ if (job == null) {
 
 // 读取 Pipeline 脚本
 def pipelineFile = new File("/usr/share/jenkins/ref/jenkins-pipeline.groovy")
-def pipelineScript = pipelineFile.text
+def pipelineScript = pipelineFile.text.replace(
+    "__JENKINS_QUIET_PERIOD__",
+    quietPeriodValue,
+)
 job.definition = new CpsFlowDefinition(pipelineScript, true)
 
 // 添加参数
@@ -78,3 +85,4 @@ job.save()
 instance.save()
 
 println "[init] Initialization complete: admin user and skill-scanner job ready"
+println "[init] Jenkins quiet period set to ${quietPeriodValue} seconds"

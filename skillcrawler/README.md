@@ -311,7 +311,7 @@ tags: [search, discovery]
 | `platform` | 优先使用所属 `skill_repos.platform` |
 | `author` | 普通仓库 owner；openEuler 仓库 SIG 名 |
 
-commit 示例：
+单目录查询的等价示例（实际扫描会按 ref 批量查询多个目录）：
 
 ```bash
 git log -1 --format=%H HEAD -- skills/find-skills

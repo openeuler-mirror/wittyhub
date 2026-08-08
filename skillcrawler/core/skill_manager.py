@@ -289,9 +289,15 @@ class SkillManager:
         unique_skill_count = self._count_unique_skills(latest_skills)
         repository_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
         await self.skill_repository.store_skills_and_versions(
-            repo.id, latest_skills, tagged_skills,
+            repo.id,
+            latest_skills,
+            tagged_skills,
+            commit=False,
         )
-        await self._store_to_security_audits(latest_skills, tagged_skills)
+        await self._store_to_security_audits(
+            latest_skills,
+            tagged_skills,
+        )
         return await self.skill_repo_repository.update_skill_repository(
             repo.id,
             repository_commit_id=repository_commit_id,
@@ -321,10 +327,10 @@ class SkillManager:
             detected_branch = self._git_ops.get_cloned_repo_branch(clone_dir)
             if detected_branch:
                 repo = await self.skill_repo_repository.update_skill_repository(
-                    repo.id, branch=detected_branch,
+                    repo.id, branch=detected_branch, commit=False,
                 )
         repo = await self.skill_repo_repository.update_skill_repository(
-            repo.id, local_path=str(clone_dir),
+            repo.id, local_path=str(clone_dir), commit=False,
         )
         return await self._scanner.start_scan(
             repo=repo,

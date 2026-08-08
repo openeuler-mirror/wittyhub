@@ -78,6 +78,7 @@ class SkillRepoRepository:
         forks_count: int | None = None,
         watchers_count: int | None = None,
         popularity_updated_at: datetime | None = None,
+        commit: bool = True,
     ) -> SkillRepoModel:
         values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if source is not None:
@@ -111,7 +112,8 @@ class SkillRepoRepository:
             .values(**values)
         )
         await self.session.flush()
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
 
         repository = await self.get_skill_repository_by_id(repository_id)
         if repository is None:
@@ -431,6 +433,8 @@ class SkillRepository:
         skill_repo_id: uuid.UUID,
         latest_skills: list[Skill],
         tagged_skills: list[SkillVersion],
+        *,
+        commit: bool = True,
     ) -> tuple[list[Skill], list[SkillVersion]]:
         existing_result = await self.session.execute(
             select(Skill)
@@ -491,7 +495,8 @@ class SkillRepository:
         )
         self.session.add_all(tagged_skills)
         await self.session.flush()
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return latest_skills, tagged_skills
 
     def _build_summary_update_values(

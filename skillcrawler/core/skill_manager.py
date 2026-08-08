@@ -345,29 +345,8 @@ class SkillManager:
         tagged_skills: list[SkillVersion],
     ) -> None:
         """Create ``SecurityAudit`` records for async-triggered skills."""
-        pending: list[
-            tuple[uuid.UUID, str, str | None, dict]
-        ] = []
-
-        for skill in latest_skills:
-            if not self._should_store_security_audit(skill):
-                continue
-            pending.append((
-                skill.id,
-                skill.version,
-                skill.commit_id,
-                skill.extra_metadata["security_audit"],
-            ))
-
-        for skill_version in tagged_skills:
-            if not self._should_store_security_audit(skill_version):
-                continue
-            pending.append((
-                skill_version.id,
-                skill_version.version,
-                skill_version.commit_id,
-                skill_version.extra_metadata['security_audit'],
-            ))
+        records: list[Skill | SkillVersion] = [*latest_skills, *tagged_skills]
+        pending = [record for record in records if self._has_new_security_audit(record)]
 
         if not pending:
             return

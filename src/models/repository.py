@@ -339,6 +339,29 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
+    async def load_scan_records(
+        self,
+        skill_repo_id: uuid.UUID,
+    ) -> tuple[dict[str, Skill], dict[tuple[str, str | None], SkillVersion]]:
+        """Load existing latest/version records once for one repository scan."""
+        skills_result = await self.session.execute(
+            select(Skill).where(Skill.skill_repo_id == skill_repo_id)
+        )
+        versions_result = await self.session.execute(
+            select(SkillVersion).where(SkillVersion.skill_repo_id == skill_repo_id)
+        )
+        skills = {
+            skill.skill_id: skill
+            for skill in skills_result.scalars().all()
+            if skill.skill_id
+        }
+        versions = {
+            (version.skill_id, version.version): version
+            for version in versions_result.scalars().all()
+            if version.skill_id
+        }
+        return skills, versions
+
     async def get_category_by_source_url(self, source_url: str) -> str | None:
         result = await self.session.execute(
             select(Skill.category)

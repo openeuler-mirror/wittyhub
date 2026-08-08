@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -31,6 +32,13 @@ if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class SecurityResolution:
+    risk_score: int | None
+    audit_details: dict[str, Any] | None
+    audit_triggered: bool
 
 
 class SkillScanner:
@@ -75,6 +83,19 @@ class SkillScanner:
         repository_git_metadata = repository_git_metadata or {}
         repository_commit_id = as_optional_str(repository_git_metadata.get('commit_id'))
         repository_latest_tags = as_optional_str_list(repository_git_metadata.get('latest_tags')) or []
+        existing_skills, existing_versions = await self.skill_repository.load_scan_records(repo.id)
+        category_cache = {
+            skill_id: skill.category
+            for skill_id, skill in existing_skills.items()
+            if getattr(skill, 'category', None)
+        }
+        commit_cache: dict[tuple[str, str], str | None] = {}
+        self._preload_commit_cache(
+            repo_root,
+            repo.branch or 'HEAD',
+            [to_repository_relative_path(repo_root, path) for path in skill_files],
+            commit_cache,
+        )
         latest_skills = await self._scan_latest_skills(
             repo=repo,
             repo_root=repo_root,
@@ -82,6 +103,9 @@ class SkillScanner:
             repository_commit_id=repository_commit_id,
             repository_latest_tags=repository_latest_tags,
             author=author,
+            existing_skills=existing_skills,
+            category_cache=category_cache,
+            commit_cache=commit_cache,
         )
 
         tagged_skills: list[SkillVersion] = []
@@ -94,6 +118,9 @@ class SkillScanner:
                 repository_commit_id=repository_commit_id,
                 repository_latest_tags=repository_latest_tags,
                 author=author,
+                existing_versions=existing_versions,
+                category_cache=category_cache,
+                commit_cache=commit_cache,
             )
 
         return latest_skills, tagged_skills
@@ -106,9 +133,11 @@ class SkillScanner:
         repository_commit_id: str | None,
         repository_latest_tags: list[str],
         author: str | None,
+        existing_skills: dict[str, Skill],
+        category_cache: dict[str, str | None],
+        commit_cache: dict[tuple[str, str], str | None],
     ) -> list[Skill]:
         discovered: list[Skill] = []
-        category_cache: dict[str, str | None] = {}
         for skill_file in skill_files:
             scan_started_at = time.perf_counter()
             relative_path = to_repository_relative_path(repo_root, skill_file)
@@ -129,6 +158,10 @@ class SkillScanner:
                 author=author,
                 scan_started_at=scan_started_at,
                 input_elapsed=input_elapsed,
+                existing_record=existing_skills.get(
+                    build_public_skill_id(repo, repo_root, skill_file)
+                ),
+                commit_cache=commit_cache,
             )
             _logger.debug(
                 'Discovered skill: skill_id=%s version=%s source=%s',
@@ -146,11 +179,13 @@ class SkillScanner:
         repository_commit_id: str | None,
         repository_latest_tags: list[str],
         author: str | None,
+        existing_versions: dict[tuple[str, str | None], SkillVersion],
+        category_cache: dict[str, str | None],
+        commit_cache: dict[tuple[str, str], str | None],
     ) -> list[SkillVersion]:
         discovered: list[SkillVersion] = []
         seen_versions: set[tuple[str, str]] = set()
         seen_commits: set[tuple[str, str]] = set()
-        category_cache: dict[str, str | None] = {}
         current_skill_paths = {
             to_repository_relative_path(repo_root, skill_file)
             for skill_file in skill_files
@@ -165,6 +200,15 @@ class SkillScanner:
             skill_paths = self.git_ops.list_skill_paths_for_ref(
                 repo_root, ref, should_skip_relative_path,
             )
+            current_tag_skill_paths = [
+                path for path in skill_paths if path in current_skill_paths
+            ]
+            self._preload_commit_cache(
+                repo_root,
+                ref,
+                current_tag_skill_paths,
+                commit_cache,
+            )
             _logger.debug(
                 'Tag skill path listing timing: repo=%s ref=%s paths=%d elapsed=%.3fs',
                 getattr(repo, 'repo_name', None) or repo.url,
@@ -172,9 +216,7 @@ class SkillScanner:
                 len(skill_paths),
                 time.perf_counter() - path_listing_started_at,
             )
-            for relative_path in skill_paths:
-                if relative_path not in current_skill_paths:
-                    continue
+            for relative_path in current_tag_skill_paths:
                 scan_started_at = time.perf_counter()
                 virtual_skill_file = repo_root / relative_path
                 metadata_content = self.git_ops.load_skill_frontmatter_from_git_ref(
@@ -183,6 +225,7 @@ class SkillScanner:
                 if metadata_content is None:
                     continue
                 input_elapsed = time.perf_counter() - scan_started_at
+                skill_id = build_public_skill_id(repo, repo_root, virtual_skill_file)
                 skill = await self._build_skill_record(
                     repo=repo,
                     repo_root=repo_root,
@@ -199,6 +242,8 @@ class SkillScanner:
                     scan_started_at=scan_started_at,
                     input_elapsed=input_elapsed,
                     return_skill_model=False,
+                    existing_record=existing_versions.get((skill_id, version)),
+                    commit_cache=commit_cache,
                 )
                 version_key = (skill.skill_id, skill.version) if skill.version else None
                 commit_key = (skill.skill_id, skill.commit_id) if skill.commit_id else None
@@ -248,6 +293,8 @@ class SkillScanner:
         input_elapsed: float,
         *,
         return_skill_model: bool = True,
+        existing_record: Skill | SkillVersion | None = None,
+        commit_cache: dict[tuple[str, str], str | None] | None = None,
     ) -> Skill | SkillVersion:
         prepare_started_at = time.perf_counter()
         metadata, content = metadata_content
@@ -269,6 +316,7 @@ class SkillScanner:
             repo_root=repo_root,
             relative_path=relative_path,
             ref=ref,
+            commit_cache=commit_cache,
         ) or commit_id
         git_commit_elapsed = time.perf_counter() - git_commit_started_at
 
@@ -289,16 +337,16 @@ class SkillScanner:
         category_elapsed = time.perf_counter() - category_started_at
 
         security_started_at = time.perf_counter()
-        risk_score, audit_details = await self._resolve_security_result(
+        security = await self._resolve_security_result(
             repo=repo,
             relative_path=relative_path,
             skill_id=skill_id,
             version=version,
             commit_id=effective_commit_id,
-            return_skill_model=return_skill_model,
+            existing_record=existing_record,
         )
-        if audit_details:
-            merged_metadata['security_audit'] = audit_details
+        if security.audit_details:
+            merged_metadata['security_audit'] = security.audit_details
         security_elapsed = time.perf_counter() - security_started_at
 
         assemble_started_at = time.perf_counter()
@@ -318,12 +366,13 @@ class SkillScanner:
             'platform': as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),
             'extra_metadata': merged_metadata,
             'content': content or None,
-            'risk_score': risk_score,
+            'risk_score': security.risk_score,
             'created_at': datetime.now(timezone.utc),
             'updated_at': datetime.now(timezone.utc),
         }
         model_class = Skill if return_skill_model else SkillVersion
         record = model_class(**common)
+        setattr(record, '_security_audit_triggered', security.audit_triggered)
         assemble_elapsed = time.perf_counter() - assemble_started_at
         total_elapsed = time.perf_counter() - scan_started_at
         accounted_elapsed = (
@@ -359,16 +408,8 @@ class SkillScanner:
         skill_id: str,
         version: str | None,
         commit_id: str | None,
-        return_skill_model: bool,
-    ) -> tuple[int | None, dict[str, Any] | None]:
-        if return_skill_model:
-            existing_record = await self.skill_repository.get_by_skill_id(skill_id)
-        else:
-            existing_record = await self.skill_repository.get_version_by_skill_id_and_version(
-                skill_id,
-                version,
-            )
-
+        existing_record: Skill | SkillVersion | None,
+    ) -> SecurityResolution:
         existing_metadata = (
             dict(existing_record.extra_metadata or {})
             if existing_record is not None
@@ -381,9 +422,6 @@ class SkillScanner:
             and existing_record.risk_score is not None
         ):
             audit_details = existing_metadata.get('security_audit')
-            reused_audit_details = dict(audit_details) if audit_details else None
-            if reused_audit_details is not None:
-                reused_audit_details['skillspector_reused'] = True
             _logger.debug(
                 'Reused security result: skill_id=%s version=%s commit_id=%s score=%s',
                 skill_id,
@@ -391,7 +429,11 @@ class SkillScanner:
                 commit_id,
                 existing_record.risk_score,
             )
-            return existing_record.risk_score, reused_audit_details
+            return SecurityResolution(
+                risk_score=existing_record.risk_score,
+                audit_details=dict(audit_details) if audit_details else None,
+                audit_triggered=False,
+            )
 
         report = await self._audit_skill_security(
             repo=repo,
@@ -399,7 +441,16 @@ class SkillScanner:
             commit_id=commit_id,
             skill_id=skill_id,
         )
-        return self._extract_audit_artifacts(report)
+        risk_score, audit_details = self._extract_audit_artifacts(report)
+        return SecurityResolution(
+            risk_score=risk_score,
+            audit_details=audit_details,
+            audit_triggered=bool(
+                audit_details
+                and audit_details.get('skillspector_async')
+                and audit_details.get('skillspector_build_number') is not None
+            ),
+        )
 
     def _get_skill_directory_commit_id(
         self,
@@ -407,15 +458,49 @@ class SkillScanner:
         repo_root: Path,
         relative_path: str,
         ref: str | None,
+        commit_cache: dict[tuple[str, str], str | None] | None = None,
     ) -> str | None:
         skill_dir = Path(relative_path).parent.as_posix()
         if skill_dir == '.':
             skill_dir = ''
-        return self.git_ops.get_latest_commit_id_for_path(
+        cache_key = (ref or 'HEAD', skill_dir)
+        if commit_cache is not None and cache_key in commit_cache:
+            return commit_cache[cache_key]
+        commit_id = self.git_ops.get_latest_commit_id_for_path(
             repo_root,
             skill_dir,
             ref=ref or 'HEAD',
         )
+        if commit_cache is not None:
+            commit_cache[cache_key] = commit_id
+        return commit_id
+
+    def _preload_commit_cache(
+        self,
+        repo_root: Path,
+        ref: str,
+        skill_paths: list[str],
+        commit_cache: dict[tuple[str, str], str | None],
+    ) -> None:
+        skill_dirs = list(dict.fromkeys(
+            '' if Path(path).parent.as_posix() == '.' else Path(path).parent.as_posix()
+            for path in skill_paths
+        ))
+        missing_dirs = [
+            skill_dir
+            for skill_dir in skill_dirs
+            if (ref, skill_dir) not in commit_cache
+        ]
+        if not missing_dirs:
+            return
+        commits = self.git_ops.get_latest_commit_ids_for_paths(
+            repo_root,
+            missing_dirs,
+            ref=ref,
+        )
+        for skill_dir in missing_dirs:
+            normalized_dir = skill_dir or '.'
+            commit_cache[(ref, skill_dir)] = commits.get(normalized_dir)
 
     async def _classify_skill_category(
         self,
@@ -429,11 +514,6 @@ class SkillScanner:
     ) -> str | None:
         if skill_id in category_cache:
             return category_cache[skill_id]
-
-        existing_category = await self.skill_repository.get_category_by_skill_id(skill_id)
-        if existing_category:
-            category_cache[skill_id] = existing_category
-            return existing_category
 
         if self.category_classifier is None:
             category = as_optional_str(metadata.get('category'))

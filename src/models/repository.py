@@ -631,7 +631,6 @@ class SkillRepository:
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
             return None
-        update_data["updated_at"] = datetime.now(timezone.utc)
         await self.session.execute(
             update(Skill).where(Skill.id == existing.id).values(**update_data)
         )

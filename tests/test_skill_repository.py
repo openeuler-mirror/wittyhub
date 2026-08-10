@@ -26,6 +26,50 @@ class TestSkillRepositoryUnit:
         assert SkillRepoModel is not None
         assert SkillRepoRepository is not None
 
+    @pytest.mark.asyncio
+    async def test_increment_download_does_not_update_skill_updated_at(self):
+        from sqlalchemy.dialects import postgresql
+
+        from src.models.repository import SkillRepository
+
+        skill = SimpleNamespace(id=uuid.uuid4())
+        session = AsyncMock()
+        repo = SkillRepository(session)
+        repo.get_by_skill_id = AsyncMock(return_value=skill)
+
+        assert await repo.increment_download("github/acme/example") is True
+
+        statement = session.execute.await_args.args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        assert "download_count=(skills.download_count +" in sql
+        assert "updated_at=" not in sql
+
+    @pytest.mark.asyncio
+    async def test_update_only_changes_updated_at_when_explicitly_requested(self):
+        from sqlalchemy.dialects import postgresql
+
+        from src.models.repository import SkillRepository
+
+        skill = SimpleNamespace(id=uuid.uuid4())
+        session = AsyncMock()
+        repo = SkillRepository(session)
+        repo.get_by_skill_id = AsyncMock(side_effect=[skill, skill, skill, skill])
+
+        await repo.update("github/acme/example", {"risk_score": 10})
+        implicit_statement = session.execute.await_args_list[0].args[0]
+        implicit_sql = str(implicit_statement.compile(dialect=postgresql.dialect()))
+        assert "risk_score=" in implicit_sql
+        assert "updated_at=" not in implicit_sql
+
+        requested_time = datetime.now(timezone.utc)
+        await repo.update(
+            "github/acme/example",
+            {"risk_score": 20, "updated_at": requested_time},
+        )
+        explicit_statement = session.execute.await_args_list[1].args[0]
+        explicit_sql = str(explicit_statement.compile(dialect=postgresql.dialect()))
+        assert "updated_at=" in explicit_sql
+
     def test_build_public_skill_id_uses_relative_skill_path(self):
         from skillcrawler.core.skill_parser import build_public_skill_id
 

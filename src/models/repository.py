@@ -199,6 +199,8 @@ class SkillRepository:
         source: str | None = None,
         security_level: list[str] | None = None,
     ):
+        # 全局规则：排除未检测（risk_score 为空）的 Skill，不进入列表
+        query = query.where(skill_model.risk_score.is_not(None))
         if category:
             conditions = []
             normal_cats = []
@@ -243,6 +245,8 @@ class SkillRepository:
     def _latest_unique_skills_subquery(self):
         return (
             select(Skill)
+            # 全局规则：统计排除未检测（risk_score 为空）的 Skill，与列表保持一致
+            .where(Skill.risk_score.is_not(None))
             .order_by(desc(Skill.updated_at), desc(Skill.created_at))
             .subquery()
         )

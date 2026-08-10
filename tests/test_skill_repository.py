@@ -614,6 +614,7 @@ class TestSearchService:
             platform=None,
             tags=None,
             scope="summary",
+            security_level=None,
         )
         service._vector_search.assert_not_awaited()
         assert result["results"] == [{"skill_id": "skill-1"}]

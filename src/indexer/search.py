@@ -41,6 +41,8 @@ class SearchService:
         tags: list[str] | None = None,
         security_level: list[str] | None = None,
     ):
+        # 全局规则：排除未检测（risk_score 为空）的 Skill，不进入搜索
+        query = query.where(Skill.risk_score.is_not(None))
         if category:
             conditions = []
             normal_cats = []
@@ -211,9 +213,11 @@ class SearchService:
                 security_level=security_level,
             )
         else:
+            # _text_search 已在 SQL 层完成 limit/offset 分页（见上方 limit/offset 传参），
+            # 这里不能再按 offset 二次切片，否则第 2 页（offset>0）会得到空列表。
             deduped = self._dedupe_skill_results(text_results["results"])
             return {
-                "results": deduped[offset:offset + limit],
+                "results": deduped,
                 "total": text_results["total"],
                 "query": query,
                 "skip": offset,
@@ -348,7 +352,7 @@ class SearchService:
     ) -> dict[str, Any]:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
-        where_clauses = ["embedding IS NOT NULL"]
+        where_clauses = ["embedding IS NOT NULL", "risk_score IS NOT NULL"]
         params: dict[str, Any] = {"limit": limit, "offset": offset, "embedding": embedding_str}
 
         if category:

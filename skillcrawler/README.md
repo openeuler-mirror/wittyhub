@@ -74,7 +74,6 @@ src/models/
 | `commit_id` | `SKILL.md` 所在 skill 文件夹的最新 commit，不是 repo HEAD |
 | `platform` | 优先继承 `skill_repos.platform` |
 | `author` | 普通仓库来自仓库 owner；openEuler 仓库来自 SIG 名称 |
-| `extra_metadata.skill_directory_commit_id` | 与 `skills.commit_id` 相同，作为元数据保留 |
 
 注意：repo HEAD commit 存在 `skill_repos.repository_commit_id`，不要写入 `skills.extra_metadata.repository_commit_id`。
 
@@ -131,7 +130,6 @@ python skillcrawler/main.py query --id <repo_id>
 | `-u` / `--url` | 扫描单个仓库 URL，不依赖配置列表 |
 | `-b` / `--branch` | 与 `--url` 搭配使用，指定分支 |
 | `-i` / `--id` | 重新 discover 指定数据库仓库记录 |
-| `-r` / `--refresh` | 刷新数据库中已有的 `skill_repos`，不读取配置列表 |
 | `-f` / `--force` | 仅用于已有 repo 场景：即使状态是 `discovering` 也允许重跑；不会跳过 commit unchanged 优化 |
 
 默认扫描全部配置列表：
@@ -169,13 +167,6 @@ python skillcrawler/main.py discover --url https://gitcode.com/openeuler/wittyhu
 
 ```bash
 python skillcrawler/main.py discover --id <repo_id>
-```
-
-刷新数据库已有 repo：
-
-```bash
-python skillcrawler/main.py discover --refresh
-python skillcrawler/main.py discover --refresh --platform personal
 ```
 
 ### delete
@@ -232,12 +223,10 @@ flowchart TD
     B -->|默认 / --platform| C[读取 skills/skill-repos.yaml]
     B -->|--url| D[构造单仓库请求]
     B -->|--id| E[读取指定 skill_repos 记录]
-    B -->|--refresh| F[读取数据库已有 skill_repos]
 
     C --> G[clone / fetch 本地 Git 仓库]
     D --> G
     E --> G
-    F --> G
 
     G --> H{是否存在可扫描 SKILL.md}
     H -->|否| I[跳过；如果已有记录则删除]
@@ -247,11 +236,11 @@ flowchart TD
     K -->|是| L[标记 unchanged；不扫描 skills]
     K -->|否| M[补全 Git 历史]
 
-    M --> N[扫描 latest SKILL.md]
-    N --> O[扫描最新 tag 版本]
-    O --> P[按 skill_id 同步 skills]
-    P --> Q[重建 skill_versions]
-    Q --> R[更新 skill_repos.repository_commit_id / skill_num / status]
+    M --> N[每个 ref 批量计算 Skill 目录 commit]
+    N --> O[扫描 latest SKILL.md]
+    O --> P[扫描最新 tag 版本]
+    P --> Q[预加载并同步 skills / skill_versions]
+    Q --> R[同一事务写安全审计和仓库最终状态]
 ```
 
 核心行为：
@@ -322,7 +311,7 @@ tags: [search, discovery]
 | `platform` | 优先使用所属 `skill_repos.platform` |
 | `author` | 普通仓库 owner；openEuler 仓库 SIG 名 |
 
-commit 示例：
+单目录查询的等价示例（实际扫描会按 ref 批量查询多个目录）：
 
 ```bash
 git log -1 --format=%H HEAD -- skills/find-skills

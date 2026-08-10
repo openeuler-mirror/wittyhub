@@ -107,6 +107,7 @@ services:
       JENKINS_OPTS: --httpPort=8083
       JENKINS_ADMIN_PASS: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:?SECURITY__SKILLSPECTOR_JENKINS_TOKEN is required}
       JENKINS_NUM_EXECUTORS: ${JENKINS_NUM_EXECUTORS:-10}
+      JENKINS_QUIET_PERIOD: ${JENKINS_QUIET_PERIOD:-5}
       WITTYHUB_REPOSITORY_ROOT: /opt/wittyhub/skill-repositories
     volumes:
       - jenkins-data:/var/jenkins_home

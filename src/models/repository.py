@@ -78,6 +78,7 @@ class SkillRepoRepository:
         forks_count: int | None = None,
         watchers_count: int | None = None,
         popularity_updated_at: datetime | None = None,
+        commit: bool = True,
     ) -> SkillRepoModel:
         values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
         if source is not None:
@@ -111,7 +112,8 @@ class SkillRepoRepository:
             .values(**values)
         )
         await self.session.flush()
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
 
         repository = await self.get_skill_repository_by_id(repository_id)
         if repository is None:
@@ -339,6 +341,29 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
+    async def load_scan_records(
+        self,
+        skill_repo_id: uuid.UUID,
+    ) -> tuple[dict[str, Skill], dict[tuple[str, str | None], SkillVersion]]:
+        """Load existing latest/version records once for one repository scan."""
+        skills_result = await self.session.execute(
+            select(Skill).where(Skill.skill_repo_id == skill_repo_id)
+        )
+        versions_result = await self.session.execute(
+            select(SkillVersion).where(SkillVersion.skill_repo_id == skill_repo_id)
+        )
+        skills = {
+            skill.skill_id: skill
+            for skill in skills_result.scalars().all()
+            if skill.skill_id
+        }
+        versions = {
+            (version.skill_id, version.version): version
+            for version in versions_result.scalars().all()
+            if version.skill_id
+        }
+        return skills, versions
+
     async def get_category_by_source_url(self, source_url: str) -> str | None:
         result = await self.session.execute(
             select(Skill.category)
@@ -408,6 +433,8 @@ class SkillRepository:
         skill_repo_id: uuid.UUID,
         latest_skills: list[Skill],
         tagged_skills: list[SkillVersion],
+        *,
+        commit: bool = True,
     ) -> tuple[list[Skill], list[SkillVersion]]:
         existing_result = await self.session.execute(
             select(Skill)
@@ -468,7 +495,8 @@ class SkillRepository:
         )
         self.session.add_all(tagged_skills)
         await self.session.flush()
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return latest_skills, tagged_skills
 
     def _build_summary_update_values(
@@ -612,7 +640,6 @@ class SkillRepository:
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
             return None
-        update_data["updated_at"] = datetime.now(timezone.utc)
         await self.session.execute(
             update(Skill).where(Skill.id == existing.id).values(**update_data)
         )

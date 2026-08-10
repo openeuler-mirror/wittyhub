@@ -4,7 +4,7 @@ pipeline {
     options {
         timestamps()
         skipDefaultCheckout()
-        quietPeriod(1)
+        quietPeriod(__JENKINS_QUIET_PERIOD__)
         buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '10000'))
     }
 

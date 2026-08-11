@@ -24,6 +24,28 @@ class TestSkillsTelemetry:
 
         assert skill_id == "github/vercel-labs/agent-skills/skills/deploy-to-vercel"
 
+    def test_build_skill_id_from_telemetry_root_skill_matches_crawler(self):
+        # Root-level SKILL.md resolves to the repo slug — same as the crawler
+        # (build_public_skill_id), so the lookup hits the same DB record.
+        skill_id = build_skill_id_from_telemetry(
+            "github",
+            "acme/agent-skills",
+            "agent-skills",
+            {"agent-skills": "SKILL.md"},
+        )
+
+        assert skill_id == "github/acme/agent-skills/agent-skills"
+
+    def test_build_skill_id_from_telemetry_gitcode_matches_crawler(self):
+        skill_id = build_skill_id_from_telemetry(
+            "gitcode",
+            "openeuler/yuanrong",
+            "gitcode-api",
+            {"gitcode-api": ".skills/gitcode-api/SKILL.md"},
+        )
+
+        assert skill_id == "gitcode/openeuler/yuanrong/.skills/gitcode-api"
+
     def test_process_install_telemetry_increments_each_matched_skill(self):
         service = TelemetryService(AsyncMock())
         service.skill_repo = AsyncMock()

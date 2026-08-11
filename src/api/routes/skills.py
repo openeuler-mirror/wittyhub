@@ -1,4 +1,5 @@
 from typing import Annotated
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -14,9 +15,14 @@ from src.api.schemas.skill import (
     SkillVersionsResponse,
 )
 from src.api.services.security import SecurityService
-from src.api.services.telemetry import TelemetryService
+from src.api.services.telemetry import TelemetryService, build_skill_id_from_telemetry
 from src.core.database import get_db
-from src.models.repository import DownloadHistoryRepository, SkillRepoRepository, SkillRepository
+from src.models.repository import (
+    DownloadHistoryRepository,
+    SecurityAuditRepository,
+    SkillRepoRepository,
+    SkillRepository,
+)
 from src.storage.downloader import (
     DownloadManager,
     SkillArchiveConflictError,
@@ -48,6 +54,70 @@ async def receive_telemetry(
     telemetry_service = TelemetryService(db)
     matched_skill_ids = await telemetry_service.process(params)
     return {"ok": True, "matched_skill_ids": matched_skill_ids}
+
+
+@router.get("/audit")
+async def batch_audit_skills(
+    source: str,
+    skills: str,
+    source_type: str = "github",
+    skill_files: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch security audit lookup for the CLI install flow.
+
+    Derives each skill_id the same way the install telemetry does (including
+    the optional ``skill_files`` map), so the skills that get download-counted
+    and the skills whose audit is displayed are guaranteed to be the same
+    records. Returns the latest audit per skill, keyed by the requested skill
+    name; never fails (advisory info only).
+    """
+    skill_names = [s.strip() for s in skills.split(",") if s.strip()]
+    if not skill_names:
+        return {}
+
+    skill_files_map: dict[str, str] | None = None
+    if skill_files:
+        try:
+            parsed_skill_files = json.loads(skill_files)
+        except json.JSONDecodeError:
+            parsed_skill_files = None
+        if isinstance(parsed_skill_files, dict):
+            skill_files_map = {
+                str(key): str(value)
+                for key, value in parsed_skill_files.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
+
+    name_to_sid = {
+        name: build_skill_id_from_telemetry(source_type, source, name, skill_files_map)
+        for name in skill_names
+    }
+
+    repo = SkillRepository(db)
+    audit_repo = SecurityAuditRepository(db)
+    skills_map = {
+        s.skill_id: s for s in await repo.list_by_skill_ids([sid for sid in name_to_sid.values() if sid])
+    }
+
+    audits_map = (
+        await audit_repo.get_latest_by_resources("skill", [s.id for s in skills_map.values()])
+        if skills_map
+        else {}
+    )
+
+    result: dict[str, dict] = {}
+    for name in skill_names:
+        sid = name_to_sid[name]
+        skill = skills_map.get(sid) if sid else None
+        audit = audits_map.get(skill.id) if skill else None
+        result[name] = {
+            "risk_level": audit.risk_level if audit else "unknown",
+            "risk_score": skill.risk_score if skill else None,
+            "risk_signals": audit.risk_signals if audit else [],
+            "audited_at": audit.audited_at.isoformat() if audit and audit.audited_at else None,
+        }
+    return result
 
 
 def skill_to_response(skill) -> SkillResponse:

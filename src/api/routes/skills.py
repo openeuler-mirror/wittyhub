@@ -16,6 +16,7 @@ from src.api.schemas.skill import (
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
 from src.core.database import get_db
+from src.core.rate_limit import limiter
 from src.models.repository import (
     DownloadHistoryRepository,
     SkillRepoRepository,
@@ -34,6 +35,7 @@ SkillIdPath = Annotated[str, Path(min_length=1, max_length=255)]
 
 
 @router.get("/telemetry")
+@limiter.limit("10/minute")
 async def receive_telemetry(
     request: Request,
     db: AsyncSession = Depends(get_db),

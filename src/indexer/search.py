@@ -308,7 +308,7 @@ class SearchService:
         # 10x candidate overfetch loaded up to 240 rows for a 12-card page.
         candidate_query = (
             base_query
-            .order_by(text("rank desc"), Skill.download_count.desc(), desc(Skill.updated_at), desc(Skill.created_at))
+            .order_by(rank_expression.desc(), Skill.download_count.desc(), desc(Skill.updated_at), desc(Skill.created_at))
             .limit(limit)
             .offset(offset)
         )

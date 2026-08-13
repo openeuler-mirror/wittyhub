@@ -12,11 +12,11 @@ class SkillBase(BaseModel):
     commit_id: str | None = Field(None, max_length=40)
     author: str | None = Field(None, max_length=255)
     source: str = Field(..., max_length=50)
-    source_url: str = Field(..., min_length=1)
+    source_url: str = Field(..., min_length=1, max_length=2048)
     category: str | None = Field(None, max_length=100)
-    tags: list[str] | None = None
+    tags: list[str] | None = Field(None, max_length=100)
     platform: str | None = Field(None, max_length=100)
-    content: str | None = None
+    content: str | None = Field(None, max_length=2_000_000)
     extra_metadata: dict[str, Any] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("extra_metadata", "metadata"),

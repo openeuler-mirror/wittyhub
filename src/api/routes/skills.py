@@ -1,7 +1,7 @@
 from typing import Annotated
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from src.storage.downloader import (
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
+SkillIdPath = Annotated[str, Path(min_length=1, max_length=255)]
 
 
 @router.get("/telemetry")
@@ -85,10 +86,10 @@ def skill_to_response(skill) -> SkillResponse:
 async def list_skills(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    category: str | None = None,
-    platform: str | None = None,
-    tags: str | None = None,
-    security_level: str | None = None,
+    category: Annotated[str | None, Query(max_length=1000)] = None,
+    platform: Annotated[str | None, Query(max_length=500)] = None,
+    tags: Annotated[str | None, Query(max_length=2000)] = None,
+    security_level: Annotated[str | None, Query(max_length=500)] = None,
     sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "updated_at",
     sort_period: Annotated[str | None, Query(pattern="^(week|month)$")] = None,
     db: AsyncSession = Depends(get_db),
@@ -119,7 +120,7 @@ async def list_skills(
 
 @router.get("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
 async def audit_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     db: AsyncSession = Depends(get_db),
 ):
     repo = SkillRepository(db)
@@ -152,7 +153,7 @@ async def audit_skill(
 
 @router.post("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
 async def trigger_skill_audit(
-    skill_id: str,
+    skill_id: SkillIdPath,
     scanners: str | None = Query(None, description="Comma-separated: skillspector"),
     async_mode: bool = Query(False, description="Trigger scan without waiting for result"),
     db: AsyncSession = Depends(get_db),
@@ -211,7 +212,7 @@ async def trigger_skill_audit(
 
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
 async def get_skill_versions(
-    skill_id: str,
+    skill_id: SkillIdPath,
     db: AsyncSession = Depends(get_db),
 ):
     skill_repo = SkillRepository(db)
@@ -245,7 +246,7 @@ async def get_skill_versions(
     },
 )
 async def download_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
@@ -288,7 +289,7 @@ async def download_skill(
 
 
 @router.get("/{skill_id:path}", response_model=SkillResponse | ErrorResponse)
-async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
+async def get_skill(skill_id: SkillIdPath, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
     skill = await repo.get_by_skill_id(skill_id)
 
@@ -366,7 +367,7 @@ async def create_skill(
 
 
 @router.delete("/{skill_id:path}")
-async def delete_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_skill(skill_id: SkillIdPath, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
     deleted = await repo.delete(skill_id)
 

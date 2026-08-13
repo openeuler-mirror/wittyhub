@@ -3,6 +3,11 @@ import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from skillcrawler.core.skill_parser import (
+    build_public_skill_id_from_relative_path,
+    extract_owner_repo,
+)
+
 from src.models.repository import SkillRepository
 
 
@@ -13,20 +18,6 @@ def _slugify_telemetry_value(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9._-]+", "-", lowered)
     normalized = re.sub(r"-{2,}", "-", normalized)
     return normalized.strip("-")
-
-
-def _derive_telemetry_skill_path(skill_name: str, skill_files: dict[str, str] | None) -> str:
-    if skill_files:
-        skill_path = skill_files.get(skill_name)
-        if skill_path:
-            normalized_path = skill_path.strip().replace("\\", "/").rstrip("/")
-            if normalized_path.lower() == "skill.md":
-                fallback_slug = _slugify_telemetry_value(skill_name)
-                if fallback_slug:
-                    return fallback_slug
-            if normalized_path.lower().endswith("/skill.md"):
-                return normalized_path[: -len("/SKILL.md")]
-    return _slugify_telemetry_value(skill_name)
 
 
 def build_skill_id_from_telemetry(
@@ -40,17 +31,31 @@ def build_skill_id_from_telemetry(
     if not source:
         return None
 
-    segments = [segment for segment in source.strip("/").split("/") if segment]
-    if len(segments) < 2:
+    try:
+        owner_repo = extract_owner_repo(source)
+    except ValueError:
         return None
 
-    owner = _slugify_telemetry_value(segments[-2])
-    repo = _slugify_telemetry_value(segments[-1])
-    skill_path = _derive_telemetry_skill_path(skill_name, skill_files)
-    if not owner or not repo or not skill_path:
-        return None
+    # Prefer the repo-relative SKILL.md path. It uses the exact same
+    # derivation as the crawler (skill_parser.build_public_skill_id) that
+    # wrote the skill records, so install telemetry/audit lookups hit the
+    # same skill_id that exists in the database.
+    if skill_files:
+        relative_path = skill_files.get(skill_name)
+        if relative_path:
+            normalized_path = relative_path.strip().replace("\\", "/").rstrip("/")
+            try:
+                return build_public_skill_id_from_relative_path(
+                    source_type, owner_repo, normalized_path
+                )
+            except ValueError:
+                pass
 
-    return f"{source_type}/{owner}/{repo}/{skill_path}"
+    # No path info available — fall back to the skill name slug.
+    skill_path = _slugify_telemetry_value(skill_name)
+    if not skill_path:
+        return None
+    return f"{source_type}/{owner_repo}/{skill_path}"
 
 
 class TelemetryService:

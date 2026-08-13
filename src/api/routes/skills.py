@@ -15,6 +15,7 @@ from src.api.schemas.skill import (
 )
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
+from src.core.auth import require_admin_token
 from src.core.database import get_db
 from src.core.rate_limit import limiter
 from src.models.repository import (
@@ -153,7 +154,11 @@ async def audit_skill(
     return {"error": "No audit found"}
 
 
-@router.post("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
+@router.post(
+    "/{skill_id:path}/audit",
+    response_model=SecurityAuditResponse | ErrorResponse,
+    dependencies=[Depends(require_admin_token)],
+)
 async def trigger_skill_audit(
     skill_id: SkillIdPath,
     scanners: str | None = Query(None, description="Comma-separated: skillspector"),
@@ -301,7 +306,12 @@ async def get_skill(skill_id: SkillIdPath, db: AsyncSession = Depends(get_db)):
     return skill_to_response(skill)
 
 
-@router.post("/", response_model=SkillResponse, status_code=201)
+@router.post(
+    "/",
+    response_model=SkillResponse,
+    status_code=201,
+    dependencies=[Depends(require_admin_token)],
+)
 async def create_skill(
     skill_data: SkillCreate,
     request: Request,
@@ -368,7 +378,10 @@ async def create_skill(
     return skill_to_response(skill)
 
 
-@router.delete("/{skill_id:path}")
+@router.delete(
+    "/{skill_id:path}",
+    dependencies=[Depends(require_admin_token)],
+)
 async def delete_skill(skill_id: SkillIdPath, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
     deleted = await repo.delete(skill_id)

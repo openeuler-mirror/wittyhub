@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.ai.embedding import generate_embeddings, prepare_skill_text
+from src.core.auth import require_admin_token
 from src.core.database import get_db
 from src.core.config import  get_settings
 from src.indexer.search import SearchService
@@ -60,7 +61,7 @@ async def search(
     return results
 
 
-@router.post("/reindex")
+@router.post("/reindex", dependencies=[Depends(require_admin_token)])
 async def reindex(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -86,7 +87,10 @@ async def reindex(
     }
 
 
-@router.post("/reindex/{skill_id:path}")
+@router.post(
+    "/reindex/{skill_id:path}",
+    dependencies=[Depends(require_admin_token)],
+)
 async def reindex_skill(
     skill_id: Annotated[str, Path(min_length=1, max_length=255)],
     db: AsyncSession = Depends(get_db),

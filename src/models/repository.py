@@ -322,15 +322,6 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_by_skill_ids(self, skill_ids: list[str]) -> list[Skill]:
-        """Fetch multiple skills by skill_id in one query (used by batch audit)."""
-        if not skill_ids:
-            return []
-        result = await self.session.execute(
-            select(Skill).where(Skill.skill_id.in_(skill_ids))
-        )
-        return list(result.scalars().all())
-
     async def get_with_repository_by_skill_id(self, skill_id: str) -> Skill | None:
         result = await self.session.execute(
             select(Skill)

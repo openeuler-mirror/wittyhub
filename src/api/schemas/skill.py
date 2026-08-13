@@ -92,6 +92,7 @@ class SecurityAuditResponse(BaseModel):
     commit_id: str | None = None
     audit_type: str
     risk_level: str
+    risk_score: int | None = None
     risk_signals: list[RiskSignalSchema]
     details: dict[str, Any]
     audited_at: datetime

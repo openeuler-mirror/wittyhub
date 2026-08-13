@@ -16,7 +16,11 @@ from src.api.schemas.skill import (
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
 from src.core.database import get_db
-from src.models.repository import DownloadHistoryRepository, SkillRepoRepository, SkillRepository
+from src.models.repository import (
+    DownloadHistoryRepository,
+    SkillRepoRepository,
+    SkillRepository,
+)
 from src.storage.downloader import (
     DownloadManager,
     SkillArchiveConflictError,
@@ -137,6 +141,7 @@ async def audit_skill(
             commit_id=latest_audit.commit_id,
             audit_type=latest_audit.audit_type,
             risk_level=latest_audit.risk_level,
+            risk_score=skill.risk_score,
             risk_signals=latest_audit.risk_signals,
             details=latest_audit.details,
             audited_at=latest_audit.audited_at,

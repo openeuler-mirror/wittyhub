@@ -66,6 +66,28 @@ def normalize_repository_browse_base_url(repo_url: str) -> str | None:
 # ── Skill ID generation ────────────────────────────────────────────
 
 
+def build_public_skill_id_from_relative_path(
+    source: str,
+    owner_repo: str,
+    relative_path: str,
+) -> str:
+    """Derive a public skill_id from a normalized owner/repo and the
+    repository-relative path of the SKILL.md file.
+
+    Shared by the crawler (which writes the skill records) and the install
+    audit lookup (which reads them back), so both use the exact same skill_id
+    in the database. Root-level SKILL.md resolves to the repo slug, matching
+    the crawler's historical behaviour.
+    """
+    if relative_path == 'SKILL.md':
+        skill_path = owner_repo.rsplit('/', 1)[-1]
+    elif relative_path.endswith('/SKILL.md'):
+        skill_path = relative_path.removesuffix('/SKILL.md')
+    else:
+        raise ValueError(f'Expected a SKILL.md file, got: {relative_path}')
+    return f'{source}/{owner_repo}/{skill_path}'
+
+
 def build_public_skill_id(
     repo: "SkillRepoModel",
     repo_root: Path,
@@ -73,13 +95,7 @@ def build_public_skill_id(
 ) -> str:
     owner_repo = extract_owner_repo(repo.url)
     relative_path = to_repository_relative_path(repo_root, skill_file)
-    if relative_path == 'SKILL.md':
-        skill_path = owner_repo.rsplit('/', 1)[-1]
-    elif relative_path.endswith('/SKILL.md'):
-        skill_path = relative_path.removesuffix('/SKILL.md')
-    else:
-        raise ValueError(f'Expected a SKILL.md file, got: {skill_file}')
-    return f'{repo.source}/{owner_repo}/{skill_path}'
+    return build_public_skill_id_from_relative_path(repo.source, owner_repo, relative_path)
 
 
 def extract_owner_repo(repo_url: str | None) -> str:

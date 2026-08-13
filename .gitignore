@@ -8,3 +8,5 @@ __pycache__/
 *.log
 .vscode
 tmp/
+.reasonix/
+reasonix.toml

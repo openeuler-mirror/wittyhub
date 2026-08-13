@@ -305,6 +305,13 @@ async def create_skill(
     async_mode: bool = Query(False, description="Trigger security audit without waiting for result"),
     db: AsyncSession = Depends(get_db),
 ):
+    # Validate source_url for SSRF protection
+    from src.security.detector import validate_git_url
+    if skill_data.source_url:
+        is_valid, error_msg = validate_git_url(skill_data.source_url)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid source URL: {error_msg}")
+
     repo = SkillRepository(db)
 
     existing = await repo.get_by_skill_id(skill_data.skill_id)

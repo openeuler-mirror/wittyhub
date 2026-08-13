@@ -23,6 +23,19 @@ from src.core.config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+ALLOWED_GIT_HOSTS = frozenset({
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "gitea.io",
+    "gitee.com",
+    "gitcode.com",
+    "codeberg.org",
+    "git.sr.ht",
+})
+ALLOWED_GIT_SCHEMES = frozenset({"http", "https", "git", "ssh"})
+MAX_GIT_URL_LENGTH = 2048
+
 
 def validate_git_url(url: str) -> tuple[bool, str]:
     """Validate a git URL for SSRF protection.
@@ -32,8 +45,14 @@ def validate_git_url(url: str) -> tuple[bool, str]:
     tuple[bool, str]
         (is_valid, error_message)
     """
-    if not url:
+    if not isinstance(url, str) or not url.strip():
         return False, "URL cannot be empty"
+
+    url = url.strip()
+    if len(url) > MAX_GIT_URL_LENGTH:
+        return False, "URL is too long"
+    if any(ord(char) < 0x20 or ord(char) == 0x7f for char in url):
+        return False, "URL contains control characters"
 
     # 1. Parse URL
     try:
@@ -42,44 +61,55 @@ def validate_git_url(url: str) -> tuple[bool, str]:
         return False, f"Invalid URL format: {str(e)}"
 
     # 2. Protocol validation
-    if parsed.scheme not in ("http", "https", "git", "ssh"):
+    scheme = parsed.scheme.lower()
+    if scheme not in ALLOWED_GIT_SCHEMES:
         return False, f"Unsupported protocol: {parsed.scheme}"
 
+    if parsed.fragment:
+        return False, "URL fragments are not allowed"
+    if scheme in {"http", "https", "git"} and (parsed.username or parsed.password):
+        return False, "Credentials in URL are not allowed"
+    if scheme == "ssh" and parsed.password:
+        return False, "Passwords in URL are not allowed"
+
     # 3. Extract hostname
-    hostname = parsed.hostname or parsed.netloc.split(":", 1)[0]
+    try:
+        hostname = (parsed.hostname or "").rstrip(".").encode("idna").decode("ascii").lower()
+        port = parsed.port
+    except (UnicodeError, ValueError):
+        return False, "Invalid hostname or port"
 
     if not hostname:
         return False, "Could not extract hostname from URL"
 
+    allowed_ports = {
+        "http": {None, 80},
+        "https": {None, 443},
+        "git": {None, 9418},
+        "ssh": {None, 22},
+    }
+    if port not in allowed_ports[scheme]:
+        return False, f"Non-standard port is not allowed: {port}"
+
     # 4. Private/loopback IP check
     try:
         ip_obj = ipaddress.ip_address(hostname)
-        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
-            return False, f"Private/loopback IP addresses are not allowed: {hostname}"
+        if not ip_obj.is_global:
+            return False, f"Non-public IP addresses are not allowed: {hostname}"
     except ValueError:
         # It's a domain name, not an IP - continue
         pass
 
     # 5. Domain whitelist
-    allowed_domains = [
-        "github.com",
-        "gitlab.com",
-        "bitbucket.org",
-        "gitea.io",
-        "gitee.com",
-        "codeberg.org",
-        "git.sr.ht",
-    ]
-
-    # Check if domain or subdomain is in whitelist
-    is_allowed = False
-    for domain in allowed_domains:
-        if hostname == domain or hostname.endswith(f".{domain}"):
-            is_allowed = True
-            break
-
-    if not is_allowed:
+    # Exact host matching avoids trusting arbitrary subdomains of a provider.
+    if hostname not in ALLOWED_GIT_HOSTS:
         return False, f"Domain not in whitelist: {hostname}"
+
+    path = urllib.parse.unquote(parsed.path)
+    if not path or path == "/":
+        return False, "Repository path is required"
+    if "\\" in path or any(part in {".", ".."} for part in path.split("/")):
+        return False, "Invalid repository path"
 
     return True, ""
 

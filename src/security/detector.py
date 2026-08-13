@@ -5,10 +5,12 @@ Components
 * Skillspector       — Jenkins‑based deep code audit (sync + async)
 """
 import asyncio
+import ipaddress
 import json
 import logging
 import re
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,6 +22,66 @@ from src.core.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+
+def validate_git_url(url: str) -> tuple[bool, str]:
+    """Validate a git URL for SSRF protection.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_valid, error_message)
+    """
+    if not url:
+        return False, "URL cannot be empty"
+
+    # 1. Parse URL
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL format: {str(e)}"
+
+    # 2. Protocol validation
+    if parsed.scheme not in ("http", "https", "git", "ssh"):
+        return False, f"Unsupported protocol: {parsed.scheme}"
+
+    # 3. Extract hostname
+    hostname = parsed.hostname or parsed.netloc.split(":", 1)[0]
+
+    if not hostname:
+        return False, "Could not extract hostname from URL"
+
+    # 4. Private/loopback IP check
+    try:
+        ip_obj = ipaddress.ip_address(hostname)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+            return False, f"Private/loopback IP addresses are not allowed: {hostname}"
+    except ValueError:
+        # It's a domain name, not an IP - continue
+        pass
+
+    # 5. Domain whitelist
+    allowed_domains = [
+        "github.com",
+        "gitlab.com",
+        "bitbucket.org",
+        "gitea.io",
+        "gitee.com",
+        "codeberg.org",
+        "git.sr.ht",
+    ]
+
+    # Check if domain or subdomain is in whitelist
+    is_allowed = False
+    for domain in allowed_domains:
+        if hostname == domain or hostname.endswith(f".{domain}"):
+            is_allowed = True
+            break
+
+    if not is_allowed:
+        return False, f"Domain not in whitelist: {hostname}"
+
+    return True, ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -182,6 +244,12 @@ class SkillspectorClient:
         scanners: str = "skillspector",
     ) -> int | None:
         """Trigger a build via buildWithParameters; return the build number."""
+        # Validate git URL for SSRF protection
+        is_valid, error_msg = validate_git_url(git_url)
+        if not is_valid:
+            logger.error("Git URL validation failed: %s", error_msg)
+            return None
+
         trigger_started_at = time.perf_counter()
         url = f"{self.base_url}{self.JOB_PATH}/buildWithParameters"
         params = {

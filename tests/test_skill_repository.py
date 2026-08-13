@@ -551,6 +551,48 @@ openeuler_repos:
         assert skills[0].risk_score == 12
         assert getattr(skills[0], "_security_audit_triggered") is False
 
+    def test_single_repository_discover_failure_marks_repository_failed(self):
+        from skillcrawler.core.skill_manager import SkillDiscoverStatus, SkillManager
+
+        repository_id = uuid.uuid4()
+        repository = SimpleNamespace(
+            id=repository_id,
+            repo_name="github.com_acme_repository",
+            url="https://github.com/acme/repository",
+            branch="main",
+            platform="personal",
+            skill_num=7,
+            skill_discover_status=SkillDiscoverStatus.DONE,
+        )
+        skill_repository = MagicMock()
+        skill_repository.session = MagicMock()
+        skill_repository.session.rollback = AsyncMock()
+        repo_repository = MagicMock()
+        repo_repository.get_skill_repository_by_id = AsyncMock(return_value=repository)
+        repo_repository.update_skill_repository = AsyncMock(return_value=repository)
+        manager = SkillManager(skill_repository, repo_repository)
+
+        with patch.object(
+            SkillManager,
+            "_sync_git_repository",
+            side_effect=RuntimeError("fetch failed"),
+        ):
+            with pytest.raises(ValueError, match="fetch failed"):
+                asyncio.run(
+                    manager.discover_skills_from_single_existing_repository(
+                        str(repository_id),
+                    )
+                )
+
+        skill_repository.session.rollback.assert_awaited_once()
+        assert repo_repository.update_skill_repository.await_args_list[-1].args == (
+            repository_id,
+        )
+        assert repo_repository.update_skill_repository.await_args_list[-1].kwargs == {
+            "skill_discover_status": SkillDiscoverStatus.FAILED,
+            "skill_num": 7,
+        }
+
     async def test_configured_discover_force_does_not_skip_commit_unchanged_check(self):
         from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
 

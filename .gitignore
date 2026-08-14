@@ -1,5 +1,6 @@
 node_modules/
 dist/
+web/.vite/
 .venv/
 __pycache__/
 *.pyc

@@ -186,8 +186,8 @@ function onPaginationChange(
       </div>
 
       <div class="container-wide relative h-full flex flex-col items-center justify-center text-center">
-        <h1 class="hero-title">SkillHub</h1>
-        <p class="hero-subtitle">探索、评估、贡献openEuler技能</p>
+        <h1 class="hero-title">openEuler SkillHub</h1>
+        <p class="hero-subtitle">与开发者共同探索、评估、贡献AI技能</p>
         <p class="hero-stats">
           <span class="hero-stats-number">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
           Skills

@@ -12,7 +12,7 @@ import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
 import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
-import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading } from '@opensig/opendesign'
+import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,7 +31,7 @@ const categoryNames: Record<string, string> = {
 }
 
 const platformNames: Record<string, string> = {
-  openeuler: '社区官方',
+  openeuler: '社区SIG',
   enterprise: '企业组织',
   personal: '个人'
 }
@@ -45,6 +45,21 @@ const downloading = ref(false)
 const toastVisible = ref(false)
 const copiedVersion = ref(false)
 const cliCopied = ref(false)
+// 第三方链接跳转提示
+const externalDialogVisible = ref(false)
+const externalUrl = ref('')
+
+function confirmExternalLink() {
+  if (!skill.value?.source_url) return
+  externalUrl.value = skill.value.source_url
+  externalDialogVisible.value = true
+}
+
+function openExternalUrl() {
+  if (!externalUrl.value) return
+  window.open(externalUrl.value, '_blank', 'noopener')
+  externalDialogVisible.value = false
+}
 
 // ===== Shiki 代码高亮 =====
 let highlighter: Highlighter | null = null
@@ -430,7 +445,12 @@ onMounted(async () => {
                 </div>
                 <div class="info-row">
                   <span class="info-label">仓库地址</span>
-                  <a v-if="skill.source_url" :href="skill.source_url" target="_blank" class="info-link" rel="noopener noreferrer">{{ skill.source_url }}</a>
+                  <a
+                    v-if="skill.source_url"
+                    href="javascript:void(0)"
+                    class="info-link"
+                    @click.prevent="confirmExternalLink"
+                  >{{ skill.source_url }}</a>
                   <span v-else class="info-value">-</span>
                 </div>
                 <div class="info-row">
@@ -452,6 +472,19 @@ onMounted(async () => {
         </aside>
       </div>
     </div>
+
+    <!-- ========== 第三方链接跳转提示 ========== -->
+    <ODialog v-model:visible="externalDialogVisible" size="auto" :mask-close="false">
+      <template #header>跳转提示</template>
+      <p class="external-dialog-desc">您即将离开本站，前往第三方外部链接：</p>
+      <p class="external-dialog-url">{{ externalUrl }}</p>
+      <template #footer>
+        <div class="external-dialog-actions">
+          <OButton variant="outline" @click="externalDialogVisible = false">取消</OButton>
+          <OButton color="brand" variant="solid" @click="openExternalUrl">继续访问</OButton>
+        </div>
+      </template>
+    </ODialog>
   </div>
 </template>
 
@@ -1359,6 +1392,35 @@ onMounted(async () => {
     font-size: 13px;
     color: var(--o-color-info4);
   }
+}
+
+/* ===== 第三方链接跳转提示对话框 ===== */
+.external-dialog-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.external-dialog-desc {
+  margin: 0 0 8px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-r-font_size-text1);
+  line-height: var(--o-r-line_height-text1);
+  letter-spacing: 0;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+.external-dialog-url {
+  margin: 0;
+  font-family: var(--o-font_family-code);
+  font-size: var(--o-r-font_size-tip1);
+  line-height: var(--o-r-line_height-tip1);
+  letter-spacing: 0;
+  text-align: left;
+  color: var(--o-color-info3);
+  word-break: break-all;
 }
 </style>
 

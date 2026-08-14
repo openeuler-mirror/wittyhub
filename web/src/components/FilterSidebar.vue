@@ -5,7 +5,7 @@ import { useSkillStore } from '@/stores/skill'
 const skillStore = useSkillStore()
 
 const platformLabel: Record<string, string> = {
-  openeuler: '社区官方',
+  openeuler: '社区SIG',
   enterprise: '企业组织',
   personal: '个人'
 }

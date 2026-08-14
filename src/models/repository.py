@@ -322,15 +322,6 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_by_skill_ids(self, skill_ids: list[str]) -> list[Skill]:
-        """Fetch multiple skills by skill_id in one query (used by batch audit)."""
-        if not skill_ids:
-            return []
-        result = await self.session.execute(
-            select(Skill).where(Skill.skill_id.in_(skill_ids))
-        )
-        return list(result.scalars().all())
-
     async def get_with_repository_by_skill_id(self, skill_id: str) -> Skill | None:
         result = await self.session.execute(
             select(Skill)
@@ -917,26 +908,6 @@ class SecurityAuditRepository:
             .limit(1)
         )
         return result.scalar_one_or_none()
-
-    async def get_latest_by_resources(
-        self, resource_type: str, resource_ids: list[uuid.UUID]
-    ) -> dict[uuid.UUID, SecurityAudit]:
-        """Fetch the latest audit per resource_id in one query (used by batch audit)."""
-        if not resource_ids:
-            return {}
-        result = await self.session.execute(
-            select(SecurityAudit)
-            .where(
-                SecurityAudit.resource_type == resource_type,
-                SecurityAudit.resource_id.in_(resource_ids),
-            )
-            .order_by(SecurityAudit.audited_at.desc())
-        )
-        latest: dict[uuid.UUID, SecurityAudit] = {}
-        for audit in result.scalars():
-            if audit.resource_id not in latest:
-                latest[audit.resource_id] = audit
-        return latest
 
     async def list_by_resource(
         self, resource_type: str, resource_id: uuid.UUID

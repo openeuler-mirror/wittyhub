@@ -12,12 +12,13 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --default-timeout=300 \
-    -i https://mirrors.aliyun.com/pypi/simple \
+RUN pip install --no-cache-dir --default-timeout=600 --retries 3 \
+    --index-url https://mirrors.aliyun.com/pypi/simple \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    "torch==2.13.0+cpu" \
     fastapi \
     uvicorn \
     sentence-transformers \
-    torch \
     numpy \
     pyyaml \
     huggingface_hub

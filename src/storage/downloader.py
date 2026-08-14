@@ -14,6 +14,7 @@ from src.core.config import get_settings
 from src.models.orm import Skill, SkillRepoModel
 
 settings = get_settings()
+MAX_STORAGE_READ_BYTES = 20 * 1024 * 1024
 
 
 class SkillArchiveError(Exception):
@@ -230,16 +231,33 @@ class DownloadManager:
 
 class LocalStorage:
     def __init__(self, base_path: Path | None = None):
-        self.base_path = base_path or Path(settings.storage.local_path)
+        self.base_path = Path(base_path or settings.storage.local_path).resolve()
+
+    def _resolve_path(
+        self,
+        skill_id: str,
+        filename: str | None = None,
+    ) -> Path:
+        if not skill_id or "\x00" in skill_id:
+            raise ValueError("Invalid skill ID")
+        if filename is not None and (not filename or "\x00" in filename):
+            raise ValueError("Invalid filename")
+
+        path = self.base_path / skill_id
+        if filename is not None:
+            path /= filename
+        resolved_path = path.resolve()
+
+        if (
+            resolved_path == self.base_path
+            or not resolved_path.is_relative_to(self.base_path)
+        ):
+            raise ValueError("Storage path escapes base directory")
+        return resolved_path
 
     async def save(self, skill_id: str, content: bytes | str, filename: str | None = None) -> Path:
-        skill_dir = self.base_path / skill_id
-        skill_dir.mkdir(parents=True, exist_ok=True)
-
-        if filename:
-            file_path = skill_dir / filename
-        else:
-            file_path = skill_dir / "skill_data"
+        file_path = self._resolve_path(skill_id, filename or "skill_data")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
 
         mode = "wb" if isinstance(content, bytes) else "w"
         async with aiofiles.open(file_path, mode) as f:
@@ -248,27 +266,29 @@ class LocalStorage:
         return file_path
 
     async def read(self, skill_id: str, filename: str) -> bytes | str | None:
-        file_path = self.base_path / skill_id / filename
+        file_path = self._resolve_path(skill_id, filename)
 
-        if not file_path.exists():
+        if not file_path.is_file():
             return None
+        if file_path.stat().st_size > MAX_STORAGE_READ_BYTES:
+            raise ValueError("File is too large")
 
         mode = "rb" if file_path.suffix in [".zip", ".tar", ".gz"] else "r"
         async with aiofiles.open(file_path, mode) as f:
             return await f.read()
 
     async def delete(self, skill_id: str) -> bool:
-        skill_dir = self.base_path / skill_id
+        skill_dir = self._resolve_path(skill_id)
 
-        if skill_dir.exists():
+        if skill_dir.is_dir():
             shutil.rmtree(skill_dir)
             return True
         return False
 
     async def list_files(self, skill_id: str) -> list[str]:
-        skill_dir = self.base_path / skill_id
+        skill_dir = self._resolve_path(skill_id)
 
-        if not skill_dir.exists():
+        if not skill_dir.is_dir():
             return []
 
-        return [f.name for f in skill_dir.iterdir()]
+        return [f.name for f in skill_dir.iterdir() if f.is_file()]

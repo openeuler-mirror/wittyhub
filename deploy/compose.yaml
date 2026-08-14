@@ -24,10 +24,15 @@ services:
     build:
       context: ..
       dockerfile: deploy/embedding/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777
     ports:
       - "8082:8082"
     environment:
       WITTYHUB_CONFIG: /app/config.yaml
+      PYTHONDONTWRITEBYTECODE: "1"
+      HF_HOME: /models-cache
       SENTENCE_TRANSFORMERS_HOME: /models-cache
     volumes:
       - ../config.yaml:/app/config.yaml:ro
@@ -50,10 +55,14 @@ services:
     build:
       context: ..
       dockerfile: deploy/api/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
     ports:
       - "8081:8081"
     environment:
       WITTYHUB_CONFIG: /app/config.yaml
+      PYTHONDONTWRITEBYTECODE: "1"
       POSTGRES__HOST: db
       POSTGRES__PORT: 5432
       POSTGRES__USER: ${POSTGRES__USER:?POSTGRES__USER is required}
@@ -85,6 +94,11 @@ services:
     build:
       context: ..
       dockerfile: deploy/web/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=64m,mode=0770,uid=101,gid=101
+      - /var/run/nginx:rw,noexec,nosuid,nodev,size=16m,mode=0770,uid=101,gid=101
     ports:
       - "8080:8080"
       - "443:8443"

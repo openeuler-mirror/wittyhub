@@ -44,16 +44,24 @@ pipeline {
         stage("Detect Skill") {
             steps {
                 script {
+                    def skillDir
                     if (params.SKILL_PATH?.trim()) {
-                        SKILL_DIR = "${WORKSPACE}/${params.SKILL_PATH}"
+                        skillDir = "${env.WORKSPACE}/${params.SKILL_PATH.trim()}"
                     } else {
-                        SKILL_DIR = "${WORKSPACE}"
+                        skillDir = env.WORKSPACE
                     }
-                    sh "ls -la \$(realpath '${SKILL_DIR}')/"
+                    env.SKILL_DIR = skillDir
+                    sh '''
+                        set -eu
+                        test -d "$SKILL_DIR"
+                        realpath "$SKILL_DIR"
+                        ls -la "$SKILL_DIR"/
+                    '''
 
-                    SCANNER_LIST = params.SCANNERS.split(",").collect { it.trim() }.findAll { it }
-                    echo "Scan dir  : ${SKILL_DIR}"
-                    echo "Scanners  : ${SCANNER_LIST}"
+                    def scannerList = params.SCANNERS.split(",").collect { it.trim() }.findAll { it }
+                    env.SCANNER_LIST = scannerList.join(",")
+                    echo "Scan dir  : ${env.SKILL_DIR}"
+                    echo "Scanners  : ${scannerList}"
                 }
             }
         }
@@ -62,7 +70,8 @@ pipeline {
             steps {
                 script {
                     def jobs = [:]
-                    SCANNER_LIST.each { scanner ->
+                    def scannerList = env.SCANNER_LIST.split(",").findAll { it }
+                    scannerList.each { scanner ->
                         jobs[scanner] = {
                             switch(scanner) {
                                 case "skillspector":
@@ -72,10 +81,12 @@ pipeline {
                                         mkdir -p "${REPORT_DIR}/${scanner}"
 
                                         skillspector scan \\
-                                            "${SKILL_DIR}" \\
+                                            "${env.SKILL_DIR}" \\
                                             --no-llm \\
                                             --format json -o "${REPORT_DIR}/${scanner}/report.json" \\
-                                            --format markdown -o "${REPORT_DIR}/${scanner}/report.md" || true
+                                            --format markdown -o "${REPORT_DIR}/${scanner}/report.md"
+
+                                        test -s "${REPORT_DIR}/${scanner}/report.json"
                                     """
                                     break
                                 default:

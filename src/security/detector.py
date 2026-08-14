@@ -5,10 +5,12 @@ Components
 * Skillspector       — Jenkins‑based deep code audit (sync + async)
 """
 import asyncio
+import ipaddress
 import json
 import logging
 import re
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,6 +22,96 @@ from src.core.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+ALLOWED_GIT_HOSTS = frozenset({
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "gitea.io",
+    "gitee.com",
+    "gitcode.com",
+    "codeberg.org",
+    "git.sr.ht",
+})
+ALLOWED_GIT_SCHEMES = frozenset({"http", "https", "git", "ssh"})
+MAX_GIT_URL_LENGTH = 2048
+
+
+def validate_git_url(url: str) -> tuple[bool, str]:
+    """Validate a git URL for SSRF protection.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_valid, error_message)
+    """
+    if not isinstance(url, str) or not url.strip():
+        return False, "URL cannot be empty"
+
+    url = url.strip()
+    if len(url) > MAX_GIT_URL_LENGTH:
+        return False, "URL is too long"
+    if any(ord(char) < 0x20 or ord(char) == 0x7f for char in url):
+        return False, "URL contains control characters"
+
+    # 1. Parse URL
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL format: {str(e)}"
+
+    # 2. Protocol validation
+    scheme = parsed.scheme.lower()
+    if scheme not in ALLOWED_GIT_SCHEMES:
+        return False, f"Unsupported protocol: {parsed.scheme}"
+
+    if parsed.fragment:
+        return False, "URL fragments are not allowed"
+    if scheme in {"http", "https", "git"} and (parsed.username or parsed.password):
+        return False, "Credentials in URL are not allowed"
+    if scheme == "ssh" and parsed.password:
+        return False, "Passwords in URL are not allowed"
+
+    # 3. Extract hostname
+    try:
+        hostname = (parsed.hostname or "").rstrip(".").encode("idna").decode("ascii").lower()
+        port = parsed.port
+    except (UnicodeError, ValueError):
+        return False, "Invalid hostname or port"
+
+    if not hostname:
+        return False, "Could not extract hostname from URL"
+
+    allowed_ports = {
+        "http": {None, 80},
+        "https": {None, 443},
+        "git": {None, 9418},
+        "ssh": {None, 22},
+    }
+    if port not in allowed_ports[scheme]:
+        return False, f"Non-standard port is not allowed: {port}"
+
+    # 4. Private/loopback IP check
+    try:
+        ip_obj = ipaddress.ip_address(hostname)
+        if not ip_obj.is_global:
+            return False, f"Non-public IP addresses are not allowed: {hostname}"
+    except ValueError:
+        # It's a domain name, not an IP - continue
+        pass
+
+    # 5. Domain whitelist
+    # Exact host matching avoids trusting arbitrary subdomains of a provider.
+    if hostname not in ALLOWED_GIT_HOSTS:
+        return False, f"Domain not in whitelist: {hostname}"
+
+    path = urllib.parse.unquote(parsed.path)
+    if not path or path == "/":
+        return False, "Repository path is required"
+    if "\\" in path or any(part in {".", ".."} for part in path.split("/")):
+        return False, "Invalid repository path"
+
+    return True, ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -182,6 +274,12 @@ class SkillspectorClient:
         scanners: str = "skillspector",
     ) -> int | None:
         """Trigger a build via buildWithParameters; return the build number."""
+        # Validate git URL for SSRF protection
+        is_valid, error_msg = validate_git_url(git_url)
+        if not is_valid:
+            logger.error("Git URL validation failed: %s", error_msg)
+            return None
+
         trigger_started_at = time.perf_counter()
         url = f"{self.base_url}{self.JOB_PATH}/buildWithParameters"
         params = {

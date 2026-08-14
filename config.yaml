@@ -40,10 +40,10 @@ ai:
   enable_semantic_search: true
 
 app:
-  host: "0.0.0.0"
-  port: 8080
+  admin_api_token: "" # APP__ADMIN_API_TOKEN='高强度随机Token'：openssl rand -hex 32
   cors_origins:
-    - "*"
+    - "http://localhost:8080"
+    - "http://127.0.0.1:8080"
 
 logging:
   level: "INFO"

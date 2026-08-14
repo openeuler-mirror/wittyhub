@@ -1,8 +1,9 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.ai.embedding import generate_embeddings, prepare_skill_text
+from src.core.auth import require_admin_token
 from src.core.database import get_db
 from src.core.config import  get_settings
 from src.indexer.search import SearchService
@@ -13,13 +14,13 @@ router = APIRouter()
 
 @router.get("/search")
 async def search(
-    q: Annotated[str, Query(min_length=1)] = "",
+    q: Annotated[str, Query(min_length=1, max_length=500)] = "",
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    category: str | None = None,
-    platform: str | None = None,
-    tags: str | None = None,
-    security_level: str | None = None,
+    category: Annotated[str | None, Query(max_length=1000)] = None,
+    platform: Annotated[str | None, Query(max_length=500)] = None,
+    tags: Annotated[str | None, Query(max_length=2000)] = None,
+    security_level: Annotated[str | None, Query(max_length=500)] = None,
     mode: str = Query("hybrid", pattern="^(text|semantic|hybrid)$"),
     scope: str = Query("summary", pattern="^(summary|full)$"),
     db: AsyncSession = Depends(get_db),
@@ -60,7 +61,7 @@ async def search(
     return results
 
 
-@router.post("/reindex")
+@router.post("/reindex", dependencies=[Depends(require_admin_token)])
 async def reindex(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -86,9 +87,12 @@ async def reindex(
     }
 
 
-@router.post("/reindex/{skill_id:path}")
+@router.post(
+    "/reindex/{skill_id:path}",
+    dependencies=[Depends(require_admin_token)],
+)
 async def reindex_skill(
-    skill_id: str,
+    skill_id: Annotated[str, Path(min_length=1, max_length=255)],
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     repo = SkillRepository(db)

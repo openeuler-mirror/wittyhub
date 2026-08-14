@@ -289,6 +289,157 @@ openeuler_repos:
         assert git_ops.get_latest_commit_id_for_path(repository, "skills/a") == skill_a_commit
         assert git_ops.get_latest_commit_id_for_path(repository, "skills/b") == skill_b_commit
 
+    def test_git_operations_batches_latest_commits_for_skill_directories(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_a = repository / "skills" / "a" / "SKILL.md"
+        skill_a.parent.mkdir(parents=True)
+        skill_a.write_text("# A\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add a")
+        skill_a_commit = _git(repository, "rev-parse", "HEAD")
+
+        skill_b = repository / "skills" / "b" / "SKILL.md"
+        skill_b.parent.mkdir(parents=True)
+        skill_b.write_text("# B\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add b")
+        skill_b_commit = _git(repository, "rev-parse", "HEAD")
+
+        git_ops = GitOperations()
+        original_run = git_ops._run_git_command
+        git_ops._run_git_command = MagicMock(wraps=original_run)
+
+        commits = git_ops.get_latest_commit_ids_for_paths(
+            repository,
+            ["skills/a", "skills/b"],
+        )
+
+        assert commits == {
+            "skills/a": skill_a_commit,
+            "skills/b": skill_b_commit,
+        }
+        git_ops._run_git_command.assert_called_once()
+
+    def test_full_repository_update_uses_regular_fetch(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations()
+        git_ops._run_git_command_with_retries = MagicMock()
+        git_ops._run_git_command_with_auth_retry = MagicMock()
+        git_ops.is_shallow_repository = MagicMock(return_value=False)
+
+        git_ops.update_existing_repository(
+            tmp_path,
+            "https://github.com/acme/repository.git",
+            branch="main",
+        )
+
+        fetch_command = git_ops._run_git_command_with_auth_retry.call_args.args[0]
+        assert fetch_command == [
+            "git", "-C", str(tmp_path), "fetch", "origin", "main",
+        ]
+
+    def test_shallow_repository_update_keeps_depth_one_fetch(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations()
+        git_ops._run_git_command_with_retries = MagicMock()
+        git_ops._run_git_command_with_auth_retry = MagicMock()
+        git_ops.is_shallow_repository = MagicMock(return_value=True)
+
+        git_ops.update_existing_repository(
+            tmp_path,
+            "https://github.com/acme/repository.git",
+            branch="main",
+        )
+
+        fetch_command = git_ops._run_git_command_with_auth_retry.call_args.args[0]
+        assert fetch_command == [
+            "git", "-C", str(tmp_path), "fetch", "--depth", "1", "origin", "main",
+        ]
+
+    def test_unshallow_prefers_blobless_history(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations()
+        git_ops.is_shallow_repository = MagicMock(return_value=True)
+        git_ops._run_git_command_with_retries = MagicMock()
+        git_ops._run_git_command_with_auth_retry = MagicMock()
+
+        git_ops.ensure_full_history(
+            tmp_path,
+            "https://github.com/acme/repository.git",
+            "https://github.com/acme/repository",
+        )
+
+        fetch_command = git_ops._run_git_command_with_auth_retry.call_args.args[0]
+        assert fetch_command == [
+            "git", "-C", str(tmp_path), "fetch",
+            "--unshallow", "--filter=blob:none", "origin",
+        ]
+        configured_keys = {
+            call.args[0][-2]: call.args[0][-1]
+            for call in git_ops._run_git_command_with_retries.call_args_list
+        }
+        assert configured_keys == {
+            "remote.origin.promisor": "true",
+            "remote.origin.partialclonefilter": "blob:none",
+        }
+
+    def test_unshallow_falls_back_when_filter_is_unsupported(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations()
+        git_ops.is_shallow_repository = MagicMock(return_value=True)
+        git_ops._run_git_command_with_retries = MagicMock()
+        git_ops._run_git_command_with_auth_retry = MagicMock(
+            side_effect=[subprocess.CalledProcessError(1, ["git", "fetch"]), None]
+        )
+
+        git_ops.ensure_full_history(
+            tmp_path,
+            "https://example.com/acme/repository.git",
+            "https://example.com/acme/repository",
+        )
+
+        fetch_commands = [
+            call.args[0]
+            for call in git_ops._run_git_command_with_auth_retry.call_args_list
+        ]
+        assert fetch_commands == [
+            [
+                "git", "-C", str(tmp_path), "fetch",
+                "--unshallow", "--filter=blob:none", "origin",
+            ],
+            ["git", "-C", str(tmp_path), "fetch", "--unshallow", "origin"],
+        ]
+
+    def test_git_timeout_sanitization_accepts_byte_output(self):
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token="secret-token")
+        timeout = subprocess.TimeoutExpired(
+            ["git", "clone", "https://github.com/acme/repository"],
+            120,
+            output=b"clone output\n",
+            stderr=b"authentication secret-token failed\n",
+        )
+
+        sanitized = git_ops._sanitize_timeout_error(timeout)
+
+        assert sanitized.output == "clone output\n"
+        assert sanitized.stderr == "authentication *** failed\n"
+        assert git_ops.summarize_exception(sanitized) == (
+            "git clone timed out after 120s"
+        )
+
     async def test_skill_scanner_stores_skill_directory_commit_not_repo_head(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
         from skillcrawler.core.skill_scanner import SkillScanner
@@ -313,7 +464,7 @@ openeuler_repos:
         repo_head_commit = _git(repository, "rev-parse", "HEAD")
 
         skill_repository = MagicMock()
-        skill_repository.get_category_by_skill_id = AsyncMock(return_value=None)
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
         scanner = SkillScanner(
             git_ops=GitOperations(),
             skill_repository=skill_repository,
@@ -335,7 +486,112 @@ openeuler_repos:
 
         assert skills[0].commit_id == skill_dir_commit
         assert skills[0].commit_id != repo_head_commit
-        assert skills[0].extra_metadata["skill_directory_commit_id"] == skill_dir_commit
+
+    def test_skill_scanner_reuses_security_result_for_unchanged_skill_commit(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+        from skillcrawler.core.skill_parser import build_public_skill_id
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_dir = repository / "skills" / "production-skill"
+        skill_dir.mkdir(parents=True)
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text("---\nname: example\n---\n# Example\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill")
+        skill_commit = _git(repository, "rev-parse", "HEAD")
+
+        (repository / "README.md").write_text("# unrelated change\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "change readme")
+        repo_head = _git(repository, "rev-parse", "HEAD")
+
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="github",
+            url="https://github.com/acme/repository",
+            branch="master",
+            platform=None,
+        )
+        skill_id = build_public_skill_id(repo, repository, skill_file)
+        existing = SimpleNamespace(
+            commit_id=skill_commit,
+            risk_score=12,
+            extra_metadata={
+                "security_audit": {"skillspector_score": 12},
+            },
+        )
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(
+            return_value=({skill_id: existing}, {})
+        )
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        scanner._audit_skill_security = AsyncMock()
+
+        skills, _ = asyncio.run(
+            scanner.start_scan(
+                repo=repo,
+                repo_root=repository,
+                repository_git_metadata={"commit_id": repo_head},
+            )
+        )
+
+        scanner._audit_skill_security.assert_not_awaited()
+        assert skills[0].skill_id == skill_id
+        assert skills[0].commit_id == skill_commit
+        assert skills[0].risk_score == 12
+        assert getattr(skills[0], "_security_audit_triggered") is False
+
+    def test_single_repository_discover_failure_marks_repository_failed(self):
+        from skillcrawler.core.skill_manager import SkillDiscoverStatus, SkillManager
+
+        repository_id = uuid.uuid4()
+        repository = SimpleNamespace(
+            id=repository_id,
+            repo_name="github.com_acme_repository",
+            url="https://github.com/acme/repository",
+            branch="main",
+            platform="personal",
+            skill_num=7,
+            skill_discover_status=SkillDiscoverStatus.DONE,
+        )
+        skill_repository = MagicMock()
+        skill_repository.session = MagicMock()
+        skill_repository.session.rollback = AsyncMock()
+        repo_repository = MagicMock()
+        repo_repository.get_skill_repository_by_id = AsyncMock(return_value=repository)
+        repo_repository.update_skill_repository = AsyncMock(return_value=repository)
+        manager = SkillManager(skill_repository, repo_repository)
+
+        with patch.object(
+            SkillManager,
+            "_sync_git_repository",
+            side_effect=RuntimeError("fetch failed"),
+        ):
+            with pytest.raises(ValueError, match="fetch failed"):
+                asyncio.run(
+                    manager.discover_skills_from_single_existing_repository(
+                        str(repository_id),
+                    )
+                )
+
+        skill_repository.session.rollback.assert_awaited_once()
+        assert repo_repository.update_skill_repository.await_args_list[-1].args == (
+            repository_id,
+        )
+        assert repo_repository.update_skill_repository.await_args_list[-1].kwargs == {
+            "skill_discover_status": SkillDiscoverStatus.FAILED,
+            "skill_num": 7,
+        }
 
     async def test_configured_discover_force_does_not_skip_commit_unchanged_check(self):
         from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
@@ -457,6 +713,99 @@ openeuler_repos:
         assert record.extra_metadata["security_audit"]["skillspector_build_number"] == 123
         audit_repository.upsert_by_resource.assert_awaited_once()
         session.commit.assert_awaited_once()
+
+    async def test_discover_store_uses_one_final_repository_commit(self, tmp_path):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        skill_repository = MagicMock()
+        skill_repository.store_skills_and_versions = AsyncMock()
+        repo_repository = MagicMock()
+        updated_repo = SimpleNamespace(id=uuid.uuid4())
+        repo_repository.update_skill_repository = AsyncMock(return_value=updated_repo)
+        manager = SkillManager(skill_repository, repo_repository)
+        manager._git_ops.get_repository_head_commit_id = MagicMock(
+            return_value="c" * 40,
+        )
+        repo = SimpleNamespace(
+            id=updated_repo.id,
+            platform=None,
+        )
+
+        with (
+            patch.object(
+                SkillManager,
+                "_discover_skills",
+                AsyncMock(return_value=([], [])),
+            ),
+            patch.object(
+                SkillManager,
+                "_store_to_security_audits",
+                AsyncMock(),
+            ),
+        ):
+            result = await manager._discover_and_store_skills(
+                repo,
+                clone_dir=tmp_path,
+                repo_name="github.com_acme_skills",
+            )
+
+        skill_repository.store_skills_and_versions.assert_awaited_once_with(
+            repo.id,
+            [],
+            [],
+            commit=False,
+        )
+        repo_repository.update_skill_repository.assert_awaited_once_with(
+            repo.id,
+            repository_commit_id="c" * 40,
+            skill_discover_status="done",
+            skill_num=0,
+        )
+        assert result is updated_repo
+
+    async def test_security_audit_store_uses_runtime_trigger_flag(self):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        skill_repository = MagicMock()
+        skill_repository.session = MagicMock()
+        manager = SkillManager(skill_repository, MagicMock())
+        audit_repository = MagicMock()
+        audit_repository.upsert_by_resource = AsyncMock()
+        details = {
+            "skillspector_async": True,
+            "skillspector_build_number": 123,
+        }
+        reused = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_id="reused",
+            version="latest",
+            commit_id="a" * 40,
+            extra_metadata={"security_audit": details},
+            _security_audit_triggered=False,
+        )
+        triggered = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_id="triggered",
+            version="latest",
+            commit_id="b" * 40,
+            extra_metadata={"security_audit": details},
+            _security_audit_triggered=True,
+        )
+
+        with patch(
+            "skillcrawler.core.skill_manager.SecurityAuditRepository",
+            return_value=audit_repository,
+        ):
+            await manager._store_to_security_audits(
+                [reused, triggered],
+                [],
+            )
+
+        audit_repository.upsert_by_resource.assert_awaited_once()
+        assert (
+            audit_repository.upsert_by_resource.call_args.kwargs["resource_id"]
+            == triggered.id
+        )
 
     def test_security_retry_resolves_path_from_commit_source_url(self):
         from skillcrawler.core.skill_manager import SkillManager

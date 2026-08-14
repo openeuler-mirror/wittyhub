@@ -32,6 +32,7 @@ dependencies = [
     "aiofiles>=23.2.1",
     "pillow>=10.2.0",
     "pgvector>=0.3.6",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

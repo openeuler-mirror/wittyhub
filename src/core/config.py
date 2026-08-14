@@ -59,9 +59,8 @@ class SecurityConfig(BaseSettings):
 
 
 class AppConfig(BaseSettings):
-    host: str = "0.0.0.0"
-    port: int = 8080
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    admin_api_token: str = ""
 
 
 class LoggingConfig(BaseSettings):

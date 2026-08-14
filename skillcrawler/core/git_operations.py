@@ -547,10 +547,16 @@ class GitOperations:
             stderr=self._mask_github_token(error.stderr),
         )
 
-    def _mask_github_token(self, value: str | None) -> str | None:
-        if value is None or not self.github_token:
-            return value
-        return value.replace(self.github_token, '***')
+    def _mask_github_token(
+        self,
+        value: str | bytes | None,
+    ) -> str | None:
+        if value is None:
+            return None
+        text = value.decode(errors='replace') if isinstance(value, bytes) else value
+        if not self.github_token:
+            return text
+        return text.replace(self.github_token, '***')
 
     def summarize_exception(self, exc: Exception) -> str:
         if isinstance(exc, subprocess.TimeoutExpired):

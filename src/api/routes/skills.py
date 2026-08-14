@@ -1,7 +1,7 @@
 from typing import Annotated
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,9 @@ from src.api.schemas.skill import (
 )
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
+from src.core.auth import require_admin_token
 from src.core.database import get_db
+from src.core.rate_limit import limiter
 from src.models.repository import (
     DownloadHistoryRepository,
     SkillRepoRepository,
@@ -30,9 +32,11 @@ from src.storage.downloader import (
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
+SkillIdPath = Annotated[str, Path(min_length=1, max_length=255)]
 
 
 @router.get("/telemetry")
+@limiter.limit("10/minute")
 async def receive_telemetry(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -85,10 +89,10 @@ def skill_to_response(skill) -> SkillResponse:
 async def list_skills(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    category: str | None = None,
-    platform: str | None = None,
-    tags: str | None = None,
-    security_level: str | None = None,
+    category: Annotated[str | None, Query(max_length=1000)] = None,
+    platform: Annotated[str | None, Query(max_length=500)] = None,
+    tags: Annotated[str | None, Query(max_length=2000)] = None,
+    security_level: Annotated[str | None, Query(max_length=500)] = None,
     sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "updated_at",
     sort_period: Annotated[str | None, Query(pattern="^(week|month)$")] = None,
     db: AsyncSession = Depends(get_db),
@@ -119,7 +123,7 @@ async def list_skills(
 
 @router.get("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
 async def audit_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     db: AsyncSession = Depends(get_db),
 ):
     repo = SkillRepository(db)
@@ -150,9 +154,13 @@ async def audit_skill(
     return {"error": "No audit found"}
 
 
-@router.post("/{skill_id:path}/audit", response_model=SecurityAuditResponse | ErrorResponse)
+@router.post(
+    "/{skill_id:path}/audit",
+    response_model=SecurityAuditResponse | ErrorResponse,
+    dependencies=[Depends(require_admin_token)],
+)
 async def trigger_skill_audit(
-    skill_id: str,
+    skill_id: SkillIdPath,
     scanners: str | None = Query(None, description="Comma-separated: skillspector"),
     async_mode: bool = Query(False, description="Trigger scan without waiting for result"),
     db: AsyncSession = Depends(get_db),
@@ -211,7 +219,7 @@ async def trigger_skill_audit(
 
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
 async def get_skill_versions(
-    skill_id: str,
+    skill_id: SkillIdPath,
     db: AsyncSession = Depends(get_db),
 ):
     skill_repo = SkillRepository(db)
@@ -245,7 +253,7 @@ async def get_skill_versions(
     },
 )
 async def download_skill(
-    skill_id: str,
+    skill_id: SkillIdPath,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
@@ -288,7 +296,7 @@ async def download_skill(
 
 
 @router.get("/{skill_id:path}", response_model=SkillResponse | ErrorResponse)
-async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
+async def get_skill(skill_id: SkillIdPath, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
     skill = await repo.get_by_skill_id(skill_id)
 
@@ -298,13 +306,25 @@ async def get_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
     return skill_to_response(skill)
 
 
-@router.post("/", response_model=SkillResponse, status_code=201)
+@router.post(
+    "/",
+    response_model=SkillResponse,
+    status_code=201,
+    dependencies=[Depends(require_admin_token)],
+)
 async def create_skill(
     skill_data: SkillCreate,
     request: Request,
     async_mode: bool = Query(False, description="Trigger security audit without waiting for result"),
     db: AsyncSession = Depends(get_db),
 ):
+    # Validate source_url for SSRF protection
+    from src.security.detector import validate_git_url
+    if skill_data.source_url:
+        is_valid, error_msg = validate_git_url(skill_data.source_url)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid source URL: {error_msg}")
+
     repo = SkillRepository(db)
 
     existing = await repo.get_by_skill_id(skill_data.skill_id)
@@ -358,8 +378,11 @@ async def create_skill(
     return skill_to_response(skill)
 
 
-@router.delete("/{skill_id:path}")
-async def delete_skill(skill_id: str, db: AsyncSession = Depends(get_db)):
+@router.delete(
+    "/{skill_id:path}",
+    dependencies=[Depends(require_admin_token)],
+)
+async def delete_skill(skill_id: SkillIdPath, db: AsyncSession = Depends(get_db)):
     repo = SkillRepository(db)
     deleted = await repo.delete(skill_id)
 

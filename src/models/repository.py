@@ -220,6 +220,7 @@ class SkillRepository:
         platform: list[str] | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
+        skill_id_prefix: str | None = None,
         security_level: list[str] | None = None,
     ):
         # 全局规则：排除未检测（risk_score 为空）的 Skill，不进入列表
@@ -248,6 +249,9 @@ class SkillRepository:
             query = query.where(skill_model.tags.contains(tags))
         if source:
             query = query.where(skill_model.source == source)
+        if skill_id_prefix:
+            # 按仓库过滤：匹配 skill_id 前缀 {source_type}/{owner}/{repo}/
+            query = query.where(skill_model.skill_id.like(f"{skill_id_prefix}/%"))
         if security_level:
             conditions = []
             for level in security_level:
@@ -566,6 +570,7 @@ class SkillRepository:
         platform: list[str] | None = None,
         tags: list[str] | None = None,
         source: str | None = None,
+        skill_id_prefix: str | None = None,
         sort_by: str = "updated_at",
         sort_period: str | None = None,
         security_level: list[str] | None = None,
@@ -577,6 +582,7 @@ class SkillRepository:
             platform=platform,
             tags=tags,
             source=source,
+            skill_id_prefix=skill_id_prefix,
             security_level=security_level,
         )
 
@@ -587,6 +593,7 @@ class SkillRepository:
             platform=platform,
             tags=tags,
             source=source,
+            skill_id_prefix=skill_id_prefix,
             security_level=security_level,
         )
         total = await self.session.scalar(count_query)

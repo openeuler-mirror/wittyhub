@@ -70,6 +70,83 @@ class TestSkillRepositoryUnit:
         explicit_sql = str(explicit_statement.compile(dialect=postgresql.dialect()))
         assert "updated_at=" in explicit_sql
 
+    def test_list_with_skill_id_prefix_filters_by_repo(self):
+        from sqlalchemy import select
+        from sqlalchemy.dialects import postgresql
+
+        from src.models.orm import Skill
+        from src.models.repository import SkillRepository
+
+        session = AsyncMock()
+        repo = SkillRepository(session)
+        query = repo._apply_skill_filters(
+            select(Skill),
+            Skill,
+            source="github",
+            skill_id_prefix="github/anthropics/claude-code",
+        )
+        compiled = query.compile(dialect=postgresql.dialect())
+        sql = str(compiled)
+        # source_type 过滤 + repo 前缀过滤应同时生效
+        assert "skills.source = " in sql
+        assert "skills.skill_id LIKE " in sql
+        assert "github/anthropics/claude-code/%" in compiled.params.values()
+
+    @pytest.mark.asyncio
+    async def test_list_skills_route_forwards_repo_filter(self):
+        from src.api.routes.skills import list_skills
+        from src.api.schemas.skill import SkillListResponse
+
+        now = datetime.now(timezone.utc)
+        skill = SimpleNamespace(
+            id=str(uuid.uuid4()),
+            skill_id="github/anthropics/claude-code/.ai/skills/add-or-fix-type-checking",
+            name="add-or-fix-type-checking",
+            description="Check types",
+            version="1.0.0",
+            commit_id="abc123",
+            author="anthropics",
+            source="github",
+            source_url="https://github.com/anthropics/claude-code",
+            repo_url=None,
+            category="Development",
+            tags=["types"],
+            platform="personal",
+            extra_metadata={},
+            content=None,
+            risk_score=10,
+            download_count=3,
+            _period_downloads=None,
+            rating=None,
+            created_at=now,
+            updated_at=now,
+            last_indexed_at=None,
+        )
+        skill_repository = MagicMock()
+        skill_repository.list = AsyncMock(return_value=([skill], 1))
+        db = AsyncMock()
+
+        with patch("src.api.routes.skills.SkillRepository", return_value=skill_repository):
+            response = await list_skills(
+                skip=0,
+                limit=20,
+                category=None,
+                platform=None,
+                tags=None,
+                security_level=None,
+                source_type="github",
+                repo="anthropics/claude-code",
+                sort_by="updated_at",
+                sort_period=None,
+                db=db,
+            )
+
+        assert isinstance(response, SkillListResponse)
+        kwargs = skill_repository.list.await_args.kwargs
+        assert kwargs["source"] == "github"
+        assert kwargs["skill_id_prefix"] == "github/anthropics/claude-code"
+        assert kwargs["limit"] == 20
+
     def test_build_public_skill_id_uses_relative_skill_path(self):
         from skillcrawler.core.skill_parser import build_public_skill_id
 
@@ -77,7 +154,6 @@ class TestSkillRepositoryUnit:
             source="github",
             url="https://github.com/wix/react-native-navigation.git",
         )
-
         skill_id = build_public_skill_id(
             repo,
             Path("/tmp/repo"),

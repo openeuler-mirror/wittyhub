@@ -18,18 +18,6 @@ const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 
-const categoryNames: Record<string, string> = {
-  'Research and Design': '研究设计',
-  'Development and Build': '开发构建',
-  'Engineering and Compilation': '工程编译',
-  'Quality and Validation': '质量验证',
-  'Release and Deployment': '发布部署',
-  'Monitoring and Operations': '监控运维',
-  'Performance Optimization': '性能优化',
-  'Security Hardening': '安全加固',
-  others: '其他'
-}
-
 const platformNames: Record<string, string> = {
   openeuler: '社区SIG',
   enterprise: '企业组织',
@@ -333,7 +321,7 @@ onMounted(async () => {
 
             <!-- 标签区 -->
             <div class="skill-tags">
-              <span v-if="skill.category" class="tag tag-category">{{ categoryNames[skill.category] || skill.category }}</span>
+              <span v-if="skill.category" class="tag tag-category">{{ skill.category_label || skill.category }}</span>
               <span v-if="skill.platform" class="tag tag-gray">{{ platformNames[skill.platform] || skill.platform }}</span>
               <span
                 v-for="tag in (skill.tags || []).slice(0, 5)"

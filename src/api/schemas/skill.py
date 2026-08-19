@@ -55,6 +55,7 @@ class SkillResponse(SkillBase):
     id: str
     repo_url: str | None = None
     content: str | None = None
+    category_label: str | None = None
     risk_score: int | None = None
     download_count: int = 0
     period_downloads: int | None = None

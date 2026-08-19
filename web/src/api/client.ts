@@ -15,6 +15,25 @@ const client = axios.create({
   timeout: 30000
 })
 
+// Backend wraps every successful JSON response into
+// { code, msg, data }. Unwrap it here so callers get the payload
+// directly. Blob responses (file downloads) and error responses are untouched.
+client.interceptors.response.use((response) => {
+  if (response.config.responseType === 'blob') {
+    return response
+  }
+  const body = response.data
+  if (
+    body &&
+    typeof body === 'object' &&
+    'code' in body &&
+    'data' in body
+  ) {
+    response.data = body.data
+  }
+  return response
+})
+
 function parseContentDispositionFilename(header: string | undefined): string {
   if (!header) return 'skill.zip'
   const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)

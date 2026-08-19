@@ -65,22 +65,6 @@ function toggleArrayItem(arr: string[], item: string): string[] {
   return arr.includes(item) ? arr.filter(i => i !== item) : [...arr, item]
 }
 
-const categoryNames: Record<string, string> = {
-  'Research and Design': '研究设计',
-  'Development and Build': '开发构建',
-  'Engineering and Compilation': '工程编译',
-  'Quality and Validation': '质量验证',
-  'Release and Deployment': '发布部署',
-  'Monitoring and Operations': '监控运维',
-  'Performance Optimization': '性能优化',
-  'Security Hardening': '安全加固',
-  others: '其他'
-}
-
-function displayCategory(name: string): string {
-  return categoryNames[name] ?? name
-}
-
 function selectCategory(name: string) {
   skillStore.setFilter('category', toggleArrayItem(skillStore.filter.category, name))
   skillStore.fetchSkills()
@@ -179,7 +163,7 @@ const hasActiveFilter = computed(() => {
                   <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </span>
-              {{ displayCategory(cat.name) }}
+              {{ cat.label || cat.name }}
             </span>
             <span class="filter-count">{{ cat.count }}</span>
           </div>

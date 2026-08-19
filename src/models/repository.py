@@ -7,6 +7,7 @@ from sqlalchemy import case, delete, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.api.services.categories import CANONICAL_CATEGORIES, category_label
 from src.models.orm import (
     Agent,
     AgentVersion,
@@ -731,20 +732,14 @@ class SkillRepository:
                 key = row.display_name or "others"
             categories_map[key] = row.count
 
-        # Always return all 9 canonical categories (from skill-repos.yaml), fill 0 for missing
-        canonical_categories = [
-            "Research and Design",
-            "Development and Build",
-            "Engineering and Compilation",
-            "Quality and Validation",
-            "Release and Deployment",
-            "Monitoring and Operations",
-            "Performance Optimization",
-            "Security Hardening",
-            "others",
-        ]
+        # Always return all canonical categories (from skill-repos.yaml), fill 0 for missing
+        canonical_categories = CANONICAL_CATEGORIES
         categories = [
-            {"name": name, "count": categories_map.get(name, 0)}
+            {
+                "name": name,
+                "label": category_label(name),
+                "count": categories_map.get(name, 0),
+            }
             for name in canonical_categories
         ]
         # Sort: non-others by count desc, others at end

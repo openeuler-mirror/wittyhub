@@ -1,3 +1,9 @@
+export type ResponseT<T> = {
+  code: number
+  msg: string
+  data: T
+}
+
 export interface Skill {
   id: string
   skill_id: string
@@ -10,6 +16,7 @@ export interface Skill {
   source_url: string
   repo_url: string | null
   category: string | null
+  category_label?: string | null
   tags: string[] | null
   platform: string | null
   content: string | null
@@ -84,13 +91,14 @@ export interface SkillVersion {
 export interface Stats {
   total_skills: number
   total_categories: number
-  categories: { name: string; count: number }[]
+  categories: Category[]
   platforms: { name: string; count: number }[]
   security_levels: { name: string; count: number }[]
 }
 
 export interface Category {
   name: string
+  label?: string
   count: number
 }
 

@@ -7,18 +7,6 @@ const props = defineProps<{
   skill: Skill
 }>()
 
-const categoryNames: Record<string, string> = {
-  'Research and Design': '研究设计',
-  'Development and Build': '开发构建',
-  'Engineering and Compilation': '工程编译',
-  'Quality and Validation': '质量验证',
-  'Release and Deployment': '发布部署',
-  'Monitoring and Operations': '监控运维',
-  'Performance Optimization': '性能优化',
-  'Security Hardening': '安全加固',
-  others: '其他'
-}
-
 function getSkillRoutePath(skillId: string): string {
   return `/skills/${encodeURIComponent(skillId)}`
 }
@@ -54,7 +42,7 @@ function truncate(text: string | null, length: number): string {
     </div>
 
     <div class="w-[100px] text-left">
-      <span v-if="skill.category" class="tag tag-category">{{ categoryNames[skill.category] || skill.category }}</span>
+      <span v-if="skill.category" class="tag tag-category">{{ skill.category_label || skill.category }}</span>
       <span v-else class="text-gray-400 dark:text-gray-500">-</span>
     </div>
 

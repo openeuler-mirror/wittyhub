@@ -13,6 +13,7 @@ from src.api.schemas.skill import (
     SkillResponse,
     SkillVersionsResponse,
 )
+from src.api.services.categories import category_label
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
 from src.core.auth import require_admin_token
@@ -71,6 +72,7 @@ def skill_to_response(skill) -> SkillResponse:
         source_url=skill.source_url,
         repo_url=skill.repo_url,
         category=skill.category,
+        category_label=category_label(skill.category),
         tags=skill.tags,
         platform=skill.platform,
         metadata=skill.extra_metadata,

@@ -5,6 +5,7 @@ from sqlalchemy import desc, func, literal_column, select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
+from src.api.services.categories import category_label
 from src.models.orm import Skill
 
 
@@ -327,6 +328,7 @@ class SearchService:
                 "source": row["source"],
                 "source_url": row["source_url"],
                 "category": row["category"],
+                "category_label": category_label(row["category"]),
                 "tags": row["tags"] or [],
                 "platform": row["platform"],
                 "risk_score": row["risk_score"],
@@ -424,6 +426,7 @@ class SearchService:
                 "source": row.source,
                 "source_url": row.source_url,
                 "category": row.category,
+                "category_label": category_label(row.category),
                 "tags": row.tags or [],
                 "platform": row.platform,
                 "risk_score": row.risk_score,

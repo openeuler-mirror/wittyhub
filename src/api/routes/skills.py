@@ -95,6 +95,8 @@ async def list_skills(
     platform: Annotated[str | None, Query(max_length=500)] = None,
     tags: Annotated[str | None, Query(max_length=2000)] = None,
     security_level: Annotated[str | None, Query(max_length=500)] = None,
+    source_type: Annotated[str | None, Query(max_length=50)] = None,
+    repo: Annotated[str | None, Query(max_length=500)] = None,
     sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "updated_at",
     sort_period: Annotated[str | None, Query(pattern="^(week|month)$")] = None,
     db: AsyncSession = Depends(get_db),
@@ -103,6 +105,13 @@ async def list_skills(
     category_list = category.split(",") if category else None
     platform_list = platform.split(",") if platform else None
     security_level_list = security_level.split(",") if security_level else None
+    # repo 过滤：匹配 skill_id 前缀 {source_type}/{owner}/{repo}/，
+    # 与 source_type 过滤（Skill.source 列）一起限定到具体仓库
+    skill_id_prefix = (
+        f"{source_type.strip()}/{repo.strip()}"
+        if source_type and source_type.strip() and repo and repo.strip()
+        else None
+    )
     repo = SkillRepository(db)
     skills, total = await repo.list(
         skip=skip,
@@ -111,6 +120,8 @@ async def list_skills(
         platform=platform_list,
         tags=tag_list,
         security_level=security_level_list,
+        source=source_type,
+        skill_id_prefix=skill_id_prefix,
         sort_by=sort_by,
         sort_period=sort_period,
     )

@@ -105,25 +105,17 @@ class SkillManager:
         await self.skill_repository.session.rollback()
 
     async def create_skill_repository(
-        self, request: SkillRepositoryRequest
-    ) -> SkillRepoModel | None:
-        normalized = self._normalize_repository_request(request)
-        repo_name = self._derive_repo_name(normalized)
-        existing = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
-        if existing is not None:
-            _logger.info(
-                f'Skill repo "{repo_name}" already exists with id "{existing.id}", skipping creation'
-            )
-            return None
-        source, _ = derive_skill_source(normalized.url)
+        self, normalized_request: SkillRepositoryRequest, repo_name: str,
+    ) -> SkillRepoModel:
+        source, _ = derive_skill_source(normalized_request.url)
         return await self.skill_repo_repository.create_skill_repository(
             repo_name=repo_name,
             source=source,
-            branch=normalized.branch,
-            url=normalized.url,
+            branch=normalized_request.branch,
+            url=normalized_request.url,
             local_path=None,
             skill_discover_status=SkillDiscoverStatus.INIT,
-            platform=normalized.platform,
+            platform=normalized_request.platform,
         )
 
     async def delete_skill_repository(self, repository_id: str) -> None:
@@ -520,18 +512,18 @@ class SkillManager:
 
     async def _get_or_create_skill_repository(
         self,
-        request: SkillRepositoryRequest,
+        normalized_request: SkillRepositoryRequest,
         repo_name: str,
     ) -> tuple[SkillRepoModel, bool]:
-        repository = await self.create_skill_repository(request)
-        if repository is not None:
-            return repository, True
+        existing_repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
+        if existing_repository is not None:
+            _logger.info(
+                f'Skill repo "{repo_name}" already exists with id "{existing_repository.id}", skipping creation'
+            )
+            return existing_repository, False
 
-        _logger.info('Discover: skill repo already exists in DB: %s', repo_name)
-        repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
-        if repository is None:
-            raise ValueError(f'Skill repo {repo_name} was expected in DB but not found')
-        return repository, False
+        repository = await self.create_skill_repository(normalized_request, repo_name)
+        return repository, True
 
     def _is_commit_unchanged(
         self,

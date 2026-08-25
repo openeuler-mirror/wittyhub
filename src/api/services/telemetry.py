@@ -55,7 +55,7 @@ def build_skill_id_from_telemetry(
     skill_path = _slugify_telemetry_value(skill_name)
     if not skill_path:
         return None
-    return f"{source_type}/{owner_repo}/{skill_path}"
+    return f"{source_type}:{owner_repo}/{skill_path}"
 
 
 class TelemetryService:

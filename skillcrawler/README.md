@@ -69,7 +69,7 @@ src/models/
 
 | 字段 | 含义 |
 |------|------|
-| `skill_id` | 全局唯一 Skill ID，格式类似 `gitcode/openeuler/wittyhub-cli/skills/find-skills` |
+| `skill_id` | 全局唯一 Skill ID，格式类似 `gitcode:openeuler/wittyhub-cli/find-skills` |
 | `skill_repo_id` | 所属 `skill_repos.id` |
 | `commit_id` | `SKILL.md` 所在 skill 文件夹的最新 commit，不是 repo HEAD |
 | `platform` | 优先继承 `skill_repos.platform` |
@@ -299,7 +299,7 @@ tags: [search, discovery]
 
 | 字段 | 来源 |
 |------|------|
-| `skill_id` | 仓库来源 + owner/repo + `SKILL.md` 相对目录，不依赖 frontmatter |
+| `skill_id` | 仓库来源 + owner/repo + `SKILL.md` 所在目录名，不依赖 frontmatter |
 | `name` | frontmatter `name`；缺失时用目录名 |
 | `description` | frontmatter `description` |
 | `category` | 已有数据库分类优先；否则 frontmatter；再否则调用分类模型 |

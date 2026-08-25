@@ -472,7 +472,7 @@ class SkillManager:
                     return relative_path
 
         owner_repo = extract_owner_repo(repo.url)
-        prefix = f'{repo.source}/{owner_repo}/'
+        prefix = f'{repo.source}:{owner_repo}/'
         skill_path = record.skill_id.removeprefix(prefix)
         repository_name = owner_repo.rsplit('/', 1)[-1]
         if skill_path == repository_name:

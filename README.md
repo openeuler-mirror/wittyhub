@@ -260,7 +260,7 @@ docker compose --profile skillspector up --build
 docker compose -f compose.yaml --profile skillspector up -d --build
 ```
 
-Jenkins 默认通过 http://localhost:8083 访问；API 在 Compose 网络内通过 `http://skillspector:8083` 调用它。
+Jenkins 默认通过 http://localhost:8083 访问；API 在 Compose 网络内通过 `http://skillspector:8083` 调用它。Jenkins 部署参数（HTTP 端口、executor 数、quiet period、仓库根目录）统一由 `config.yaml` 的 `security.skillspector_*` 字段管理，容器启动时注入为 `JENKINS_*` / `WITTYHUB_REPOSITORY_ROOT` 环境变量。
 
 ## 使用指南
 

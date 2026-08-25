@@ -8,10 +8,12 @@
 #     -v jenkins_home:/var/jenkins_home \
 #     skillspector-jenkins:latest
 #
-# 环境变量 (可选):
-#   JENKINS_ADMIN_PASS    admin 初始密码 (默认 admin@123456)
-#   GIT_REPO_URL          SkillSpector 仓库地址
-#   GIT_REF               分支/标签 (默认 main)
+# 配置:
+#   WITTYHUB_CONFIG    配置文件路径 (默认 /app/config.yaml)，容器入口启动时读取，
+#                      将其中的 security.skillspector_* 参数注入为 JENKINS_* 环境变量
+# 构建参数:
+#   GIT_REPO_URL        SkillSpector 仓库地址
+#   GIT_REF             分支/标签 (默认 main)
 # ============================================================================
 
 # ---- Stage 1: 构建 SkillSpector wheels ----
@@ -50,7 +52,7 @@ COPY --from=skillspector-builder /tmp/wheels /tmp/wheels
 # 安装 SkillSpector
 RUN pip config set global.timeout 120 && \
     pip config set global.index-url https://repo.huaweicloud.com/repository/pypi/simple && \
-    pip install --no-cache-dir --break-system-packages --ignore-installed /tmp/wheels/*.whl && \
+    pip install --no-cache-dir --break-system-packages --ignore-installed /tmp/wheels/*.whl pyyaml && \
     rm -rf /tmp/wheels
 
 # 验证 SkillSpector 安装
@@ -70,6 +72,11 @@ COPY deploy/skillspector/init.groovy /usr/share/jenkins/ref/init.groovy.d/01-ini
 COPY deploy/skillspector/pipeline.groovy /usr/share/jenkins/ref/jenkins-pipeline.groovy
 COPY deploy/skillspector/checkout.sh /usr/local/bin/wittyhub-skillspector-checkout
 RUN chmod 755 /usr/local/bin/wittyhub-skillspector-checkout
+
+# 容器入口：读取 config.yaml 注入 JENKINS_* 环境变量后启动 Jenkins
+COPY deploy/skillspector/entrypoint.sh /usr/local/bin/wittyhub-entrypoint.sh
+RUN chmod 755 /usr/local/bin/wittyhub-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/wittyhub-entrypoint.sh"]
 
 ENV SKILLSPECTOR_LOG_LEVEL=WARNING
 ENV SKILLSPECTOR_PROVIDER=openai

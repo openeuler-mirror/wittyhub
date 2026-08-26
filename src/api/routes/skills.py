@@ -229,9 +229,11 @@ async def trigger_skill_audit(
     audit_result = await security_service.audit_skill(
         skill_id=skill.skill_id,
         source=skill.source,
-        source_url=skill.source_url,
+        # Jenkins 需要合法 git 仓库 URL（source_url 是 SKILL.md 的 blob 链接，不可用于 clone）
+        source_url=skill.repo_url or skill.source_url,
         metadata={
-            "version": skill.version,
+            # Jenkins 需要真实 git ref；version 可能是 "latest"，用 commit_id 兜底
+            "version": skill.commit_id or skill.version,
             "commit_id": skill.commit_id,
             "content": skill.content,
             "skill_path": _derive_scan_skill_path(
@@ -416,9 +418,9 @@ async def create_skill(
             await security_service.audit_skill(
                 skill.skill_id,
                 skill.source,
-                skill.source_url,
+                skill.repo_url or skill.source_url,
                 {
-                    "version": skill.version,
+                    "version": skill.commit_id or skill.version,
                     "commit_id": skill.commit_id,
                     "content": skill.content or "",
                     "skill_path": _derive_scan_skill_path(

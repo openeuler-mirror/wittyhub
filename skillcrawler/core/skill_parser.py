@@ -80,10 +80,9 @@ def build_public_skill_id_from_relative_path(
     contains SKILL.md; a root-level SKILL.md resolves to the repo slug, matching
     the crawler's historical behaviour.
     """
-    lowered = relative_path.lower()
-    if lowered == 'skill.md':
+    if relative_path == 'SKILL.md':
         skill_name = owner_repo.rsplit('/', 1)[-1]
-    elif lowered.endswith('/skill.md'):
+    elif relative_path.endswith('/SKILL.md'):
         skill_name = Path(relative_path).parent.name
     else:
         raise ValueError(f'Expected a SKILL.md file, got: {relative_path}')

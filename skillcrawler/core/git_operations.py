@@ -17,7 +17,12 @@ settings = get_settings()
 
 GIT_CLONE_RETRY_TIMES = 3
 GIT_CLONE_TIMEOUT_SECONDS = 120
-DEFAULT_MAX_TAGS_PER_REPO = 3
+DEFAULT_MAX_TAGS_PER_REPO = 5
+TAG_CANDIDATE_REF_PREFIX = 'refs/crawler/tag-candidates'
+UNSUPPORTED_FILTER_MESSAGES = (
+    'filtering not recognized by server',
+    'server does not support filter',
+)
 GIT_NON_INTERACTIVE_ENV = {
     'GIT_TERMINAL_PROMPT': '0',
     'GCM_INTERACTIVE': 'Never',
@@ -277,35 +282,58 @@ class GitOperations:
         clone_url: str,
         repo_url: str | None,
         action: str,
+        *,
+        reject_unsupported_filter: bool = False,
     ) -> None:
         auth_command = self._build_github_token_command(command, clone_url)
         if auth_command is not None:
             try:
-                self._run_git_command_with_retries(command)
+                self._run_git_command_with_retries(
+                    command, reject_unsupported_filter=reject_unsupported_filter,
+                )
                 return
             except subprocess.CalledProcessError:
                 _logger.warning(
                     'Git %s failed for %s, retrying with GitHub token authentication',
                     action, repo_url or clone_url,
                 )
-                self._run_git_command_with_retries(auth_command)
+                self._run_git_command_with_retries(
+                    auth_command, reject_unsupported_filter=reject_unsupported_filter,
+                )
                 return
-        self._run_git_command_with_retries(command)
+        self._run_git_command_with_retries(
+            command, reject_unsupported_filter=reject_unsupported_filter,
+        )
 
-    def _run_git_command_with_retries(self, command: list[str]) -> None:
+    def _run_git_command_with_retries(
+        self,
+        command: list[str],
+        *,
+        reject_unsupported_filter: bool = False,
+    ) -> None:
         last_exc: subprocess.CalledProcessError | None = None
         last_timeout: subprocess.TimeoutExpired | None = None
         env = os.environ.copy()
         env.update(GIT_NON_INTERACTIVE_ENV)
         for _ in range(GIT_CLONE_RETRY_TIMES):
             try:
-                subprocess.run(
+                result = subprocess.run(
                     command, check=True, capture_output=True, text=True,
                     env=env, timeout=GIT_CLONE_TIMEOUT_SECONDS,
                 )
+                if reject_unsupported_filter and self._has_unsupported_filter_warning(
+                    result.stderr,
+                ):
+                    raise subprocess.CalledProcessError(
+                        1, command, output=result.stdout, stderr=result.stderr,
+                    )
                 return
             except subprocess.CalledProcessError as exc:
                 last_exc = exc
+                if reject_unsupported_filter and self._has_unsupported_filter_warning(
+                    exc.stderr,
+                ):
+                    break
             except subprocess.TimeoutExpired as exc:
                 last_timeout = exc
         if last_timeout is not None:
@@ -313,13 +341,21 @@ class GitOperations:
         assert last_exc is not None
         raise self._sanitize_called_process_error(last_exc)
 
-    def _run_git_command(self, command: list[str]) -> str:
+    @staticmethod
+    def _has_unsupported_filter_warning(stderr: str | bytes | None) -> bool:
+        if stderr is None:
+            return False
+        text = stderr.decode(errors='replace') if isinstance(stderr, bytes) else stderr
+        lowered = text.lower()
+        return any(message in lowered for message in UNSUPPORTED_FILTER_MESSAGES)
+
+    def _run_git_command(self, command: list[str], input_data: str | None = None) -> str:
         env = os.environ.copy()
         env.update(GIT_NON_INTERACTIVE_ENV)
         try:
             result = subprocess.run(
                 command, check=True, capture_output=True, text=True,
-                env=env, timeout=GIT_CLONE_TIMEOUT_SECONDS,
+                env=env, timeout=GIT_CLONE_TIMEOUT_SECONDS, input=input_data,
             )
         except subprocess.CalledProcessError as exc:
             raise self._sanitize_called_process_error(exc)
@@ -330,7 +366,7 @@ class GitOperations:
     def _get_git_ref_commit_id(self, clone_dir: Path, ref: str) -> str | None:
         try:
             commit_id = self._run_git_command(
-                ['git', '-C', str(clone_dir), 'rev-parse', ref]
+                ['git', '-C', str(clone_dir), 'rev-parse', f'{ref}^{{commit}}']
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             _logger.warning('Failed to read git ref commit id for %s (%s): %s', clone_dir, ref, exc)
@@ -343,29 +379,229 @@ class GitOperations:
         clone_url: str,
         repo_url: str | None,
     ) -> list[str]:
+        candidate_tags = self._list_remote_tags(clone_dir, clone_url, repo_url)
+        if not candidate_tags:
+            return []
+
+        tags_by_date = self._sort_remote_tags_by_creator_date(
+            clone_dir, clone_url, repo_url, candidate_tags,
+        )
+        latest_tags = tags_by_date[:self.max_tags_per_repo]
+        if not latest_tags:
+            return []
+
+        # The metadata pass uses tree:0, so force a second fetch for the
+        # selected tags with blob:none.  --refetch avoids negotiation deciding
+        # that the already-present commit is sufficient while its tree is
+        # still intentionally missing.
         fetch_tags_command = [
             'git', '-C', str(clone_dir), 'fetch',
-            '--tags', '--force', 'origin',
+            '--force', '--no-tags', '--refetch', '--filter=blob:none', 'origin',
         ]
+        fetch_tags_command.extend(
+            f'refs/tags/{tag}:refs/tags/{tag}' for tag in latest_tags
+        )
         try:
             self._run_git_command_with_auth_retry(fetch_tags_command, clone_url, repo_url, 'fetch tags')
-            output = self._run_git_command([
-                'git', '-C', str(clone_dir), 'for-each-ref',
-                '--sort=-creatordate', '--format=%(refname:short)', 'refs/tags',
-            ])
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to fetch skill repo tags for %s: %s', clone_dir, exc,
+            )
+            self._cleanup_orphaned_tmp_packs(clone_dir)
+            return []
+        return latest_tags
+
+    def _sort_remote_tags_by_creator_date(
+        self,
+        clone_dir: Path,
+        clone_url: str,
+        repo_url: str | None,
+        candidate_tags: list[str],
+    ) -> list[str]:
+        """Sort remote tags by tagger/commit time without fetching their trees.
+
+        Annotated tags use their tagger date; lightweight tags use the target
+        commit's committer date via Git's ``creatordate`` field.  If the remote
+        does not support partial clone filters, retain the natural-name order
+        returned by ``_list_remote_tags``.
+        """
+        # Stale candidate refs from a previous run trigger a Git client bug
+        # (``pack-objects.c:4310 should_include_obj`` assertion) on some
+        # servers, so drop them before fetching metadata again.
+        self._cleanup_candidate_refs(clone_dir)
+
+        probe_tag = candidate_tags[0]
+        metadata_probe_command = [
+            'git', '-C', str(clone_dir), 'fetch',
+            '--force', '--no-tags', '--depth=1', '--filter=tree:0', 'origin',
+            f'+refs/tags/{probe_tag}:{TAG_CANDIDATE_REF_PREFIX}/{probe_tag}',
+        ]
+        try:
+            self._run_git_command_with_auth_retry(
+                metadata_probe_command, clone_url, repo_url, 'probe tag metadata filter',
+                reject_unsupported_filter=True,
+            )
+            if len(candidate_tags) > 1:
+                metadata_fetch_command = [
+                    'git', '-C', str(clone_dir), 'fetch',
+                    '--force', '--no-tags', '--depth=1', '--filter=tree:0', 'origin',
+                    f'+refs/tags/*:{TAG_CANDIDATE_REF_PREFIX}/*',
+                ]
+                self._run_git_command_with_auth_retry(
+                    metadata_fetch_command, clone_url, repo_url, 'fetch tag metadata',
+                    reject_unsupported_filter=True,
+                )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to fetch tag metadata for %s; falling back to natural '
+                'tag ordering: %s',
+                clone_dir, exc,
+            )
+            self._cleanup_orphaned_tmp_packs(clone_dir)
+            return candidate_tags
+
+        command = [
+            'git', '-C', str(clone_dir), 'for-each-ref',
+            '--format=%(creatordate:unix)\t%(refname)',
+            f'{TAG_CANDIDATE_REF_PREFIX}/',
+        ]
+        try:
+            output = self._run_git_command(command)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to read tag creator dates for %s; falling back to '
+                'natural tag ordering: %s',
+                clone_dir, exc,
+            )
+            return candidate_tags
+
+        candidate_set = set(candidate_tags)
+        dated_tags: list[tuple[int, list[tuple[int, str]], str]] = []
+        prefix = f'{TAG_CANDIDATE_REF_PREFIX}/'
+        for line in output.splitlines():
+            date_text, separator, ref = line.partition('\t')
+            if not separator or not ref.startswith(prefix):
+                continue
+            tag = ref.removeprefix(prefix)
+            if tag not in candidate_set:
+                continue
+            try:
+                creator_timestamp = int(date_text)
+            except ValueError:
+                creator_timestamp = 0
+            dated_tags.append((creator_timestamp, self._tag_sort_key(tag), tag))
+
+        dated_tag_names = {tag for _, _, tag in dated_tags}
+        undated_tags = [tag for tag in candidate_tags if tag not in dated_tag_names]
+        dated_tags.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [tag for _, _, tag in dated_tags] + undated_tags
+
+    def _list_remote_tags(
+        self,
+        clone_dir: Path,
+        clone_url: str,
+        repo_url: str | None,
+    ) -> list[str]:
+        command = ['git', '-C', str(clone_dir), 'ls-remote', '--tags', '--refs', 'origin']
+        auth_command = self._build_github_token_command(command, clone_url)
+        try:
+            if auth_command is not None:
+                try:
+                    output = self._run_git_command(command)
+                except subprocess.CalledProcessError:
+                    _logger.warning(
+                        'Git ls-remote failed for %s, retrying with GitHub token authentication',
+                        repo_url or clone_url,
+                    )
+                    output = self._run_git_command(auth_command)
+            else:
+                output = self._run_git_command(command)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             _logger.warning('Failed to read skill repo tags for %s: %s', clone_dir, exc)
             return []
 
         tags: list[str] = []
         for line in output.splitlines():
-            tag = line.strip()
+            ref = line.split('\t', 1)[-1].strip()
+            if not ref.startswith('refs/tags/'):
+                continue
+            tag = ref.removeprefix('refs/tags/')
             if not tag or tag in tags:
                 continue
             tags.append(tag)
-            if len(tags) == self.max_tags_per_repo:
-                break
-        return tags
+        # ``ls-remote`` has no sort option, so sort tags by version for a
+        # stable "newest first" ordering.
+        return sorted(tags, key=self._tag_sort_key, reverse=True)
+
+    @staticmethod
+    def _tag_sort_key(tag: str) -> list[tuple[int, str]]:
+        """Natural sort key so version-like tags order correctly (v10 > v9)."""
+        parts: list[tuple[int, str]] = []
+        for token in re.split(r'(\d+)', tag):
+            if not token:
+                continue
+            if token.isdigit():
+                parts.append((1, f'{int(token):012d}'))
+            else:
+                parts.append((0, token.lower()))
+        return parts
+
+    @staticmethod
+    def _cleanup_candidate_refs(clone_dir: Path) -> None:
+        """Delete leftover ``refs/crawler/tag-candidates/*`` from earlier runs.
+
+        These temporary refs are only meaningful within a single
+        ``_sort_remote_tags_by_creator_date`` call.  Stale entries make the
+        next ``tree:0`` fetch negotiate against refs whose objects may be
+        missing, which trips the ``pack-objects`` assertion on some servers.
+        """
+        command = [
+            'git', '-C', str(clone_dir), 'for-each-ref',
+            '--format=delete %(refname)',
+            f'{TAG_CANDIDATE_REF_PREFIX}/',
+        ]
+        try:
+            output = subprocess.run(
+                command, capture_output=True, text=True, check=False,
+            )
+        except OSError as exc:
+            _logger.warning('Failed to enumerate candidate refs for %s: %s', clone_dir, exc)
+            return
+        if output.returncode != 0 or not output.stdout.strip():
+            return
+        delete_command = ['git', '-C', str(clone_dir), 'update-ref', '--stdin']
+        try:
+            subprocess.run(
+                delete_command, input=output.stdout, text=True,
+                capture_output=True, check=True,
+            )
+            _logger.debug(
+                'Cleaned up stale tag candidate refs in %s', clone_dir,
+            )
+        except (subprocess.CalledProcessError, OSError) as exc:
+            _logger.warning(
+                'Failed to clean up candidate refs for %s: %s', clone_dir, exc,
+            )
+
+    @staticmethod
+    def _cleanup_orphaned_tmp_packs(clone_dir: Path) -> None:
+        """Delete ``tmp_pack_*`` leftovers from interrupted fetch transfers.
+
+        Git streams incoming pack data into a ``tmp_pack_XXXXXX`` file and
+        renames it only after a successful transfer; a timeout or kill leaves
+        the partial file behind forever.  These orphans are never referenced
+        by any index, so removing them is safe as long as no fetch for this
+        repository is concurrently running.
+        """
+        pack_directory = clone_dir / '.git' / 'objects' / 'pack'
+        if not pack_directory.is_dir():
+            return
+        for entry in pack_directory.glob('tmp_pack_*'):
+            try:
+                entry.unlink()
+                _logger.info('Removed orphaned pack file %s', entry)
+            except OSError as exc:
+                _logger.warning('Failed to remove orphaned pack file %s: %s', entry, exc)
 
     # ── GitHub auth ────────────────────────────────────────────────
 

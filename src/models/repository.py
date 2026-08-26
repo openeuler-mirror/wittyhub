@@ -472,37 +472,85 @@ class SkillRepository:
         for skill_id in scanned_ids - existing_ids:
             skill = scanned_skills[skill_id]
             skill.skill_repo_id = skill_repo_id
-            self.session.add(skill)
-
-        for skill_id in scanned_ids & existing_ids:
-            scanned_skill = scanned_skills[skill_id]
-            existing_skill = existing_skills[skill_id]
-            scanned_skill.skill_repo_id = skill_repo_id
-            scanned_skill.id = existing_skill.id
-            if scanned_skill.commit_id == existing_skill.commit_id:
+            existing_skill = existing_skills.get(skill_id)
+            if existing_skill is None:
+                self.session.add(skill)
+                continue
+            skill.id = existing_skill.id
+            if self._is_content_unchanged(existing_skill, skill):
                 continue
             await self.session.execute(
                 update(Skill)
                 .where(Skill.id == existing_skill.id)
                 .values(
                     **self._build_summary_update_values(
-                        scanned_skill,
+                        skill,
                         download_count=existing_skill.download_count,
                     )
                 )
             )
 
-        for skill in tagged_skills:
-            skill.skill_repo_id = skill_repo_id
-
-        await self.session.execute(
-            delete(SkillVersion).where(SkillVersion.skill_repo_id == skill_repo_id)
+        existing_versions_result = await self.session.execute(
+            select(SkillVersion).where(SkillVersion.skill_repo_id == skill_repo_id)
         )
-        self.session.add_all(tagged_skills)
+        existing_versions = {
+            (version.skill_id, version.version): version
+            for version in existing_versions_result.scalars().all()
+            if version.skill_id
+        }
+        scanned_versions = {
+            (version.skill_id, version.version): version
+            for version in tagged_skills
+            if version.skill_id
+        }
+
+        removed_version_ids = [
+            existing_versions[key].id
+            for key in set(existing_versions) - set(scanned_versions)
+        ]
+        if removed_version_ids:
+            await self.session.execute(
+                delete(SkillVersion).where(SkillVersion.id.in_(removed_version_ids))
+            )
+
+        for version_key, version in scanned_versions.items():
+            version.skill_repo_id = skill_repo_id
+            existing_version = existing_versions.get(version_key)
+            if existing_version is None:
+                self.session.add(version)
+                continue
+            version.id = existing_version.id
+            if self._is_content_unchanged(existing_version, version):
+                continue
+            await self.session.execute(
+                update(SkillVersion)
+                .where(SkillVersion.id == existing_version.id)
+                .values(
+                    **self._build_summary_update_values(
+                        version,
+                        download_count=existing_version.download_count,
+                    )
+                )
+            )
+
         await self.session.flush()
         if commit:
             await self.session.commit()
         return latest_skills, tagged_skills
+
+    @staticmethod
+    def _is_content_unchanged(
+        existing: Skill | SkillVersion,
+        scanned: Skill | SkillVersion,
+    ) -> bool:
+        """Return whether a scanned record is content-identical to the stored one.
+
+        The directory ``tree_hash`` is the primary signal; when it is missing on
+        either side we fall back to comparing ``commit_id``.
+        """
+        if existing.tree_hash is not None and scanned.tree_hash is not None:
+            return existing.tree_hash == scanned.tree_hash
+        return existing.commit_id == scanned.commit_id
 
     def _build_summary_update_values(
         self,
@@ -517,6 +565,7 @@ class SkillRepository:
             "description": representative.description,
             "version": representative.version,
             "commit_id": representative.commit_id,
+            "tree_hash": representative.tree_hash,
             "author": representative.author,
             "source": representative.source,
             "source_url": representative.source_url,
@@ -543,15 +592,6 @@ class SkillRepository:
         result = await self.session.execute(query)
         skills = list(result.scalars().all())
         return sorted(skills, key=self._version_sort_key, reverse=True)
-
-    async def get_by_repo_and_name(self, repo: str, skill_name: str) -> list[SkillVersion]:
-        public_skill_id = f"{repo}/{skill_name}"
-        result = await self.session.execute(
-            select(SkillVersion)
-            .where(SkillVersion.skill_id == public_skill_id)
-            .order_by(desc(SkillVersion.updated_at), desc(SkillVersion.created_at))
-        )
-        return list(result.scalars().all())
 
     async def get_by_id(self, id: uuid.UUID) -> Skill | None:
         result = await self.session.execute(

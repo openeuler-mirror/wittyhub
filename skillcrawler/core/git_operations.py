@@ -358,6 +358,48 @@ class GitOperations:
             return None
         return parse_fn(text)
 
+    def get_skill_tree_hashes(
+        self,
+        repo_root: Path,
+        relative_skill_paths: list[str],
+        *,
+        ref: str = 'HEAD',
+    ) -> dict[str, str | None]:
+        """Return directory tree hashes for multiple skills in one ``rev-parse``.
+
+        Maps each repo-relative SKILL.md path to its parent directory's tree
+        hash (the root tree hash when SKILL.md sits at the repository root).
+        Unresolvable paths map to ``None`` instead of raising.
+        """
+        if not relative_skill_paths:
+            return {}
+
+        def _treeish(relative_skill_path: str) -> str:
+            skill_dir = Path(relative_skill_path).parent.as_posix()
+            if skill_dir == '.':
+                skill_dir = ''
+            return f'{ref}:{skill_dir}'
+
+        command = ['git', '-C', str(repo_root), 'rev-parse']
+        command.extend(_treeish(path) for path in relative_skill_paths)
+
+        try:
+            lines = self._run_git_command(command).splitlines()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to read tree hashes for %s (%s): %s',
+                repo_root, ref, exc,
+            )
+            lines = []
+
+        hashes: dict[str, str | None] = {}
+        for index, path in enumerate(relative_skill_paths):
+            if index < len(lines):
+                hashes[path] = lines[index] or None
+            else:
+                hashes[path] = None
+        return hashes
+
     # ── Version snapshots ──────────────────────────────────────────
 
     @staticmethod

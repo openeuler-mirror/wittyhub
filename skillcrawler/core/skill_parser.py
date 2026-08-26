@@ -308,18 +308,6 @@ def should_skip_relative_path(relative_path: str) -> bool:
     )
 
 
-def find_scannable_skill_files(repo_root: Path) -> list[Path]:
-    """Return SKILL.md files that are eligible for repository discovery."""
-    return sorted(
-        skill_file
-        for skill_file in repo_root.rglob('SKILL.md')
-        if skill_file.is_file()
-        and not should_skip_relative_path(
-            to_repository_relative_path(repo_root, skill_file)
-        )
-    )
-
-
 def normalize_git_clone_url(url: str | None) -> str:
     if not url:
         return ''

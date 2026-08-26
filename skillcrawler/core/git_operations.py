@@ -47,7 +47,7 @@ class GitOperations:
         branch: str | None = None,
         repo_url: str | None = None,
     ) -> None:
-        command = ['git', 'clone', '--depth', '1']
+        command = ['git', 'clone', '--depth', '1', '--no-checkout', '--filter=blob:none']
         if branch:
             command.extend(['--branch', branch])
         command.extend([clone_url, str(clone_dir)])
@@ -78,7 +78,7 @@ class GitOperations:
                 fetch_command, clone_url, repo_url, 'fetch',
             )
             self._run_git_command_with_retries(
-                ['git', '-C', str(clone_dir), 'checkout', '-B', target_branch, 'FETCH_HEAD']
+                ['git', '-C', str(clone_dir), 'update-ref', f'refs/heads/{target_branch}', 'FETCH_HEAD']
             )
             return
 
@@ -120,162 +120,6 @@ class GitOperations:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return (clone_dir / '.git' / 'shallow').exists()
         return is_shallow.strip().lower() == 'true'
-
-    def ensure_full_history(
-        self,
-        clone_dir: Path,
-        clone_url: str,
-        repo_url: str | None,
-    ) -> None:
-        if not self.is_shallow_repository(clone_dir):
-            return
-
-        partial_clone_settings = (
-            ('remote.origin.promisor', 'true'),
-            ('remote.origin.partialclonefilter', 'blob:none'),
-        )
-        for key, value in partial_clone_settings:
-            self._run_git_command_with_retries(
-                ['git', '-C', str(clone_dir), 'config', key, value]
-            )
-
-        try:
-            _logger.info(
-                'Discover: fetching full commit/tree history with blob:none for '
-                'path-level commits: %s',
-                clone_dir,
-            )
-            self._run_git_command_with_auth_retry(
-                [
-                    'git', '-C', str(clone_dir), 'fetch',
-                    '--unshallow', '--filter=blob:none', 'origin',
-                ],
-                clone_url,
-                repo_url,
-                'fetch filtered full history',
-            )
-        except subprocess.CalledProcessError as exc:
-            _logger.warning(
-                'Filtered unshallow is unsupported for %s; retrying without '
-                'blob filter: %s',
-                clone_dir,
-                exc,
-            )
-            for key, _ in partial_clone_settings:
-                self._run_git_command_with_retries(
-                    ['git', '-C', str(clone_dir), 'config', '--unset-all', key]
-                )
-            try:
-                self._run_git_command_with_auth_retry(
-                    ['git', '-C', str(clone_dir), 'fetch', '--unshallow', 'origin'],
-                    clone_url,
-                    repo_url,
-                    'fetch full history',
-                )
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as fallback_exc:
-                _logger.warning(
-                    'Failed to unshallow skill repo %s; skill directory commits '
-                    'may use HEAD: %s',
-                    clone_dir,
-                    fallback_exc,
-                )
-        except subprocess.TimeoutExpired as exc:
-            _logger.warning(
-                'Filtered unshallow timed out for %s; skill directory commits '
-                'may use HEAD: %s',
-                clone_dir,
-                exc,
-            )
-
-    def get_latest_commit_id_for_path(
-        self,
-        repo_root: Path,
-        relative_path: str,
-        *,
-        ref: str = 'HEAD',
-    ) -> str | None:
-        normalized_path = relative_path.strip('/') or '.'
-        try:
-            commit_id = self._run_git_command(
-                [
-                    'git',
-                    '-C',
-                    str(repo_root),
-                    'log',
-                    '-1',
-                    '--format=%H',
-                    ref,
-                    '--',
-                    normalized_path,
-                ]
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            _logger.warning(
-                'Failed to read latest commit for %s (%s:%s): %s',
-                repo_root,
-                ref,
-                normalized_path,
-                exc,
-            )
-            return None
-        return commit_id.strip() or None
-
-    def get_latest_commit_ids_for_paths(
-        self,
-        repo_root: Path,
-        relative_paths: list[str],
-        *,
-        ref: str = 'HEAD',
-    ) -> dict[str, str | None]:
-        """Resolve the newest commit for many directories with one git log."""
-        normalized_paths = list(dict.fromkeys(
-            path.strip('/') or '.' for path in relative_paths
-        ))
-        if not normalized_paths:
-            return {}
-
-        marker = '__WITTYHUB_COMMIT__'
-        try:
-            output = self._run_git_command(
-                [
-                    'git', '-C', str(repo_root), 'log',
-                    f'--format={marker}%H', '--name-only', ref, '--',
-                    *normalized_paths,
-                ]
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            _logger.warning(
-                'Failed to batch-read latest commits for %s (%s, paths=%d): %s',
-                repo_root, ref, len(normalized_paths), exc,
-            )
-            return {path: None for path in normalized_paths}
-
-        unresolved = set(normalized_paths)
-        commits: dict[str, str | None] = {path: None for path in normalized_paths}
-        current_commit: str | None = None
-        for line in output.splitlines():
-            value = line.strip()
-            if not value:
-                continue
-            if value.startswith(marker):
-                current_commit = value.removeprefix(marker).strip() or None
-                continue
-            if current_commit is None:
-                continue
-            changed_path = value.strip('/')
-            matched = [
-                path
-                for path in unresolved
-                if path == '.'
-                or changed_path == path
-                or changed_path.startswith(f'{path}/')
-            ]
-            for path in matched:
-                commits[path] = current_commit
-                unresolved.remove(path)
-            if not unresolved:
-                break
-        return commits
 
     def get_cloned_repo_branch(self, clone_dir: Path) -> str | None:
         return self._get_cloned_repo_branch(clone_dir)

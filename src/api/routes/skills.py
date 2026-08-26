@@ -1,9 +1,12 @@
-from typing import Annotated
 import logging
+import re
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from skillcrawler.core.skill_parser import extract_owner_repo
 
 from src.api.schemas.skill import (
     ErrorResponse,
@@ -34,6 +37,36 @@ from src.storage.downloader import (
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 SkillIdPath = Annotated[str, Path(min_length=1, max_length=255)]
+
+
+def _derive_scan_skill_path(source: str, source_url: str, skill_id: str) -> str:
+    """Derive the skill directory (relative to its git repo) for the Jenkins scan.
+
+    Mirrors ``SkillManager._relative_skill_path`` so manual audits scan the same
+    skill directory as crawler-triggered audits.  Empty string means repo root.
+    """
+    # 1) source_url 带 /blob/<ref>/.../SKILL.md 时直接取其父目录
+    blob_match = re.search(r"/blob/[^/]+/(.+)", source_url or "")
+    if blob_match:
+        relative = blob_match.group(1)
+        if relative.endswith("SKILL.md"):
+            return relative.rsplit("/", 1)[0] if "/" in relative else ""
+
+    # 2) 从 skill_id 推导：{source}/{owner}/{repo}/<skill dir>
+    try:
+        owner_repo = extract_owner_repo(source_url)
+    except ValueError:
+        return ""
+    prefix = f"{source}/{owner_repo}"
+    if skill_id == prefix:
+        return ""  # 整仓库即 skill，扫仓库根
+    if skill_id.startswith(prefix + "/"):
+        skill_path = skill_id.removeprefix(prefix + "/").strip("/")
+        repository_name = owner_repo.rsplit("/", 1)[-1]
+        if not skill_path or skill_path == repository_name:
+            return ""
+        return skill_path
+    return ""
 
 
 @router.get("/telemetry")
@@ -201,6 +234,9 @@ async def trigger_skill_audit(
             "version": skill.version,
             "commit_id": skill.commit_id,
             "content": skill.content,
+            "skill_path": _derive_scan_skill_path(
+                skill.source, skill.source_url, skill.skill_id
+            ),
         },
         scanners=scanner_list,
         async_mode=async_mode,
@@ -381,7 +417,14 @@ async def create_skill(
                 skill.skill_id,
                 skill.source,
                 skill.source_url,
-                {"version": skill.version, "commit_id": skill.commit_id, "content": skill.content or ""},
+                {
+                    "version": skill.version,
+                    "commit_id": skill.commit_id,
+                    "content": skill.content or "",
+                    "skill_path": _derive_scan_skill_path(
+                        skill.source, skill.source_url, skill.skill_id
+                    ),
+                },
                 async_mode=async_mode,
             )
             # risk_score is already persisted by audit_skill internally

@@ -984,6 +984,48 @@ class SecurityAuditRepository:
         await self.session.refresh(audit)
         return audit
 
+    async def upsert_many_by_resource(
+        self,
+        resource_type: str,
+        entries: list[tuple[uuid.UUID, dict[str, Any]]],
+    ) -> list[SecurityAudit]:
+        """Batch create/update SecurityAudit rows for one resource type.
+
+        Mirrors ``upsert_by_resource`` semantics — update an existing row's
+        fields and reset ``skillspector_collected`` — but issues a single
+        lookup and a single flush instead of one round-trip per row.
+        """
+        if not entries:
+            return []
+
+        resource_ids = [resource_id for resource_id, _ in entries]
+        result = await self.session.execute(
+            select(SecurityAudit).where(
+                SecurityAudit.resource_type == resource_type,
+                SecurityAudit.resource_id.in_(resource_ids),
+            )
+        )
+        existing_by_id = {
+            audit.resource_id: audit for audit in result.scalars().all()
+        }
+
+        audits: list[SecurityAudit] = []
+        for resource_id, audit_data in entries:
+            existing = existing_by_id.get(resource_id)
+            if existing is not None:
+                for key, value in audit_data.items():
+                    setattr(existing, key, value)
+                if existing.details:
+                    existing.details.pop('skillspector_collected', None)
+                audits.append(existing)
+            else:
+                audit = SecurityAudit(**audit_data)
+                self.session.add(audit)
+                audits.append(audit)
+
+        await self.session.flush()
+        return audits
+
 
 class DownloadHistoryRepository:
     def __init__(self, session: AsyncSession):

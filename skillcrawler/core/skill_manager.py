@@ -362,17 +362,22 @@ class SkillManager:
     ) -> None:
         """Create ``SecurityAudit`` records for async-triggered skills."""
         records: list[Skill | SkillVersion] = [*latest_skills, *tagged_skills]
-        pending = [record for record in records if self._has_new_security_audit(record)]
+        # Records without a database id were never persisted (e.g. dropped as
+        # skill_id duplicates); writing their audit would violate the
+        # resource_id NOT NULL constraint and fail the whole transaction.
+        pending = [
+            record for record in records
+            if self._has_new_security_audit(record) and record.id is not None
+        ]
 
         if not pending:
             return
 
         audit_repo = SecurityAuditRepository(self.skill_repository.session)
-        for record in pending:
-            await audit_repo.upsert_by_resource(
-                resource_type='skill',
-                resource_id=record.id,
-                audit_data={
+        entries = [
+            (
+                record.id,
+                {
                     'resource_type': 'skill',
                     'resource_id': record.id,
                     'version': record.version,
@@ -383,6 +388,9 @@ class SkillManager:
                     'details': dict(record.extra_metadata['security_audit']),
                 },
             )
+            for record in pending
+        ]
+        await audit_repo.upsert_many_by_resource('skill', entries)
 
         _logger.info('Upserted %d SecurityAudit records', len(pending))
 

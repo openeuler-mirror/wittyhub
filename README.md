@@ -226,6 +226,7 @@ API 容器中的 SECTION__FIELD 环境变量
 | `POSTGRES__PASSWORD` | `postgres.password` |
 | `POSTGRES__DB` | `postgres.db` |
 | `SECURITY__SKILLSPECTOR_JENKINS_TOKEN` | `security.skillspector_jenkins_token` |
+| `SECURITY__SKILLSPECTOR_TIMEOUT` | `security.skillspector_timeout` |
 
 ```mermaid
 flowchart LR

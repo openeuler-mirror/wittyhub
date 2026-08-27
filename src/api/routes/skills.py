@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from skillcrawler.core.skill_parser import extract_owner_repo
 
 from src.api.schemas.skill import (
+    AuditByUrlRequest,
+    AuditByUrlResponse,
     ErrorResponse,
     SecurityAuditResponse,
     SkillCreate,
@@ -27,6 +30,7 @@ from src.models.repository import (
     SkillRepoRepository,
     SkillRepository,
 )
+from src.security.detector import validate_git_url
 from src.storage.downloader import (
     DownloadManager,
     SkillArchiveConflictError,
@@ -67,6 +71,36 @@ def _derive_scan_skill_path(source: str, source_url: str, skill_id: str) -> str:
             return ""
         return skill_path
     return ""
+
+
+def _derive_audit_target(payload: "AuditByUrlRequest") -> tuple[str, str, str]:
+    """Derive ``(git_url, ref, skill_path)`` from an audit-by-url payload.
+
+    * ``repo_url`` mode -> scan the whole repository at the given branch.
+    * ``skill_url`` mode (``<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md``)
+      -> scan a single skill directory.
+    """
+    if payload.skill_url:
+        parsed = urlparse(payload.skill_url.strip())
+        segments = [segment for segment in parsed.path.strip("/").split("/") if segment]
+        if len(segments) < 5 or segments[2] != "blob":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "skill_url must be a "
+                    "'<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md' URL"
+                ),
+            )
+        owner, repo, _blob, ref, *rest = segments
+        skill_path = "/".join(rest)
+        if skill_path.endswith("SKILL.md"):
+            skill_path = skill_path.rsplit("/", 1)[0] if "/" in skill_path else ""
+        git_url = f"{parsed.scheme}://{parsed.netloc}/{owner}/{repo}"
+        return git_url, ref, skill_path
+
+    git_url = payload.repo_url.strip()
+    ref = (payload.branch or "main").strip()
+    return git_url, ref, ""
 
 
 @router.get("/telemetry")
@@ -266,6 +300,55 @@ async def trigger_skill_audit(
         details=latest_audit.details,
         audited_at=latest_audit.audited_at,
     )
+
+
+@router.post(
+    "/audit-by-url",
+    response_model=AuditByUrlResponse | ErrorResponse,
+    dependencies=[Depends(require_admin_token)],
+)
+async def audit_by_url(
+    payload: AuditByUrlRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Run a one-off security audit for a git URL without registering the skill.
+
+    Used by the openEuler-skills PR gate: audit a skill repository URL
+    (whole repo) or a SKILL.md URL (single skill) before the content is
+    merged into the skill index.  Nothing is persisted to the database.
+
+    The request must provide either ``repo_url`` (with optional ``branch``)
+    or ``skill_url`` (a ``.../blob/<ref>/<path>/SKILL.md`` link).
+    """
+    if not payload.repo_url and not payload.skill_url:
+        raise HTTPException(
+            status_code=422, detail="Either repo_url or skill_url is required"
+        )
+
+    security_service = SecurityService(db)
+    if not security_service.detector.enable_audit:
+        raise HTTPException(status_code=503, detail="Security audit is disabled")
+
+    git_url, ref, skill_path = _derive_audit_target(payload)
+
+    is_valid, error_msg = validate_git_url(git_url)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid git URL: {error_msg}"
+        )
+
+    scanner_list = None
+    if payload.scanners:
+        scanner_list = [s.strip() for s in payload.scanners.split(",") if s.strip()]
+
+    result = await security_service.audit_external(
+        git_url=git_url,
+        ref=ref,
+        skill_path=skill_path,
+        scanners=scanner_list,
+        async_mode=payload.async_mode,
+    )
+    return AuditByUrlResponse(**result)
 
 
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)

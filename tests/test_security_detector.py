@@ -71,13 +71,13 @@ def test_final_result_log_contains_report():
             risk_level="low",
             score=8,
             signal_count=1,
-            report={"recommendation": "可以使用"},
         )
 
     message = log_info.call_args.args[1]
     assert '"event":"skillspector_final_result"' in message
     assert '"build_number":123' in message
-    assert '"recommendation":"可以使用"' in message
+    assert '"risk_level":"low"' in message
+    assert '"score":8' in message
 
 
 def test_missing_jenkins_build_is_terminal():
@@ -106,3 +106,41 @@ def test_collector_event_log_contains_decision():
     assert '"event":"item_deferred"' in message
     assert '"build_number":456' in message
     assert '"action":"retry_next_poll"' in message
+
+
+def test_run_scan_uses_report_even_when_build_not_success():
+    """Critical findings make the Jenkins build exit non-zero, but report.json
+    still exists.  The report artifact must be treated as the source of truth."""
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    report = {"risk_assessment": {"severity": "CRITICAL", "score": 95}}
+    report_md = "# Security Report"
+
+    with (
+        patch.object(client, "trigger_scan", return_value=42),
+        patch.object(client, "wait_for_build", return_value="FAILURE"),
+        patch.object(client, "fetch_report", return_value=report) as mock_fetch,
+        patch.object(client, "fetch_report_md", return_value=report_md) as mock_fetch_md,
+    ):
+        result, md = client.run_scan("https://gitcode.com/openeuler/foo")
+
+    mock_fetch.assert_called_once_with(42)
+    mock_fetch_md.assert_called_once_with(42)
+    assert result == report
+    assert md == report_md
+
+
+def test_run_scan_errors_when_report_unavailable():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+
+    with (
+        patch.object(client, "trigger_scan", return_value=42),
+        patch.object(client, "wait_for_build", return_value="SUCCESS"),
+        patch.object(client, "fetch_report", return_value=None),
+    ):
+        result, _ = client.run_scan("https://gitcode.com/openeuler/foo")
+
+    assert "error" in result

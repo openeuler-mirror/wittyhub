@@ -99,6 +99,42 @@ class SecurityAuditResponse(BaseModel):
     audited_at: datetime
 
 
+class AuditByUrlRequest(BaseModel):
+    """One-off security audit for a skill repository URL or a SKILL.md URL.
+
+    Either ``repo_url`` (scan the whole repository) or ``skill_url`` (a
+    ``<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md`` link) must be provided.
+    """
+
+    repo_url: str | None = Field(
+        None, max_length=2048, description="Git repository URL to scan (whole repo)"
+    )
+    branch: str | None = Field(
+        None, max_length=255, description="Git ref/branch to scan (default: main)"
+    )
+    skill_url: str | None = Field(
+        None, max_length=2048, description="SKILL.md blob URL to scan (single skill)"
+    )
+    scanners: str | None = Field(
+        None, description="Comma-separated scanner list (default: skillspector)"
+    )
+    async_mode: bool = Field(
+        False, description="Trigger scan without waiting for the result"
+    )
+
+
+class AuditByUrlResponse(BaseModel):
+    """Result of a one-off audit-by-URL scan (not persisted)."""
+
+    git_url: str
+    ref: str
+    skill_path: str
+    risk_level: str
+    risk_score: int | None = None
+    risk_signals: list[RiskSignalSchema] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None

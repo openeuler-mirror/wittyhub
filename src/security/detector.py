@@ -211,7 +211,7 @@ class SkillspectorClient:
         jenkins_url: str,
         user: str = "",
         token: str = "",
-        timeout: float = 150.0,
+        timeout: float = 600.0,
         poll_interval: float = 1.0,
     ):
         self.base_url = jenkins_url.rstrip("/")
@@ -234,18 +234,26 @@ class SkillspectorClient:
         ref: str = "main",
         skill_path: str = "",
         scanners: str = "skillspector",
-    ) -> dict[str, Any]:
-        """Convenience: trigger a build, wait for it, and return the report."""
+    ) -> tuple[dict[str, Any], str | None]:
+        """Convenience: trigger a build, wait for it, and return the report.
+
+        Returns a ``(report, report_md)`` tuple.  ``report_md`` is the raw
+        Markdown report artifact (or *None* if unavailable).  A build may
+        finish with a non-SUCCESS status (e.g. skillspector reports a critical
+        finding and the pipeline exits non-zero) while still producing
+        report.json.  We therefore treat the report artifact as the source of
+        truth and only error out when it cannot be fetched.
+        """
         build_number = self.trigger_scan(git_url, ref, skill_path, scanners)
         if build_number is None:
-            return {"error": "Failed to trigger Jenkins build"}
+            return {"error": "Failed to trigger Jenkins build"}, None
         status = self.wait_for_build(build_number)
-        if status != "SUCCESS":
-            return {"error": f"Build {build_number} ended with status {status}"}
+        if status is None:
+            return {"error": f"Build {build_number} did not finish within the timeout"}, None
         report = self.fetch_report(build_number)
         if report is None:
-            return {"error": f"Failed to fetch report for build {build_number}"}
-        return report
+            return {"error": f"Failed to fetch report for build {build_number} (status {status})"}, None
+        return report, self.fetch_report_md(build_number)
 
     # ------------------------------------------------------------------
     # Low-level Jenkins API
@@ -393,6 +401,29 @@ class SkillspectorClient:
         """Fetch the JSON report artifact from a completed build."""
         report, _ = self.fetch_report_with_status(build_number)
         return report
+
+    def fetch_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report artifact (report.md) from a completed build."""
+        url = (
+            f"{self.base_url}{self.JOB_PATH}/{build_number}"
+            "/artifact/reports/skillspector/report.md"
+        )
+        with httpx.Client(timeout=30.0) as client:
+            try:
+                resp = client.get(url, auth=self.auth)
+            except httpx.RequestError as exc:
+                logger.error("Failed to fetch report.md: %s", exc)
+                return None
+
+        if resp.status_code != 200:
+            logger.warning(
+                "Report.md fetch failed: build_number=%s status_code=%s url=%s",
+                build_number,
+                resp.status_code,
+                url,
+            )
+            return None
+        return resp.text
 
     def fetch_report_with_status(
         self, build_number: int,
@@ -904,6 +935,7 @@ class SecurityDetector:
                 jenkins_url=settings.security.skillspector_jenkins_url,
                 user=settings.security.skillspector_jenkins_user,
                 token=settings.security.skillspector_jenkins_token,
+                timeout=settings.security.skillspector_timeout,
             )
             if not self._skillspector_client.enabled:
                 logger.warning("skillspector enabled but no credentials configured")
@@ -1008,7 +1040,7 @@ class SecurityDetector:
         ref = version if version else "main"
 
         try:
-            report = await asyncio.to_thread(
+            report, report_md = await asyncio.to_thread(
                 self._skillspector_client.run_scan,
                 git_url=source_url,
                 ref=ref,
@@ -1041,18 +1073,22 @@ class SecurityDetector:
         risk_level_map = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
         risk_level = risk_level_map.get(severity, "unknown")
 
+        details: dict[str, Any] = {
+            "source": "skillspector",
+            "skillspector_version": report.get("metadata", {}).get("skillspector_version"),
+            "skillspector_score": score,
+            "recommendation": report.get("risk_assessment", {}).get("recommendation"),
+            "skillspector_report": report,
+        }
+        if report_md:
+            details["skillspector_report_md"] = report_md
+
         return SecurityReport(
             resource_type="skill",
             resource_id=source_url,
             risk_level=risk_level,
             risk_signals=risk_signals,
-            details={
-                "source": "skillspector",
-                "skillspector_version": report.get("metadata", {}).get("skillspector_version"),
-                "skillspector_score": score,
-                "recommendation": report.get("risk_assessment", {}).get("recommendation"),
-                "skillspector_report": report,
-            },
+            details=details,
         )
 
 
@@ -1073,6 +1109,7 @@ async def start_skillspector_collector() -> SkillspectorCollector | None:
         jenkins_url=settings.security.skillspector_jenkins_url,
         user=settings.security.skillspector_jenkins_user,
         token=settings.security.skillspector_jenkins_token,
+        timeout=settings.security.skillspector_timeout,
     )
     if not client.enabled:
         logger.warning("Skillspector enabled but no credentials — collector skipped")

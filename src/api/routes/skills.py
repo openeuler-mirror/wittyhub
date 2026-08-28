@@ -12,6 +12,7 @@ from skillcrawler.core.skill_parser import extract_owner_repo
 from src.api.schemas.skill import (
     AuditByUrlRequest,
     AuditByUrlResponse,
+    AuditByUrlResultResponse,
     ErrorResponse,
     SecurityAuditResponse,
     SkillCreate,
@@ -349,6 +350,30 @@ async def audit_by_url(
         async_mode=payload.async_mode,
     )
     return AuditByUrlResponse(**result)
+
+
+@router.get(
+    "/audit-by-url/result",
+    response_model=AuditByUrlResultResponse | ErrorResponse,
+    dependencies=[Depends(require_admin_token)],
+)
+async def audit_by_url_result(
+    build_number: Annotated[int, Query(ge=1, description="Jenkins build number")],
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll the result of an async audit-by-URL scan (async_mode=True).
+
+    The openEuler-skills PR gate triggers a scan with ``async_mode=True``
+    (which returns immediately with ``details.skillspector_build_number``),
+    then polls this endpoint until ``status == "done"``.  Returns
+    ``pending`` while the Jenkins build is still running, ``done`` with the
+    audit result once the report is collected, or ``error``.
+    """
+    security_service = SecurityService(db)
+    if not security_service.detector.enable_audit:
+        raise HTTPException(status_code=503, detail="Security audit is disabled")
+    result = await security_service.get_external_result(build_number)
+    return AuditByUrlResultResponse(**result)
 
 
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)

@@ -23,7 +23,18 @@ security:
   enable_audit: true
   skillspector_jenkins_url: "http://localhost:8083"
   skillspector_jenkins_user: "admin"
+  # 该 Token 同时用作 Jenkins admin 密码：skillspector 容器启动时直接读取
+  #（WITTYHUB_CONFIG 指向本文件），注入为 JENKINS_ADMIN_PASS。
   skillspector_jenkins_token: ""
+  # 同步扫描等待 Jenkins 构建结束的超时（秒）；超过后该次审计返回 unknown
+  skillspector_timeout: 600
+  # Jenkins 容器部署参数（skillspector 容器启动时读取，注入为
+  # JENKINS_OPTS / JENKINS_ADMIN_PASS / JENKINS_NUM_EXECUTORS /
+  # JENKINS_QUIET_PERIOD / WITTYHUB_REPOSITORY_ROOT 环境变量）
+  skillspector_jenkins_http_port: 8083
+  skillspector_jenkins_num_executors: 10
+  skillspector_jenkins_quiet_period: 5
+  skillspector_repository_root: "/opt/wittyhub/skill-repositories"
 
 postgres:
   host: "localhost"

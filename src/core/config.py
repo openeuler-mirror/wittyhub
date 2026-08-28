@@ -56,6 +56,14 @@ class SecurityConfig(BaseSettings):
     skillspector_jenkins_url: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_URL
     skillspector_jenkins_user: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_USER
     skillspector_jenkins_token: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_TOKEN
+    # 同步扫描等待 Jenkins 构建结束的超时（秒），默认 600（10 分钟）
+    skillspector_timeout: float = 600.0  # env: SECURITY__SKILLSPECTOR_TIMEOUT
+    # Jenkins 部署参数（skillspector 容器入口读取注入为 JENKINS_* 环境变量；
+    # 后端仅解析 config.yaml，不消费这些字段）
+    skillspector_jenkins_http_port: int = 8083
+    skillspector_jenkins_num_executors: int = 10
+    skillspector_jenkins_quiet_period: int = 5
+    skillspector_repository_root: str = "/opt/wittyhub/skill-repositories"
 
 
 class AppConfig(BaseSettings):

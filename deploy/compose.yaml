@@ -118,12 +118,11 @@ services:
       - "8083:8083"
       - "50000:50000"
     environment:
-      JENKINS_OPTS: --httpPort=8083
-      JENKINS_ADMIN_PASS: ${SECURITY__SKILLSPECTOR_JENKINS_TOKEN:?SECURITY__SKILLSPECTOR_JENKINS_TOKEN is required}
-      JENKINS_NUM_EXECUTORS: ${JENKINS_NUM_EXECUTORS:-10}
-      JENKINS_QUIET_PERIOD: ${JENKINS_QUIET_PERIOD:-5}
-      WITTYHUB_REPOSITORY_ROOT: /opt/wittyhub/skill-repositories
+      # Jenkins 部署参数（含 admin 密码）由 config.yaml（WITTYHUB_CONFIG）统一管理，
+      # 容器入口会把 security.skillspector_* 注入为 JENKINS_* 环境变量。
+      WITTYHUB_CONFIG: /app/config.yaml
     volumes:
+      - ../config.yaml:/app/config.yaml:ro
       - jenkins-data:/var/jenkins_home
       - /opt/wittyhub:/opt/wittyhub:ro
     networks:

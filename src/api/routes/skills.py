@@ -1,11 +1,17 @@
-from typing import Annotated
 import logging
+import re
+from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from skillcrawler.core.skill_parser import extract_owner_repo
+
 from src.api.schemas.skill import (
+    AuditByUrlRequest,
+    AuditByUrlResponse,
     ErrorResponse,
     SecurityAuditResponse,
     SkillCreate,
@@ -24,6 +30,7 @@ from src.models.repository import (
     SkillRepoRepository,
     SkillRepository,
 )
+from src.security.detector import validate_git_url
 from src.storage.downloader import (
     DownloadManager,
     SkillArchiveConflictError,
@@ -34,6 +41,66 @@ from src.storage.downloader import (
 router = APIRouter()
 _logger = logging.getLogger(__name__)
 SkillIdPath = Annotated[str, Path(min_length=1, max_length=255)]
+
+
+def _derive_scan_skill_path(source: str, source_url: str, skill_id: str) -> str:
+    """Derive the skill directory (relative to its git repo) for the Jenkins scan.
+
+    Mirrors ``SkillManager._relative_skill_path`` so manual audits scan the same
+    skill directory as crawler-triggered audits.  Empty string means repo root.
+    """
+    # 1) source_url 带 /blob/<ref>/.../SKILL.md 时直接取其父目录
+    blob_match = re.search(r"/blob/[^/]+/(.+)", source_url or "")
+    if blob_match:
+        relative = blob_match.group(1)
+        if relative.endswith("SKILL.md"):
+            return relative.rsplit("/", 1)[0] if "/" in relative else ""
+
+    # 2) 从 skill_id 推导：{source}/{owner}/{repo}/<skill dir>
+    try:
+        owner_repo = extract_owner_repo(source_url)
+    except ValueError:
+        return ""
+    prefix = f"{source}/{owner_repo}"
+    if skill_id == prefix:
+        return ""  # 整仓库即 skill，扫仓库根
+    if skill_id.startswith(prefix + "/"):
+        skill_path = skill_id.removeprefix(prefix + "/").strip("/")
+        repository_name = owner_repo.rsplit("/", 1)[-1]
+        if not skill_path or skill_path == repository_name:
+            return ""
+        return skill_path
+    return ""
+
+
+def _derive_audit_target(payload: "AuditByUrlRequest") -> tuple[str, str, str]:
+    """Derive ``(git_url, ref, skill_path)`` from an audit-by-url payload.
+
+    * ``repo_url`` mode -> scan the whole repository at the given branch.
+    * ``skill_url`` mode (``<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md``)
+      -> scan a single skill directory.
+    """
+    if payload.skill_url:
+        parsed = urlparse(payload.skill_url.strip())
+        segments = [segment for segment in parsed.path.strip("/").split("/") if segment]
+        if len(segments) < 5 or segments[2] != "blob":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "skill_url must be a "
+                    "'<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md' URL"
+                ),
+            )
+        owner, repo, _blob, ref, *rest = segments
+        skill_path = "/".join(rest)
+        if skill_path.endswith("SKILL.md"):
+            skill_path = skill_path.rsplit("/", 1)[0] if "/" in skill_path else ""
+        git_url = f"{parsed.scheme}://{parsed.netloc}/{owner}/{repo}"
+        return git_url, ref, skill_path
+
+    git_url = payload.repo_url.strip()
+    ref = (payload.branch or "main").strip()
+    return git_url, ref, ""
 
 
 @router.get("/telemetry")
@@ -95,6 +162,8 @@ async def list_skills(
     platform: Annotated[str | None, Query(max_length=500)] = None,
     tags: Annotated[str | None, Query(max_length=2000)] = None,
     security_level: Annotated[str | None, Query(max_length=500)] = None,
+    source_type: Annotated[str | None, Query(max_length=50)] = None,
+    repo: Annotated[str | None, Query(max_length=500)] = None,
     sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "updated_at",
     sort_period: Annotated[str | None, Query(pattern="^(week|month)$")] = None,
     db: AsyncSession = Depends(get_db),
@@ -103,6 +172,13 @@ async def list_skills(
     category_list = category.split(",") if category else None
     platform_list = platform.split(",") if platform else None
     security_level_list = security_level.split(",") if security_level else None
+    # repo 过滤：匹配 skill_id 前缀 {source_type}/{owner}/{repo}/，
+    # 与 source_type 过滤（Skill.source 列）一起限定到具体仓库
+    skill_id_prefix = (
+        f"{source_type.strip()}/{repo.strip()}"
+        if source_type and source_type.strip() and repo and repo.strip()
+        else None
+    )
     repo = SkillRepository(db)
     skills, total = await repo.list(
         skip=skip,
@@ -111,6 +187,8 @@ async def list_skills(
         platform=platform_list,
         tags=tag_list,
         security_level=security_level_list,
+        source=source_type,
+        skill_id_prefix=skill_id_prefix,
         sort_by=sort_by,
         sort_period=sort_period,
     )
@@ -185,11 +263,16 @@ async def trigger_skill_audit(
     audit_result = await security_service.audit_skill(
         skill_id=skill.skill_id,
         source=skill.source,
-        source_url=skill.source_url,
+        # Jenkins 需要合法 git 仓库 URL（source_url 是 SKILL.md 的 blob 链接，不可用于 clone）
+        source_url=skill.repo_url or skill.source_url,
         metadata={
-            "version": skill.version,
+            # Jenkins 需要真实 git ref；version 可能是 "latest"，用 commit_id 兜底
+            "version": skill.commit_id or skill.version,
             "commit_id": skill.commit_id,
             "content": skill.content,
+            "skill_path": _derive_scan_skill_path(
+                skill.source, skill.source_url, skill.skill_id
+            ),
         },
         scanners=scanner_list,
         async_mode=async_mode,
@@ -217,6 +300,55 @@ async def trigger_skill_audit(
         details=latest_audit.details,
         audited_at=latest_audit.audited_at,
     )
+
+
+@router.post(
+    "/audit-by-url",
+    response_model=AuditByUrlResponse | ErrorResponse,
+    dependencies=[Depends(require_admin_token)],
+)
+async def audit_by_url(
+    payload: AuditByUrlRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Run a one-off security audit for a git URL without registering the skill.
+
+    Used by the openEuler-skills PR gate: audit a skill repository URL
+    (whole repo) or a SKILL.md URL (single skill) before the content is
+    merged into the skill index.  Nothing is persisted to the database.
+
+    The request must provide either ``repo_url`` (with optional ``branch``)
+    or ``skill_url`` (a ``.../blob/<ref>/<path>/SKILL.md`` link).
+    """
+    if not payload.repo_url and not payload.skill_url:
+        raise HTTPException(
+            status_code=422, detail="Either repo_url or skill_url is required"
+        )
+
+    security_service = SecurityService(db)
+    if not security_service.detector.enable_audit:
+        raise HTTPException(status_code=503, detail="Security audit is disabled")
+
+    git_url, ref, skill_path = _derive_audit_target(payload)
+
+    is_valid, error_msg = validate_git_url(git_url)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid git URL: {error_msg}"
+        )
+
+    scanner_list = None
+    if payload.scanners:
+        scanner_list = [s.strip() for s in payload.scanners.split(",") if s.strip()]
+
+    result = await security_service.audit_external(
+        git_url=git_url,
+        ref=ref,
+        skill_path=skill_path,
+        scanners=scanner_list,
+        async_mode=payload.async_mode,
+    )
+    return AuditByUrlResponse(**result)
 
 
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
@@ -369,8 +501,15 @@ async def create_skill(
             await security_service.audit_skill(
                 skill.skill_id,
                 skill.source,
-                skill.source_url,
-                {"version": skill.version, "commit_id": skill.commit_id, "content": skill.content or ""},
+                skill.repo_url or skill.source_url,
+                {
+                    "version": skill.commit_id or skill.version,
+                    "commit_id": skill.commit_id,
+                    "content": skill.content or "",
+                    "skill_path": _derive_scan_skill_path(
+                        skill.source, skill.source_url, skill.skill_id
+                    ),
+                },
                 async_mode=async_mode,
             )
             # risk_score is already persisted by audit_skill internally

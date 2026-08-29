@@ -93,7 +93,7 @@ def test_missing_jenkins_build_is_terminal():
 
 
 def test_collector_event_log_contains_decision():
-    with patch("src.security.detector.logger.debug") as log_debug:
+    with patch("src.security.detector.logger.info") as log_info:
         _log_collector_event(
             "item_deferred",
             audit_id="audit-1",
@@ -102,7 +102,7 @@ def test_collector_event_log_contains_decision():
             action="retry_next_poll",
         )
 
-    message = log_debug.call_args.args[1]
+    message = log_info.call_args.args[1]
     assert '"event":"item_deferred"' in message
     assert '"build_number":456' in message
     assert '"action":"retry_next_poll"' in message

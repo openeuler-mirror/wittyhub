@@ -226,3 +226,33 @@ def test_get_external_result_disabled():
     detector._skillspector_client = None
     result = _await(detector.get_external_result(42))
     assert result["status"] == "error"
+
+
+def test_fetch_external_report_md_returns_markdown():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    report_md = "# Security Report\n\n- high: prompt injection"
+    with patch.object(client, "fetch_report_md", return_value=report_md) as mock_fetch:
+        md = _await(detector.fetch_external_report_md(42))
+
+    mock_fetch.assert_called_once_with(42)
+    assert md == report_md
+
+
+def test_fetch_external_report_md_disabled():
+    from src.security.detector import SecurityDetector
+
+    detector = SecurityDetector()
+    detector._skillspector_client = None
+    assert _await(detector.fetch_external_report_md(42)) is None
+
+
+def test_fetch_external_report_md_error_returns_none():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    with patch.object(client, "fetch_report_md", side_effect=RuntimeError("boom")):
+        assert _await(detector.fetch_external_report_md(42)) is None

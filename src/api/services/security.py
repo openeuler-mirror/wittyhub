@@ -236,3 +236,10 @@ class SecurityService:
         until the Jenkins build finishes.  Nothing is persisted.
         """
         return await self.detector.get_external_result(build_number)
+
+    async def get_external_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report (report.md) for a one-off audit-by-URL scan.
+
+        Served to PR reviewers via the ``/audit-by-url/report`` download link.
+        """
+        return await self.detector.fetch_external_report_md(build_number)

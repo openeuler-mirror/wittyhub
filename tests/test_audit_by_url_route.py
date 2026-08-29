@@ -3,17 +3,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from src.api.routes.skills import audit_by_url, audit_by_url_result
+from src.api.routes.skills import audit_by_url, audit_by_url_report, audit_by_url_result
 from src.api.schemas.skill import AuditByUrlRequest
 
 
-def _service(result: dict | None = None) -> MagicMock:
+def _service(result: dict | None = None, report_md: str | None = None) -> MagicMock:
     service = MagicMock()
     detector = MagicMock()
     detector.enable_audit = True
     service.detector = detector
     service.audit_external = AsyncMock(return_value=result)
     service.get_external_result = AsyncMock(return_value=result)
+    service.get_external_report_md = AsyncMock(return_value=report_md)
     return service
 
 
@@ -177,4 +178,42 @@ async def test_audit_by_url_result_rejects_when_disabled():
     with patch("src.api.routes.skills.SecurityService", return_value=service):
         with pytest.raises(HTTPException) as exc_info:
             await audit_by_url_result(build_number=42, db=db)
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_audit_by_url_report_downloads_markdown():
+    """report 端点以附件形式返回 report.md 内容，供 PR 评论详情链接下载."""
+    db = AsyncMock()
+    report_md = "# Security Report\n\n- high: prompt injection"
+    service = _service(report_md=report_md)
+    with patch("src.api.routes.skills.SecurityService", return_value=service):
+        response = await audit_by_url_report(build_number=42, db=db)
+    assert response.status_code == 200
+    assert response.body == report_md.encode("utf-8")
+    assert response.media_type == "text/markdown"
+    assert "attachment" in response.headers["content-disposition"]
+    assert "report-42.md" in response.headers["content-disposition"]
+    service.get_external_report_md.assert_awaited_once_with(42)
+
+
+@pytest.mark.asyncio
+async def test_audit_by_url_report_not_found():
+    """report.md 取不到时返回 404."""
+    db = AsyncMock()
+    service = _service(report_md=None)
+    with patch("src.api.routes.skills.SecurityService", return_value=service):
+        with pytest.raises(HTTPException) as exc_info:
+            await audit_by_url_report(build_number=42, db=db)
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_audit_by_url_report_rejects_when_disabled():
+    db = AsyncMock()
+    service = _service()
+    service.detector.enable_audit = False
+    with patch("src.api.routes.skills.SecurityService", return_value=service):
+        with pytest.raises(HTTPException) as exc_info:
+            await audit_by_url_report(build_number=42, db=db)
     assert exc_info.value.status_code == 503

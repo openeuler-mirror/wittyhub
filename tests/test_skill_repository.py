@@ -149,34 +149,27 @@ class TestSkillRepositoryUnit:
         assert kwargs["skill_id_prefix"] == "github/anthropics/claude-code"
         assert kwargs["limit"] == 20
 
-    def test_build_public_skill_id_uses_relative_skill_path(self):
-        from skillcrawler.core.skill_parser import build_public_skill_id
+    def test_build_skill_id_uses_relative_skill_path(self):
+        from src.utils.skill_id import build_skill_id, extract_owner_repo
 
-        repo = SimpleNamespace(
-            source="github",
-            url="https://github.com/wix/react-native-navigation.git",
-        )
-        skill_id = build_public_skill_id(
-            repo,
-            Path("/tmp/repo"),
-            Path("/tmp/repo/.github/skills/rnn-codebase/SKILL.md"),
+        source = "github"
+        repo_url = "https://github.com/wix/react-native-navigation.git"
+        owner_repo = extract_owner_repo(repo_url)
+
+        skill_id = build_skill_id(
+            source, owner_repo, ".github/skills/rnn-codebase/SKILL.md",
         )
 
         assert skill_id == "github:wix/react-native-navigation/rnn-codebase"
 
-    def test_build_public_skill_id_uses_repo_slug_for_root_skill(self):
-        from skillcrawler.core.skill_parser import build_public_skill_id
+    def test_build_skill_id_uses_repo_slug_for_root_skill(self):
+        from src.utils.skill_id import build_skill_id, extract_owner_repo
 
-        repo = SimpleNamespace(
-            source="github",
-            url="https://github.com/acme/agent-skills.git",
-        )
+        source = "github"
+        repo_url = "https://github.com/acme/agent-skills.git"
+        owner_repo = extract_owner_repo(repo_url)
 
-        skill_id = build_public_skill_id(
-            repo,
-            Path("/tmp/github.com_acme_agent-skills"),
-            Path("/tmp/github.com_acme_agent-skills/SKILL.md"),
-        )
+        skill_id = build_skill_id(source, owner_repo, "SKILL.md")
 
         assert skill_id == "github:acme/agent-skills/agent-skills"
 
@@ -542,7 +535,7 @@ openeuler_repos:
     def test_skill_scanner_reuses_security_result_for_unchanged_skill_tree(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
         from skillcrawler.core.skill_scanner import SkillScanner
-        from skillcrawler.core.skill_parser import build_public_skill_id
+        from src.utils.skill_id import build_skill_id, extract_owner_repo
 
         repository = tmp_path / "repository"
         repository.mkdir()
@@ -571,7 +564,9 @@ openeuler_repos:
             branch="master",
             platform=None,
         )
-        skill_id = build_public_skill_id(repo, repository, skill_file)
+        skill_id = build_skill_id(
+            repo.source, extract_owner_repo(repo.url), "skills/production-skill/SKILL.md",
+        )
         existing = SimpleNamespace(
             commit_id=skill_commit,
             tree_hash=skill_tree_hash,

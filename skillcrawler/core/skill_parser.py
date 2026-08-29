@@ -63,77 +63,6 @@ def normalize_repository_browse_base_url(repo_url: str) -> str | None:
     return f'{parsed.scheme}://{parsed.netloc}/{path}'
 
 
-# ── Skill ID generation ────────────────────────────────────────────
-
-
-def build_public_skill_id_from_relative_path(
-    source: str,
-    owner_repo: str,
-    relative_path: str,
-) -> str:
-    """Derive a public skill_id from a normalized owner/repo and the
-    repository-relative path of the SKILL.md file.
-
-    Shared by the crawler (which writes the skill records) and the install
-    audit lookup (which reads them back), so both use the exact same skill_id
-    in the database. The skill segment is the name of the directory that
-    contains SKILL.md; a root-level SKILL.md resolves to the repo slug, matching
-    the crawler's historical behaviour.
-    """
-    if relative_path == 'SKILL.md':
-        skill_name = owner_repo.rsplit('/', 1)[-1]
-    elif relative_path.endswith('/SKILL.md'):
-        skill_name = Path(relative_path).parent.name
-    else:
-        raise ValueError(f'Expected a SKILL.md file, got: {relative_path}')
-    return f'{source}:{owner_repo}/{skill_name}'
-
-
-def build_public_skill_id(
-    repo: "SkillRepoModel",
-    repo_root: Path,
-    skill_file: Path,
-) -> str:
-    owner_repo = extract_owner_repo(repo.url)
-    relative_path = to_repository_relative_path(repo_root, skill_file)
-    return build_public_skill_id_from_relative_path(repo.source, owner_repo, relative_path)
-
-
-def extract_owner_repo(repo_url: str | None) -> str:
-    if not repo_url:
-        raise ValueError('Repository url is required to derive skill_id')
-
-    normalized_url = repo_url.strip()
-    ssh_match = re.match(r'git@([^:]+):(.+)', normalized_url)
-    if ssh_match:
-        path = ssh_match.group(2).strip('/')
-    else:
-        parsed = urlparse(normalized_url)
-        path = parsed.path.strip('/')
-
-    if path.endswith('.git'):
-        path = path[:-4]
-
-    segments = [segment for segment in path.split('/') if segment]
-    if len(segments) < 2:
-        raise ValueError(f'Failed to extract owner/repo from url: {repo_url}')
-
-    owner = slugify_identifier(segments[-2])
-    repo = slugify_identifier(segments[-1])
-    if not owner or not repo:
-        raise ValueError(f'Invalid owner/repo derived from url: {repo_url}')
-    return f'{owner}/{repo}'
-
-
-def slugify_identifier(value: str) -> str:
-    lowered = value.strip().lower()
-    if not lowered:
-        return ''
-    normalized = re.sub(r'[^a-z0-9._-]+', '-', lowered)
-    normalized = re.sub(r'-{2,}', '-', normalized)
-    return normalized.strip('-')
-
-
 # ── Skill source derivation ────────────────────────────────────────
 
 
@@ -289,8 +218,6 @@ def derive_repository_skill_name(
     return skill_file.stem
 
 
-def to_repository_relative_path(repo_root: Path, skill_file: Path) -> str:
-    return skill_file.relative_to(repo_root).as_posix()
 
 
 def should_skip_relative_path(relative_path: str) -> bool:

@@ -18,12 +18,12 @@ from skillcrawler.core.skill_parser import (
     as_optional_str,
     as_optional_str_list,
     derive_skill_source,
-    extract_owner_repo,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
     should_skip_relative_path,
 )
 from skillcrawler.core.skill_scanner import SkillScanner
+from src.utils.skill_id import extract_owner_repo
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import (

@@ -135,6 +135,24 @@ class AuditByUrlResponse(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class AuditByUrlResultResponse(BaseModel):
+    """Polling result of an async audit-by-URL scan (not persisted).
+
+    ``status`` is one of ``pending`` / ``done`` / ``error``.  Only when
+    ``status == "done"`` are ``risk_level`` / ``risk_score`` /
+    ``risk_signals`` / ``details`` populated.
+    """
+
+    status: str
+    build_number: int
+    jenkins_status: str | None = None
+    risk_level: str | None = None
+    risk_score: int | None = None
+    risk_signals: list[RiskSignalSchema] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None

@@ -228,3 +228,11 @@ class SecurityService:
             "low": 10,
         }
         return score_map.get(risk_level)
+
+    async def get_external_result(self, build_number: int) -> dict[str, Any]:
+        """Query the result of a previously-triggered one-off audit-by-URL scan.
+
+        The PR gate triggers a scan with ``async_mode=True`` and polls this
+        until the Jenkins build finishes.  Nothing is persisted.
+        """
+        return await self.detector.get_external_result(build_number)

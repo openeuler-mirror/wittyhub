@@ -8,7 +8,7 @@ class SkillBase(BaseModel):
     skill_id: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
-    version: str | None = Field(None, max_length=50)
+    version: str | None = Field(None, max_length=255)
     commit_id: str | None = Field(None, max_length=40)
     author: str | None = Field(None, max_length=255)
     source: str = Field(..., max_length=50)
@@ -39,7 +39,7 @@ class SkillCreate(SkillBase):
 class SkillUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
     description: str | None = None
-    version: str | None = Field(None, max_length=50)
+    version: str | None = Field(None, max_length=255)
     category: str | None = Field(None, max_length=100)
     tags: list[str] | None = None
     extra_metadata: dict[str, Any] | None = Field(

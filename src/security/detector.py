@@ -183,7 +183,7 @@ def _log_skillspector_final_result(
 def _log_collector_event(event: str, **fields: Any) -> None:
     """Write one structured trace entry for an async collector decision."""
     payload = {"event": event, **fields}
-    logger.debug(
+    logger.info(
         "Skillspector collector: %s",
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
     )

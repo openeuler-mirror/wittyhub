@@ -80,11 +80,13 @@ pipeline {
 
                                         mkdir -p "${REPORT_DIR}/${scanner}"
 
+                                        # skillspector 扫描到严重风险时即使已写出报告也会返回非零退出码，
+                                        # 用 || true 忽略其退出码，改以 report.json 是否存在作为成功判据
                                         skillspector scan \\
                                             "${env.SKILL_DIR}" \\
                                             --no-llm \\
                                             --format json -o "${REPORT_DIR}/${scanner}/report.json" \\
-                                            --format markdown -o "${REPORT_DIR}/${scanner}/report.md"
+                                            --format markdown -o "${REPORT_DIR}/${scanner}/report.md" || true
 
                                         test -s "${REPORT_DIR}/${scanner}/report.json"
                                     """

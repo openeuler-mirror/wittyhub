@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import re
+import subprocess
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -74,10 +76,35 @@ def _derive_scan_skill_path(source: str, source_url: str, skill_id: str) -> str:
     return ""
 
 
+def _resolve_default_branch(git_url: str) -> str:
+    """Resolve the repository's default branch via ``git ls-remote --symref``.
+
+    Falls back to ``"main"`` when the lookup fails (network error, URL not a
+    git repository, ...) so the scan still gets a sensible target.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", "--symref", git_url, "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        for line in proc.stdout.splitlines():
+            if line.startswith("ref:"):
+                # 形如 "ref: refs/heads/master  HEAD"，按空白切分取第二列分支引用
+                ref_spec = line.split()[1]
+                if ref_spec.startswith("refs/heads/"):
+                    return ref_spec.rsplit("/", 1)[-1]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "main"
+
+
 def _derive_audit_target(payload: "AuditByUrlRequest") -> tuple[str, str, str]:
     """Derive ``(git_url, ref, skill_path)`` from an audit-by-url payload.
 
-    * ``repo_url`` mode -> scan the whole repository at the given branch.
+    * ``repo_url`` mode -> scan the whole repository at its default branch
+      (or the branch given in ``payload.branch``).
     * ``skill_url`` mode (``<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md``)
       -> scan a single skill directory.
     """
@@ -100,7 +127,7 @@ def _derive_audit_target(payload: "AuditByUrlRequest") -> tuple[str, str, str]:
         return git_url, ref, skill_path
 
     git_url = payload.repo_url.strip()
-    ref = (payload.branch or "main").strip()
+    ref = (payload.branch or "").strip() or _resolve_default_branch(git_url)
     return git_url, ref, ""
 
 
@@ -330,7 +357,8 @@ async def audit_by_url(
     if not security_service.detector.enable_audit:
         raise HTTPException(status_code=503, detail="Security audit is disabled")
 
-    git_url, ref, skill_path = _derive_audit_target(payload)
+    # 推导目标会做 `git ls-remote` 解析默认分支（repo 类型），放线程池避免阻塞事件循环
+    git_url, ref, skill_path = await asyncio.to_thread(_derive_audit_target, payload)
 
     is_valid, error_msg = validate_git_url(git_url)
     if not is_valid:

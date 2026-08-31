@@ -232,6 +232,8 @@ class SkillManager:
             repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
             if repository is not None:
                 setattr(repository, "_removed_existing", True)
+                # 由于 skills / skill_versions 表对 skill_repos 有 ondelete="CASCADE" 外键（ orm.py ），
+                # 删 repository 时其下所有 skill 记录会 级联删除
                 await self.skill_repo_repository.delete_skill_repository(repository.id)
                 return repository
             return None

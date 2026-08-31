@@ -12,7 +12,7 @@ class TestSkillsTelemetry:
             "deploy-to-vercel",
         )
 
-        assert skill_id == "github/vercel-labs/agent-skills/deploy-to-vercel"
+        assert skill_id == "github:vercel-labs/agent-skills/deploy-to-vercel"
 
     def test_build_skill_id_from_telemetry_prefers_skill_files_path(self):
         skill_id = build_skill_id_from_telemetry(
@@ -22,7 +22,7 @@ class TestSkillsTelemetry:
             {"Deploy to Vercel": "skills/deploy-to-vercel/SKILL.md"},
         )
 
-        assert skill_id == "github/vercel-labs/agent-skills/skills/deploy-to-vercel"
+        assert skill_id == "github:vercel-labs/agent-skills/deploy-to-vercel"
 
     def test_build_skill_id_from_telemetry_root_skill_matches_crawler(self):
         # Root-level SKILL.md resolves to the repo slug — same as the crawler
@@ -34,7 +34,7 @@ class TestSkillsTelemetry:
             {"agent-skills": "SKILL.md"},
         )
 
-        assert skill_id == "github/acme/agent-skills/agent-skills"
+        assert skill_id == "github:acme/agent-skills/agent-skills"
 
     def test_build_skill_id_from_telemetry_gitcode_matches_crawler(self):
         skill_id = build_skill_id_from_telemetry(
@@ -44,7 +44,7 @@ class TestSkillsTelemetry:
             {"gitcode-api": ".skills/gitcode-api/SKILL.md"},
         )
 
-        assert skill_id == "gitcode/openeuler/yuanrong/.skills/gitcode-api"
+        assert skill_id == "gitcode:openeuler/yuanrong/gitcode-api"
 
     def test_process_install_telemetry_increments_each_matched_skill(self):
         service = TelemetryService(AsyncMock())
@@ -65,15 +65,15 @@ class TestSkillsTelemetry:
         matched_skill_ids = asyncio.run(service.process(params))
 
         assert matched_skill_ids == [
-            "github/vercel-labs/agent-skills/skills/deploy-to-vercel",
-            "github/vercel-labs/agent-skills/skills/create-sdk-plugin",
+            "github:vercel-labs/agent-skills/deploy-to-vercel",
+            "github:vercel-labs/agent-skills/create-sdk-plugin",
         ]
         assert service.skill_repo.increment_download.await_count == 2
         service.skill_repo.increment_download.assert_any_await(
-            "github/vercel-labs/agent-skills/skills/deploy-to-vercel"
+            "github:vercel-labs/agent-skills/deploy-to-vercel"
         )
         service.skill_repo.increment_download.assert_any_await(
-            "github/vercel-labs/agent-skills/skills/create-sdk-plugin"
+            "github:vercel-labs/agent-skills/create-sdk-plugin"
         )
         service.session.commit.assert_awaited_once()
 
@@ -96,6 +96,6 @@ class TestSkillsTelemetry:
         matched_skill_ids = asyncio.run(service.process(params))
 
         assert matched_skill_ids == [
-            "github/vercel-labs/agent-skills/skills/deploy-to-vercel",
+            "github:vercel-labs/agent-skills/deploy-to-vercel",
         ]
         service.session.commit.assert_awaited_once()

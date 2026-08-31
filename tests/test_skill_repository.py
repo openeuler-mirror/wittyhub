@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -9,12 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _git(repository: Path, *args: str) -> str:
+def _git(repository: Path, *args: str, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         ["git", "-C", str(repository), *args],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     return result.stdout.strip()
 
@@ -160,7 +162,7 @@ class TestSkillRepositoryUnit:
             Path("/tmp/repo/.github/skills/rnn-codebase/SKILL.md"),
         )
 
-        assert skill_id == "github/wix/react-native-navigation/.github/skills/rnn-codebase"
+        assert skill_id == "github:wix/react-native-navigation/rnn-codebase"
 
     def test_build_public_skill_id_uses_repo_slug_for_root_skill(self):
         from skillcrawler.core.skill_parser import build_public_skill_id
@@ -176,9 +178,9 @@ class TestSkillRepositoryUnit:
             Path("/tmp/github.com_acme_agent-skills/SKILL.md"),
         )
 
-        assert skill_id == "github/acme/agent-skills/agent-skills"
+        assert skill_id == "github:acme/agent-skills/agent-skills"
 
-    def test_has_skill_md_ignores_excluded_directories(self, tmp_path):
+    def test_list_skill_paths_ignores_excluded_directories(self, tmp_path):
         from skillcrawler.core.skill_manager import SkillManager
 
         for directory in ("docs", "examples", "tests", "templates"):
@@ -186,9 +188,17 @@ class TestSkillRepositoryUnit:
             skill_file.parent.mkdir(parents=True)
             skill_file.write_text("# Example", encoding="utf-8")
 
-        assert SkillManager._has_skill_md(tmp_path) is False
+        _git(tmp_path, "init")
+        _git(tmp_path, "config", "user.email", "tests@example.com")
+        _git(tmp_path, "config", "user.name", "WittyHub Tests")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-m", "add excluded skills")
 
-    def test_has_skill_md_accepts_scannable_skill(self, tmp_path):
+        manager = SkillManager(MagicMock(), MagicMock())
+
+        assert manager._list_skill_paths(tmp_path) == []
+
+    def test_list_skill_paths_accepts_scannable_skill(self, tmp_path):
         from skillcrawler.core.skill_manager import SkillManager
 
         excluded_skill = tmp_path / "docs" / "SKILL.md"
@@ -198,7 +208,15 @@ class TestSkillRepositoryUnit:
         valid_skill.parent.mkdir(parents=True)
         valid_skill.write_text("# Release Helper", encoding="utf-8")
 
-        assert SkillManager._has_skill_md(tmp_path) is True
+        _git(tmp_path, "init")
+        _git(tmp_path, "config", "user.email", "tests@example.com")
+        _git(tmp_path, "config", "user.name", "WittyHub Tests")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-m", "add skills")
+
+        manager = SkillManager(MagicMock(), MagicMock())
+
+        assert "skills/release-helper/SKILL.md" in manager._list_skill_paths(tmp_path)
 
     def test_skill_manager_workspace_defaults_to_storage_local_path(self, tmp_path):
         from skillcrawler.core import skill_manager
@@ -336,73 +354,6 @@ openeuler_repos:
 
         assert sig_name == "sig-ops"
 
-    def test_git_operations_reads_latest_commit_for_skill_directory(self, tmp_path):
-        from skillcrawler.core.git_operations import GitOperations
-
-        repository = tmp_path / "repository"
-        repository.mkdir()
-        _git(repository, "init")
-        _git(repository, "config", "user.email", "tests@example.com")
-        _git(repository, "config", "user.name", "WittyHub Tests")
-
-        skill_a = repository / "skills" / "a"
-        skill_b = repository / "skills" / "b"
-        skill_a.mkdir(parents=True)
-        skill_b.mkdir(parents=True)
-        (skill_a / "SKILL.md").write_text("# Skill A\n", encoding="utf-8")
-        (skill_b / "SKILL.md").write_text("# Skill B\n", encoding="utf-8")
-        _git(repository, "add", ".")
-        _git(repository, "commit", "-m", "add skills")
-        skill_b_commit = _git(repository, "rev-parse", "HEAD")
-
-        (skill_a / "SKILL.md").write_text("# Skill A changed\n", encoding="utf-8")
-        _git(repository, "add", ".")
-        _git(repository, "commit", "-m", "change skill a")
-        skill_a_commit = _git(repository, "rev-parse", "HEAD")
-
-        git_ops = GitOperations()
-
-        assert git_ops.get_latest_commit_id_for_path(repository, "skills/a") == skill_a_commit
-        assert git_ops.get_latest_commit_id_for_path(repository, "skills/b") == skill_b_commit
-
-    def test_git_operations_batches_latest_commits_for_skill_directories(self, tmp_path):
-        from skillcrawler.core.git_operations import GitOperations
-
-        repository = tmp_path / "repository"
-        repository.mkdir()
-        _git(repository, "init")
-        _git(repository, "config", "user.email", "tests@example.com")
-        _git(repository, "config", "user.name", "WittyHub Tests")
-
-        skill_a = repository / "skills" / "a" / "SKILL.md"
-        skill_a.parent.mkdir(parents=True)
-        skill_a.write_text("# A\n", encoding="utf-8")
-        _git(repository, "add", ".")
-        _git(repository, "commit", "-m", "add a")
-        skill_a_commit = _git(repository, "rev-parse", "HEAD")
-
-        skill_b = repository / "skills" / "b" / "SKILL.md"
-        skill_b.parent.mkdir(parents=True)
-        skill_b.write_text("# B\n", encoding="utf-8")
-        _git(repository, "add", ".")
-        _git(repository, "commit", "-m", "add b")
-        skill_b_commit = _git(repository, "rev-parse", "HEAD")
-
-        git_ops = GitOperations()
-        original_run = git_ops._run_git_command
-        git_ops._run_git_command = MagicMock(wraps=original_run)
-
-        commits = git_ops.get_latest_commit_ids_for_paths(
-            repository,
-            ["skills/a", "skills/b"],
-        )
-
-        assert commits == {
-            "skills/a": skill_a_commit,
-            "skills/b": skill_b_commit,
-        }
-        git_ops._run_git_command.assert_called_once()
-
     def test_full_repository_update_uses_regular_fetch(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
 
@@ -441,62 +392,6 @@ openeuler_repos:
             "git", "-C", str(tmp_path), "fetch", "--depth", "1", "origin", "main",
         ]
 
-    def test_unshallow_prefers_blobless_history(self, tmp_path):
-        from skillcrawler.core.git_operations import GitOperations
-
-        git_ops = GitOperations()
-        git_ops.is_shallow_repository = MagicMock(return_value=True)
-        git_ops._run_git_command_with_retries = MagicMock()
-        git_ops._run_git_command_with_auth_retry = MagicMock()
-
-        git_ops.ensure_full_history(
-            tmp_path,
-            "https://github.com/acme/repository.git",
-            "https://github.com/acme/repository",
-        )
-
-        fetch_command = git_ops._run_git_command_with_auth_retry.call_args.args[0]
-        assert fetch_command == [
-            "git", "-C", str(tmp_path), "fetch",
-            "--unshallow", "--filter=blob:none", "origin",
-        ]
-        configured_keys = {
-            call.args[0][-2]: call.args[0][-1]
-            for call in git_ops._run_git_command_with_retries.call_args_list
-        }
-        assert configured_keys == {
-            "remote.origin.promisor": "true",
-            "remote.origin.partialclonefilter": "blob:none",
-        }
-
-    def test_unshallow_falls_back_when_filter_is_unsupported(self, tmp_path):
-        from skillcrawler.core.git_operations import GitOperations
-
-        git_ops = GitOperations()
-        git_ops.is_shallow_repository = MagicMock(return_value=True)
-        git_ops._run_git_command_with_retries = MagicMock()
-        git_ops._run_git_command_with_auth_retry = MagicMock(
-            side_effect=[subprocess.CalledProcessError(1, ["git", "fetch"]), None]
-        )
-
-        git_ops.ensure_full_history(
-            tmp_path,
-            "https://example.com/acme/repository.git",
-            "https://example.com/acme/repository",
-        )
-
-        fetch_commands = [
-            call.args[0]
-            for call in git_ops._run_git_command_with_auth_retry.call_args_list
-        ]
-        assert fetch_commands == [
-            [
-                "git", "-C", str(tmp_path), "fetch",
-                "--unshallow", "--filter=blob:none", "origin",
-            ],
-            ["git", "-C", str(tmp_path), "fetch", "--unshallow", "origin"],
-        ]
-
     def test_git_timeout_sanitization_accepts_byte_output(self):
         from skillcrawler.core.git_operations import GitOperations
 
@@ -516,7 +411,7 @@ openeuler_repos:
             "git clone timed out after 120s"
         )
 
-    async def test_skill_scanner_stores_skill_directory_commit_not_repo_head(self, tmp_path):
+    async def test_skill_scanner_stores_skill_directory_tree_hash_not_repo_head(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
         from skillcrawler.core.skill_scanner import SkillScanner
 
@@ -532,7 +427,7 @@ openeuler_repos:
         skill_file.write_text("# Skill A\n", encoding="utf-8")
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill a")
-        skill_dir_commit = _git(repository, "rev-parse", "HEAD")
+        skill_dir_tree_hash = _git(repository, "rev-parse", "HEAD:skills/a")
 
         (repository / "README.md").write_text("# Changed repo head\n", encoding="utf-8")
         _git(repository, "add", ".")
@@ -560,10 +455,91 @@ openeuler_repos:
             repository_git_metadata={"commit_id": repo_head_commit},
         )
 
-        assert skills[0].commit_id == skill_dir_commit
-        assert skills[0].commit_id != repo_head_commit
+        assert skills[0].commit_id == repo_head_commit
+        assert skills[0].tree_hash == skill_dir_tree_hash
 
-    def test_skill_scanner_reuses_security_result_for_unchanged_skill_commit(self, tmp_path):
+    async def test_skill_scanner_discovers_tag_only_skills_with_different_path(
+        self, tmp_path,
+    ):
+        """Tag paths must be discovered per ref, not filtered from HEAD's set.
+
+        Regression: a repo whose HEAD contains skills/skill-1/SKILL.md while its
+        tags only contain skill/SKILL.md used to yield zero SkillVersion records
+        because the tag scan reused HEAD's path list.
+        """
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        tagged_dir = repository / "skill"
+        tagged_dir.mkdir(parents=True)
+        (tagged_dir / "SKILL.md").write_text(
+            "---\nname: tagged-skill\n---\n# Tagged Skill\n", encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add tagged skill")
+        v1_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v1")
+
+        (repository / "README.md").write_text("# v2 change\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "unrelated change")
+        v2_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v2")
+
+        head_dir = repository / "skills" / "skill-1"
+        head_dir.mkdir(parents=True)
+        (head_dir / "SKILL.md").write_text(
+            "---\nname: head-skill\n---\n# Head Skill\n", encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add head skill")
+        repo_head_commit = _git(repository, "rev-parse", "HEAD")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/weijihui/test",
+            branch="master",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": repo_head_commit,
+                "latest_tags": ["v1", "v2"],
+            },
+            version_snapshots=[
+                {"ref": "v1", "version": "v1", "commit_id": v1_commit, "version_source": "tag"},
+                {"ref": "v2", "version": "v2", "commit_id": v2_commit, "version_source": "tag"},
+            ],
+        )
+
+        assert {skill.skill_id for skill in skills} == {
+            "gitcode:weijihui/test/skill",
+            "gitcode:weijihui/test/skill-1",
+        }
+        assert {(v.version, v.commit_id) for v in tagged_skills} == {
+            ("v1", v1_commit),
+            ("v2", v2_commit),
+        }
+        assert {v.skill_id for v in tagged_skills} == {"gitcode:weijihui/test/skill"}
+
+    def test_skill_scanner_reuses_security_result_for_unchanged_skill_tree(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
         from skillcrawler.core.skill_scanner import SkillScanner
         from skillcrawler.core.skill_parser import build_public_skill_id
@@ -581,6 +557,7 @@ openeuler_repos:
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
         skill_commit = _git(repository, "rev-parse", "HEAD")
+        skill_tree_hash = _git(repository, "rev-parse", "HEAD:skills/production-skill")
 
         (repository / "README.md").write_text("# unrelated change\n", encoding="utf-8")
         _git(repository, "add", ".")
@@ -597,6 +574,7 @@ openeuler_repos:
         skill_id = build_public_skill_id(repo, repository, skill_file)
         existing = SimpleNamespace(
             commit_id=skill_commit,
+            tree_hash=skill_tree_hash,
             risk_score=12,
             extra_metadata={
                 "security_audit": {"skillspector_score": 12},
@@ -623,7 +601,8 @@ openeuler_repos:
 
         scanner._audit_skill_security.assert_not_awaited()
         assert skills[0].skill_id == skill_id
-        assert skills[0].commit_id == skill_commit
+        assert skills[0].commit_id == repo_head
+        assert skills[0].tree_hash == skill_tree_hash
         assert skills[0].risk_score == 12
         assert getattr(skills[0], "_security_audit_triggered") is False
 
@@ -678,7 +657,7 @@ openeuler_repos:
         discover_mock = AsyncMock()
         with (
             patch.object(SkillManager, "_sync_git_repository"),
-            patch.object(SkillManager, "_has_skill_md", return_value=True),
+            patch.object(SkillManager, "_list_skill_paths", return_value=["SKILL.md"]),
             patch.object(SkillManager, "_is_commit_unchanged", return_value=True),
             patch.object(
                 SkillManager,
@@ -703,7 +682,7 @@ openeuler_repos:
         repository = SimpleNamespace(id=uuid.uuid4())
         with (
             patch.object(SkillManager, "_sync_git_repository"),
-            patch.object(SkillManager, "_has_skill_md", return_value=True),
+            patch.object(SkillManager, "_list_skill_paths", return_value=["SKILL.md"]),
             patch.object(SkillManager, "_is_commit_unchanged", return_value=True),
             patch.object(
                 SkillManager,
@@ -799,9 +778,6 @@ openeuler_repos:
         updated_repo = SimpleNamespace(id=uuid.uuid4())
         repo_repository.update_skill_repository = AsyncMock(return_value=updated_repo)
         manager = SkillManager(skill_repository, repo_repository)
-        manager._git_ops.get_repository_head_commit_id = MagicMock(
-            return_value="c" * 40,
-        )
         repo = SimpleNamespace(
             id=updated_repo.id,
             platform=None,
@@ -811,7 +787,7 @@ openeuler_repos:
             patch.object(
                 SkillManager,
                 "_discover_skills",
-                AsyncMock(return_value=([], [])),
+                AsyncMock(return_value=([], [], "c" * 40)),
             ),
             patch.object(
                 SkillManager,
@@ -846,7 +822,7 @@ openeuler_repos:
         skill_repository.session = MagicMock()
         manager = SkillManager(skill_repository, MagicMock())
         audit_repository = MagicMock()
-        audit_repository.upsert_by_resource = AsyncMock()
+        audit_repository.upsert_many_by_resource = AsyncMock()
         details = {
             "skillspector_async": True,
             "skillspector_build_number": 123,
@@ -877,11 +853,15 @@ openeuler_repos:
                 [],
             )
 
-        audit_repository.upsert_by_resource.assert_awaited_once()
-        assert (
-            audit_repository.upsert_by_resource.call_args.kwargs["resource_id"]
-            == triggered.id
-        )
+        audit_repository.upsert_many_by_resource.assert_awaited_once()
+        resource_type, entries = audit_repository.upsert_many_by_resource.call_args.args
+        assert resource_type == "skill"
+        assert len(entries) == 1
+        resource_id, audit_data = entries[0]
+        assert resource_id == triggered.id
+        assert audit_data["resource_id"] == triggered.id
+        assert audit_data["commit_id"] == "b" * 40
+        assert audit_data["details"] == details
 
     def test_security_retry_resolves_path_from_commit_source_url(self):
         from skillcrawler.core.skill_manager import SkillManager
@@ -1023,6 +1003,157 @@ openeuler_repos:
         response = SkillResponse(**skill_dict)
         assert response.skill_id == "test/skill:v1.0.0"
         assert response.name == "test-skill"
+
+
+class TestGitOperationsTags:
+    def _init_repository(self, path: Path) -> None:
+        path.mkdir(parents=True)
+        _git(path, "init")
+        _git(path, "config", "user.email", "tests@example.com")
+        _git(path, "config", "user.name", "WittyHub Tests")
+
+    def test_tag_sort_key_orders_versions_naturally(self):
+        from skillcrawler.core.git_operations import GitOperations
+
+        key = GitOperations._tag_sort_key
+        assert key("v10.0.0") > key("v9.0.0")
+        assert key("v2.1.10") > key("v2.1.9")
+        assert key("2.0") > key("1.9")
+
+    def test_cleanup_orphaned_tmp_packs_only_removes_temporaries(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        pack_dir = tmp_path / ".git" / "objects" / "pack"
+        pack_dir.mkdir(parents=True)
+        orphaned = pack_dir / "tmp_pack_yqbJ9L"
+        orphaned.write_bytes(b"partial transfer")
+        real_pack = pack_dir / "pack-abc123.pack"
+        real_pack.write_bytes(b"real pack")
+        keep_idx = pack_dir / "pack-abc123.idx"
+        keep_idx.write_bytes(b"real idx")
+
+        GitOperations._cleanup_orphaned_tmp_packs(tmp_path)
+
+        assert not orphaned.exists()
+        assert real_pack.exists()
+        assert keep_idx.exists()
+
+    def test_list_remote_tags_parses_and_sorts(self, tmp_path):
+        origin = tmp_path / "origin.git"
+        self._init_repository(origin)
+        (origin / "SKILL.md").write_text("---\nname: t\n---\n# t\n", encoding="utf-8")
+        _git(origin, "add", ".")
+        _git(origin, "commit", "-m", "init")
+        for tag in ("v1.0.0", "v1.0.1", "v1.1.0", "v2.0.0", "v2.10.0", "v9.0.0"):
+            _git(origin, "tag", tag)
+
+        clone_dir = tmp_path / "clone"
+        _git(tmp_path, "clone", "--depth", "1", "--no-checkout", "--filter=blob:none",
+             str(origin), str(clone_dir))
+
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token=None, max_tags_per_repo=3)
+        tags = git_ops._list_remote_tags(clone_dir, str(origin), None)
+
+        assert tags[:3] == ["v9.0.0", "v2.10.0", "v2.0.0"]
+
+    def test_get_repository_latest_tags_fetches_only_selected_tags(self, tmp_path):
+        origin = tmp_path / "origin.git"
+        self._init_repository(origin)
+        # Allow blob:none filter over the file:// transport.
+        _git(origin, "config", "uploadpack.allowFilter", "true")
+        (origin / "SKILL.md").write_text("---\nname: t\n---\n# t\n", encoding="utf-8")
+        _git(origin, "add", ".")
+        _git(origin, "commit", "-m", "init")
+        for tag in ("v1.0.0", "v1.0.1", "v2.0.0"):
+            (origin / "CHANGELOG.md").write_text(f"# {tag}\n", encoding="utf-8")
+            _git(origin, "add", ".")
+            _git(origin, "commit", "-m", f"release {tag}")
+            _git(origin, "tag", tag)
+        # HEAD sits after every tag so the shallow clone carries no tags.
+        (origin / "README.md").write_text("# after tags\n", encoding="utf-8")
+        _git(origin, "add", ".")
+        _git(origin, "commit", "-m", "post-release commit")
+
+        clone_dir = tmp_path / "clone"
+        # file:// keeps --depth/--filter effective (plain paths ignore them).
+        _git(tmp_path, "clone", "--depth", "1", "--no-checkout", "--filter=blob:none",
+             f"file://{origin}", str(clone_dir))
+        assert _git(clone_dir, "tag").splitlines() == []
+
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token=None, max_tags_per_repo=2)
+        tags = git_ops._get_repository_latest_tags(clone_dir, f"file://{origin}", None)
+
+        assert tags == ["v2.0.0", "v1.0.1"]
+        # Only the selected tags land in the clone; v1.0.0 must stay unfetched.
+        local_tags = _git(clone_dir, "tag").splitlines()
+        assert local_tags == ["v1.0.1", "v2.0.0"]
+
+    def test_get_repository_latest_tags_orders_irregular_names_by_date(self, tmp_path):
+        origin = tmp_path / "origin.git"
+        self._init_repository(origin)
+        _git(origin, "config", "uploadpack.allowFilter", "true")
+
+        tag_dates = (
+            ("v99.0.0", "2024-01-01T00:00:00+00:00"),
+            ("release-final", "2025-01-01T00:00:00+00:00"),
+            ("stable-summer", "2026-01-01T00:00:00+00:00"),
+        )
+        for tag, date in tag_dates:
+            (origin / "SKILL.md").write_text(
+                f"---\nname: {tag}\n---\n# {tag}\n", encoding="utf-8",
+            )
+            _git(origin, "add", ".")
+            commit_env = os.environ.copy()
+            commit_env.update({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date})
+            _git(origin, "commit", "-m", f"release {tag}", env=commit_env)
+            _git(origin, "tag", tag)
+
+        clone_dir = tmp_path / "clone"
+        _git(
+            tmp_path, "clone", "--depth", "1", "--no-checkout", "--filter=blob:none",
+            f"file://{origin}", str(clone_dir),
+        )
+
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token=None, max_tags_per_repo=2)
+        tags = git_ops._get_repository_latest_tags(clone_dir, f"file://{origin}", None)
+
+        assert tags == ["stable-summer", "release-final"]
+        assert _git(clone_dir, "tag").splitlines() == ["release-final", "stable-summer"]
+
+    def test_get_repository_latest_tags_cleans_orphaned_packs_on_failure(self, tmp_path):
+        origin = tmp_path / "origin.git"
+        self._init_repository(origin)
+        (origin / "SKILL.md").write_text("---\nname: t\n---\n# t\n", encoding="utf-8")
+        _git(origin, "add", ".")
+        _git(origin, "commit", "-m", "init")
+        _git(origin, "tag", "v1.0.0")
+
+        clone_dir = tmp_path / "clone"
+        _git(tmp_path, "clone", "--depth", "1", "--no-checkout", "--filter=blob:none",
+             str(origin), str(clone_dir))
+
+        pack_dir = clone_dir / ".git" / "objects" / "pack"
+        pack_dir.mkdir(parents=True, exist_ok=True)
+        orphaned = pack_dir / "tmp_pack_orphan"
+        orphaned.write_bytes(b"partial transfer")
+
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token=None, max_tags_per_repo=1)
+        with patch.object(
+            GitOperations, "_run_git_command_with_auth_retry",
+            side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1),
+        ):
+            tags = git_ops._get_repository_latest_tags(clone_dir, str(origin), None)
+
+        assert tags == []
+        assert not orphaned.exists()
 
 
 class TestSearchService:

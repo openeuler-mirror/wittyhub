@@ -52,6 +52,8 @@ class DownloadManager:
             skill_id=skill.skill_id,
             source=repository.source,
             repository_url=repository.url,
+            source_url=skill.source_url,
+            refs=[skill.commit_id, skill.version, repository.branch, 'HEAD', 'master', 'main'],
         )
         commit_id = self._validate_commit_id(skill.commit_id)
 
@@ -85,17 +87,34 @@ class DownloadManager:
         skill_id: str,
         source: str,
         repository_url: str | None,
+        source_url: str,
+        refs: list[str],
     ) -> str:
         owner_repo = DownloadManager._extract_owner_repo(repository_url)
-        prefix = f"{source}/{owner_repo}/"
+        prefix = f"{source}:{owner_repo}/"
         if not skill_id.startswith(prefix):
             raise SkillArchiveConflictError(f"Skill ID does not belong to repository: {skill_id}")
 
-        relative_path = skill_id.removeprefix(prefix).rstrip("/")
-        path = PurePosixPath(relative_path)
-        if not relative_path or path.is_absolute() or ".." in path.parts:
-            raise SkillArchiveConflictError("Invalid Skill repository path")
-        return path.as_posix()
+        # skill_id only carries the skill name now, so the repository-relative
+        # directory is recovered from the browse URL.  The ref follows /blob/
+        # and may itself contain slashes, so match against known refs instead
+        # of blindly splitting on '/'.
+        for ref in dict.fromkeys(ref for ref in refs if ref):
+            marker = f"/blob/{ref}/"
+            if marker not in source_url:
+                continue
+            file_path = source_url.split(marker, 1)[1].rstrip("/")
+            if not file_path.endswith("SKILL.md"):
+                continue
+            relative_path = file_path.removesuffix("SKILL.md").rstrip("/")
+            path = PurePosixPath(relative_path)
+            if not relative_path or path.is_absolute() or ".." in path.parts:
+                raise SkillArchiveConflictError("Invalid Skill repository path")
+            return path.as_posix()
+
+        raise SkillArchiveNotFoundError(
+            "Skill relative path cannot be resolved from source URL"
+        )
 
     @staticmethod
     def _extract_owner_repo(repository_url: str | None) -> str:

@@ -76,16 +76,17 @@ def build_public_skill_id_from_relative_path(
 
     Shared by the crawler (which writes the skill records) and the install
     audit lookup (which reads them back), so both use the exact same skill_id
-    in the database. Root-level SKILL.md resolves to the repo slug, matching
+    in the database. The skill segment is the name of the directory that
+    contains SKILL.md; a root-level SKILL.md resolves to the repo slug, matching
     the crawler's historical behaviour.
     """
     if relative_path == 'SKILL.md':
-        skill_path = owner_repo.rsplit('/', 1)[-1]
+        skill_name = owner_repo.rsplit('/', 1)[-1]
     elif relative_path.endswith('/SKILL.md'):
-        skill_path = relative_path.removesuffix('/SKILL.md')
+        skill_name = Path(relative_path).parent.name
     else:
         raise ValueError(f'Expected a SKILL.md file, got: {relative_path}')
-    return f'{source}/{owner_repo}/{skill_path}'
+    return f'{source}:{owner_repo}/{skill_name}'
 
 
 def build_public_skill_id(
@@ -303,18 +304,6 @@ def should_skip_relative_path(relative_path: str) -> bool:
             'archive', 'archives', 'legacy',
         }
         for part in path_parts[:-1]
-    )
-
-
-def find_scannable_skill_files(repo_root: Path) -> list[Path]:
-    """Return SKILL.md files that are eligible for repository discovery."""
-    return sorted(
-        skill_file
-        for skill_file in repo_root.rglob('SKILL.md')
-        if skill_file.is_file()
-        and not should_skip_relative_path(
-            to_repository_relative_path(repo_root, skill_file)
-        )
     )
 
 

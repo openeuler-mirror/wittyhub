@@ -1091,6 +1091,22 @@ class SecurityDetector:
             details=details,
         )
 
+    async def fetch_external_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report (report.md) for a one-off scan build.
+
+        Used by the ``audit-by-url/report`` endpoint so PR reviewers can
+        download the full report for a single skill scan.
+        """
+        if not self.has_skillspector:
+            return None
+        try:
+            return await asyncio.to_thread(
+                self._skillspector_client.fetch_report_md, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector report.md fetch failed: %s", exc)
+            return None
+
     async def get_external_result(
         self, build_number: int
     ) -> dict[str, Any]:

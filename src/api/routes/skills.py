@@ -5,7 +5,7 @@ import subprocess
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -410,6 +410,40 @@ async def audit_by_url_result(
         raise HTTPException(status_code=503, detail="Security audit is disabled")
     result = await security_service.get_external_result(build_number)
     return AuditByUrlResultResponse(**result)
+
+
+@router.get(
+    "/audit-by-url/report",
+    response_model=None,
+)
+async def audit_by_url_report(
+    build_number: Annotated[int, Query(ge=1, description="Jenkins build number")],
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve report.md for a one-off audit-by-URL scan as a downloadable file.
+
+    Clicked from the openEuler-skills PR gate comment (detail link).  The
+    report content is fetched from the Jenkins artifact on demand, so it
+    stays fresh after the scan.  Read-only and intentionally unauthenticated
+    so the link can be opened directly in a browser.
+    """
+    security_service = SecurityService(db)
+    if not security_service.detector.enable_audit:
+        raise HTTPException(status_code=503, detail="Security audit is disabled")
+    md = await security_service.get_external_report_md(build_number)
+    if md is None:
+        raise HTTPException(
+            status_code=404, detail="report.md not found for build"
+        )
+    return Response(
+        content=md,
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": 'attachment; filename="report-{}.md"'.format(
+                build_number
+            )
+        },
+    )
 
 
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)

@@ -144,3 +144,115 @@ def test_run_scan_errors_when_report_unavailable():
         result, _ = client.run_scan("https://gitcode.com/openeuler/foo")
 
     assert "error" in result
+
+
+def _detector_with_client(client):
+    from src.security.detector import SecurityDetector
+
+    detector = SecurityDetector()
+    detector._skillspector_client = client
+    return detector
+
+
+def _await(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def test_get_external_result_pending():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    with patch.object(client, "get_build_status", return_value="BUILDING"):
+        result = _await(detector.get_external_result(42))
+
+    assert result["status"] == "pending"
+    assert result["build_number"] == 42
+
+
+def test_get_external_result_not_found():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    with patch.object(client, "get_build_status", return_value="NOT_FOUND"):
+        result = _await(detector.get_external_result(42))
+
+    assert result["status"] == "error"
+    assert "not found" in result["error"].lower()
+
+
+def test_get_external_result_report_unavailable():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    with (
+        patch.object(client, "get_build_status", return_value="SUCCESS"),
+        patch.object(client, "fetch_report", return_value=None),
+    ):
+        result = _await(detector.get_external_result(42))
+
+    assert result["status"] == "error"
+
+
+def test_get_external_result_done():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    report = {"risk_assessment": {"severity": "HIGH", "score": 65}}
+    report_md = "# Security Report"
+    with (
+        patch.object(client, "get_build_status", return_value="SUCCESS"),
+        patch.object(client, "fetch_report", return_value=report),
+        patch.object(client, "fetch_report_md", return_value=report_md),
+    ):
+        result = _await(detector.get_external_result(42))
+
+    assert result["status"] == "done"
+    assert result["risk_level"] == "high"
+    assert result["risk_score"] == 65
+    assert result["jenkins_status"] == "SUCCESS"
+    assert result["details"]["skillspector_report_md"] == report_md
+
+
+def test_get_external_result_disabled():
+    from src.security.detector import SecurityDetector
+
+    detector = SecurityDetector()
+    detector._skillspector_client = None
+    result = _await(detector.get_external_result(42))
+    assert result["status"] == "error"
+
+
+def test_fetch_external_report_md_returns_markdown():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    report_md = "# Security Report\n\n- high: prompt injection"
+    with patch.object(client, "fetch_report_md", return_value=report_md) as mock_fetch:
+        md = _await(detector.fetch_external_report_md(42))
+
+    mock_fetch.assert_called_once_with(42)
+    assert md == report_md
+
+
+def test_fetch_external_report_md_disabled():
+    from src.security.detector import SecurityDetector
+
+    detector = SecurityDetector()
+    detector._skillspector_client = None
+    assert _await(detector.fetch_external_report_md(42)) is None
+
+
+def test_fetch_external_report_md_error_returns_none():
+    from src.security.detector import SkillspectorClient
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    detector = _detector_with_client(client)
+    with patch.object(client, "fetch_report_md", side_effect=RuntimeError("boom")):
+        assert _await(detector.fetch_external_report_md(42)) is None

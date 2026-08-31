@@ -2,6 +2,11 @@
 
 set -eu
 
+# 部分平台（如未启用 LFS 的 GitCode 项目）无法下载 Git LFS 大文件。
+# 跳过 LFS smudge，让 git archive 导出 LFS 指针文件（文本）而非二进制内容，
+# 避免 checkout 阶段因下载 LFS blob 失败导致整个扫描失败。
+export GIT_LFS_SKIP_SMUDGE=1
+
 git_url=${SCAN_GIT_URL:?SCAN_GIT_URL is required}
 git_ref=${SCAN_GIT_REF:-main}
 skill_path=${SCAN_SKILL_PATH:-}
@@ -45,6 +50,9 @@ if [ -n "$local_repository" ] && [ -d "${local_repository}/.git" ] && \
     # The host cache is mounted read-only. Reuse its existing objects through
     # alternates, but let lazy blob fetches write into this Jenkins workspace.
     git init -q
+    git config filter.lfs.smudge cat
+    git config filter.lfs.process ''
+    git config filter.lfs.required false
     git remote add origin "$git_url"
     mkdir -p .git/objects/info
     printf '%s\n' "${local_repository}/.git/objects" > .git/objects/info/alternates
@@ -61,6 +69,9 @@ else
         echo "Local repository cache not found; using remote repository: $git_url"
     fi
     git init -q
+    git config filter.lfs.smudge cat
+    git config filter.lfs.process ''
+    git config filter.lfs.required false
     git remote add origin "$git_url"
     git fetch --depth 1 origin "$git_ref"
     archive_repository=.

@@ -1091,6 +1091,130 @@ class SecurityDetector:
             details=details,
         )
 
+    async def fetch_external_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report (report.md) for a one-off scan build.
+
+        Used by the ``audit-by-url/report`` endpoint so PR reviewers can
+        download the full report for a single skill scan.
+        """
+        if not self.has_skillspector:
+            return None
+        try:
+            return await asyncio.to_thread(
+                self._skillspector_client.fetch_report_md, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector report.md fetch failed: %s", exc)
+            return None
+
+    async def get_external_result(
+        self, build_number: int
+    ) -> dict[str, Any]:
+        """Poll a previously-triggered one-off Skillspector scan (async mode).
+
+        Used by the ``audit-by-url`` result endpoint: the PR gate triggers a
+        scan with ``async_mode=True`` and polls this method until the Jenkins
+        build finishes, then collects report.json / report.md without
+        persisting anything to the database.
+
+        Returns a dict with a ``status`` field:
+        * ``"pending"``   - build still running or status unavailable
+        * ``"done"``      - report collected, includes risk_level/score/signals
+        * ``"error"``     - build not found or report could not be fetched
+        """
+        if not self.has_skillspector:
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "error": "Skillspector not configured",
+            }
+
+        try:
+            status = await asyncio.to_thread(
+                self._skillspector_client.get_build_status, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector status fetch failed: %s", exc)
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "error": str(exc)[:200],
+            }
+
+        if status in (None, "BUILDING"):
+            return {
+                "status": "pending",
+                "build_number": build_number,
+                "jenkins_status": status or "BUILDING",
+            }
+        if status == "NOT_FOUND":
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "jenkins_status": status,
+                "error": f"Build {build_number} not found",
+            }
+
+        try:
+            report = await asyncio.to_thread(
+                self._skillspector_client.fetch_report, build_number
+            )
+            report_md = await asyncio.to_thread(
+                self._skillspector_client.fetch_report_md, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector report fetch failed: %s", exc)
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "jenkins_status": status,
+                "error": str(exc)[:200],
+            }
+
+        if report is None:
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "jenkins_status": status,
+                "error": f"Failed to fetch report for build {build_number}",
+            }
+
+        risk_signals = SkillspectorClient.report_to_risk_signals(report)
+        severity = report.get("risk_assessment", {}).get("severity", "UNKNOWN").upper()
+        score = report.get("risk_assessment", {}).get("score")
+        risk_level_map = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
+        risk_level = risk_level_map.get(severity, "unknown")
+
+        details: dict[str, Any] = {
+            "source": "skillspector",
+            "skillspector_build_number": build_number,
+            "skillspector_version": report.get("metadata", {}).get("skillspector_version"),
+            "skillspector_score": score,
+            "recommendation": report.get("risk_assessment", {}).get("recommendation"),
+            "skillspector_report": report,
+        }
+        if report_md:
+            details["skillspector_report_md"] = report_md
+
+        return {
+            "status": "done",
+            "build_number": build_number,
+            "jenkins_status": status,
+            "risk_level": risk_level,
+            "risk_score": score,
+            "risk_signals": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "severity": s.severity,
+                    "data": s.data,
+                }
+                for s in risk_signals
+            ],
+            "details": details,
+        }
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Factory — start the background collector from app lifecycle

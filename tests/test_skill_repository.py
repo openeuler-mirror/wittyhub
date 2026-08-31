@@ -85,14 +85,14 @@ class TestSkillRepositoryUnit:
             select(Skill),
             Skill,
             source="github",
-            skill_id_prefix="github/anthropics/claude-code",
+            skill_id_prefix="github:anthropics/claude-code",
         )
         compiled = query.compile(dialect=postgresql.dialect())
         sql = str(compiled)
         # source_type 过滤 + repo 前缀过滤应同时生效
         assert "skills.source = " in sql
         assert "skills.skill_id LIKE " in sql
-        assert "github/anthropics/claude-code/%" in compiled.params.values()
+        assert "github:anthropics/claude-code/%" in compiled.params.values()
 
     @pytest.mark.asyncio
     async def test_list_skills_route_forwards_repo_filter(self):
@@ -102,7 +102,7 @@ class TestSkillRepositoryUnit:
         now = datetime.now(timezone.utc)
         skill = SimpleNamespace(
             id=str(uuid.uuid4()),
-            skill_id="github/anthropics/claude-code/.ai/skills/add-or-fix-type-checking",
+            skill_id="github:anthropics/claude-code/.ai/skills/add-or-fix-type-checking",
             name="add-or-fix-type-checking",
             description="Check types",
             version="1.0.0",
@@ -146,7 +146,7 @@ class TestSkillRepositoryUnit:
         assert isinstance(response, SkillListResponse)
         kwargs = skill_repository.list.await_args.kwargs
         assert kwargs["source"] == "github"
-        assert kwargs["skill_id_prefix"] == "github/anthropics/claude-code"
+        assert kwargs["skill_id_prefix"] == "github:anthropics/claude-code"
         assert kwargs["limit"] == 20
 
     def test_build_skill_id_uses_relative_skill_path(self):

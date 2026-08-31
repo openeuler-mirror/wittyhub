@@ -80,8 +80,16 @@ async def lifespan(app: FastAPI):
 
         collector = await start_skillspector_collector()
 
+    discover_scheduler = None
+    if settings.discover_scheduler.enabled:
+        from src.api.services.discover_scheduler import start_discover_scheduler
+
+        discover_scheduler = await start_discover_scheduler()
+
     yield
 
+    if discover_scheduler is not None:
+        await discover_scheduler.stop()
     if collector is not None:
         await collector.stop()
     logger.info("wittyhub shutting down")

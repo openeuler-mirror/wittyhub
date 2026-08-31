@@ -21,7 +21,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
+
+
+class _SecurityDetectorLogAdapter(logging.LoggerAdapter):
+    """给本模块所有日志消息统一加 "SecurityDetector: " 前缀。"""
+
+    def process(self, msg: Any, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        return f"SecurityDetector: {msg}", kwargs
+
+
+logger: logging.LoggerAdapter[None] = _SecurityDetectorLogAdapter(
+    logging.getLogger(__name__), {}
+)
 
 ALLOWED_GIT_HOSTS = frozenset({
     "github.com",

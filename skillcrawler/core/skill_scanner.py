@@ -176,8 +176,8 @@ class SkillScanner:
                 input_elapsed=input_elapsed,
                 existing_record=existing_skills.get(skill_id),
             )
-            _logger.debug(
-                'Discovered skill: skill_id=%s version=%s source=%s',
+            _logger.info(
+                'Discovered skill(latest): skill_id=%s version=%s source=%s',
                 skill.skill_id, skill.version or '-', relative_path,
             )
             discovered.append(skill)
@@ -276,7 +276,7 @@ class SkillScanner:
                 if commit_key is not None:
                     seen_commits.add(commit_key)
                 _logger.info(
-                    'Discovered skill: skill_id=%s version=%s source=%s',
+                    'Discovered skill(version): skill_id=%s version=%s source=%s',
                     skill.skill_id, skill.version or '-', relative_path,
                 )
                 discovered.append(skill)

@@ -3,7 +3,7 @@ import logging
 import re
 import subprocess
 from typing import Annotated
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -418,6 +418,9 @@ async def audit_by_url_result(
 )
 async def audit_by_url_report(
     build_number: Annotated[int, Query(ge=1, description="Jenkins build number")],
+    filename: Annotated[
+        str | None, Query(max_length=2048, description="Custom download filename")
+    ] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Serve report.md for a one-off audit-by-URL scan as a downloadable file.
@@ -435,14 +438,28 @@ async def audit_by_url_report(
         raise HTTPException(
             status_code=404, detail="report.md not found for build"
         )
+    # 下载文件名：优先使用门禁传入的 filename（skill 名 + 安全审计报告.md），
+    # 否则回退为 report-<build_number>.md；剔除可能破坏 Content-Disposition 的字符。
+    # Content-Disposition 只允许 latin-1，中文等非 ASCII 文件名需用 RFC 5987 的
+    # filename*=UTF-8''<percent-encoded> 携带，ASCII 名做兼容兜底。
+    safe_name = re.sub(r'["\r\n]', "", filename or "").strip()
+    if not safe_name:
+        disposition = 'attachment; filename="report-{}.md"'.format(build_number)
+    else:
+        try:
+            safe_name.encode("latin-1")
+        except UnicodeEncodeError:
+            disposition = (
+                'attachment; filename="report-{}.md"; filename*=UTF-8\'\'{}'.format(
+                    build_number, quote(safe_name, safe="")
+                )
+            )
+        else:
+            disposition = 'attachment; filename="{}"'.format(safe_name)
     return Response(
         content=md,
         media_type="text/markdown",
-        headers={
-            "Content-Disposition": 'attachment; filename="report-{}.md"'.format(
-                build_number
-            )
-        },
+        headers={"Content-Disposition": disposition},
     )
 
 

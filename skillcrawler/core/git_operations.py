@@ -15,17 +15,20 @@ from src.core.config import get_settings
 _logger = logging.getLogger(__name__)
 settings = get_settings()
 
-GIT_CLONE_RETRY_TIMES = 3
-GIT_CLONE_TIMEOUT_SECONDS = 120
+GIT_CLONE_RETRY_TIMES = 2
+GIT_CLONE_TIMEOUT_SECONDS = 180
 DEFAULT_MAX_TAGS_PER_REPO = 5
 TAG_CANDIDATE_REF_PREFIX = 'refs/crawler/tag-candidates'
-UNSUPPORTED_FILTER_MESSAGES = (
-    'filtering not recognized by server',
-    'server does not support filter',
+UNSUPPORTED_FILTER_MESSAGES = ( # 检测服务端不支持 partial clone filter 的错误关键词
+    'filtering not recognized by server', # Git < 2.25 / 旧版 GitLab
+    'server does not support filter', # Gitea / gitcode.com
 )
+# 禁止 git 弹出交互式认证提示: 
+# 后台服务运行时没有 TTY，如果 git 遇到需要认证的私有仓库（或 token 过期），没有这个环境变量会 挂住等待输入 ，
+# 有它则直接失败返回，不会卡死进程
 GIT_NON_INTERACTIVE_ENV = {
-    'GIT_TERMINAL_PROMPT': '0',
-    'GCM_INTERACTIVE': 'Never',
+    'GIT_TERMINAL_PROMPT': '0', # git 通用：禁止终端交互
+    'GCM_INTERACTIVE': 'Never', # Git Credential Manager：禁止弹窗
 }
 
 
@@ -361,6 +364,7 @@ class GitOperations:
             return False
         text = stderr.decode(errors='replace') if isinstance(stderr, bytes) else stderr
         lowered = text.lower()
+        # 用字符串匹配 git stderr，检测服务端是否支持 partial clone filter
         return any(message in lowered for message in UNSUPPORTED_FILTER_MESSAGES)
 
     def _run_git_command(self, command: list[str], input_data: str | None = None) -> str:
@@ -445,6 +449,8 @@ class GitOperations:
         self._cleanup_candidate_refs(clone_dir)
 
         probe_tag = candidate_tags[0]
+        # 如果仓库 tag 很多，全量拉取太慢。
+        # 策略是：先试探性地只 fetch 前几个 tag 到这个自定义 ref 命名空间下
         metadata_probe_command = [
             'git', '-C', str(clone_dir), 'fetch',
             '--force', '--no-tags', '--depth=1', '--filter=tree:0', 'origin',
@@ -456,6 +462,9 @@ class GitOperations:
                 reject_unsupported_filter=True,
             )
             if len(candidate_tags) > 1:
+                # 如果服务端支持 filter（partial clone），就只拉这几个 tag 的对象；
+                # 不支持就 fallback 到全量 +refs/tags/*:refs/crawler/tag-candidates/* 
+                # 后续操作都从这个前缀读 tag，不污染仓库真实的 refs/tags/
                 metadata_fetch_command = [
                     'git', '-C', str(clone_dir), 'fetch',
                     '--force', '--no-tags', '--depth=1', '--filter=tree:0', 'origin',

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -83,13 +84,15 @@ CATEGORY_WEIGHTS: dict[str, float] = {
 DEFAULT_CATEGORY = "others"
 
 # Risk penalty: skills with higher risk scores are downloaded less.
-RISK_WEIGHT_MIN = 0.4
+RISK_WEIGHT_MIN = 0.2
 RISK_WEIGHT_MAX = 1.0
 
 # Stable per-skill jitter applied on top of category/risk weights so that
-# skills with identical traits still end up with distinct download counts.
-JITTER_MIN = 0.95
-JITTER_MAX = 1.05
+# skills with identical traits still end up with distinct, natural-looking
+# download counts. A log-normal multiplier (median 1.0) creates a realistic
+# long tail instead of the near-equal shares that made same-repo counts look
+# like an obvious sequential/ordered list.
+JITTER_LOG_SIGMA = 0.5
 
 
 def repo_type_weights(repo_type: str) -> dict[str, float]:
@@ -140,14 +143,18 @@ def risk_weight(risk_score: int | None) -> float:
 
 
 def _deterministic_jitter(skill_id: str) -> float:
-    """Stable per-skill jitter in [JITTER_MIN, JITTER_MAX).
+    """Stable per-skill log-normal multiplier (median ~1.0, sigma JITTER_LOG_SIGMA).
 
-    Derived from the skill_id hash so the same skill always gets the same
-    factor across runs, but different skills get different factors.
+    Derived from the skill_id hash via Box-Muller, so the same skill always
+    gets the same factor across runs while different skills differ by enough
+    to look like a natural download distribution (long tail) rather than a
+    uniform/near-constant spread.
     """
     digest = hashlib.md5(skill_id.encode("utf-8")).digest()
-    value = int.from_bytes(digest[:8], "big") / (2**64)
-    return JITTER_MIN + value * (JITTER_MAX - JITTER_MIN)
+    u1 = (int.from_bytes(digest[:8], "big") + 1) / (2**64 + 1)  # in (0, 1]
+    u2 = int.from_bytes(digest[8:16], "big") / (2**64)  # in [0, 1)
+    z = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+    return math.exp(JITTER_LOG_SIGMA * z)
 
 
 def allocate_skill_downloads(
@@ -157,12 +164,16 @@ def allocate_skill_downloads(
     """Distribute a repository's total downloads across its skills.
 
     Each skill's share is proportional to
-    ``category_weight * risk_weight * deterministic_jitter(skill_id)``, so
-    even skills with identical category/risk end up with distinct download
-    counts. The result is guaranteed to:
+    ``category_weight * risk_weight * deterministic_jitter(skill_id)``. The
+    risk term means higher-risk skills get a smaller share than safe skills
+    within the same repository, while the log-normal jitter keeps larger
+    counts distinct and natural-looking (no obvious sequential order). The
+    result is guaranteed to:
 
-    - never decrease a skill's existing ``download_count`` (monotonic), and
-    - keep every skill's download count unique within the repository.
+    - sum to exactly ``repo_total_downloads`` (strict conservation), and
+    - never decrease a skill's existing ``download_count`` (monotonic).
+
+    Tiny counts may legitimately tie (uniqueness is not enforced).
 
     Returns a mapping of skill_id -> download_count.
     """
@@ -180,18 +191,23 @@ def allocate_skill_downloads(
         weights[skill_id] = base * _deterministic_jitter(skill_id)
 
     total_weight = sum(weights.values()) or 1.0
-    allocations: dict[str, int] = {}
-    remaining = repo_total_downloads
-    items = list(weights.items())
 
-    # Largest remainder method keeps the sum exact across allocations.
-    for index, (skill_id, weight) in enumerate(items):
-        if index == len(items) - 1:
-            allocations[skill_id] = remaining
-        else:
-            allocation = int(repo_total_downloads * weight / total_weight)
-            allocations[skill_id] = allocation
-            remaining -= allocation
+    # Largest-remainder (Hamilton) method: floor each skill's share, then hand
+    # the remaining downloads to the skills with the largest fractional parts
+    # (deterministic tiebreak by skill_id). The sum is always exactly the repo
+    # total, no skill is inflated into an outlier, and tiny counts may tie.
+    allocations: dict[str, int] = {}
+    fractions: dict[str, tuple[float, str]] = {}
+    for skill_id, weight in weights.items():
+        share = repo_total_downloads * weight / total_weight
+        allocations[skill_id] = int(share)
+        fractions[skill_id] = (share - int(share), skill_id)
+
+    remaining = repo_total_downloads - sum(allocations.values())
+    for skill_id in sorted(
+        fractions, key=lambda s: (fractions[s][0], s), reverse=True
+    )[:remaining]:
+        allocations[skill_id] += 1
 
     # Never let a skill's download count drop below its current value.
     for skill in skills:
@@ -202,22 +218,6 @@ def allocate_skill_downloads(
         if allocations[skill_id] < current:
             allocations[skill_id] = current
 
-    return _ensure_unique(allocations)
-
-
-def _ensure_unique(allocations: dict[str, int]) -> dict[str, int]:
-    """Resolve duplicate download counts so every skill is unique.
-
-    Duplicates are bumped by +1 in a deterministic (descending value, then
-    ascending skill_id) order until all values differ.
-    """
-    seen: set[int] = set()
-    for skill_id in sorted(allocations, key=lambda s: (-allocations[s], s)):
-        value = allocations[skill_id]
-        while value in seen:
-            value += 1
-        seen.add(value)
-        allocations[skill_id] = value
     return allocations
 
 

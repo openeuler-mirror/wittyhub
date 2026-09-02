@@ -2,7 +2,7 @@
 
 按 DiscoverSchedulerConfig（config.yaml 的 discover_scheduler 段）在每天
 或每周的固定时刻触发 skillcrawler 的 discover 流程：读取
-skills/skill-repos.yaml 中全部仓库配置，逐仓库执行
+openEuler-skills catalog 中的仓库配置，逐仓库执行
 SkillManager.discover_configured_skill_repository。
 
 调度基于纯 asyncio（sleep 到下一个触发点），与 SkillspectorCollector
@@ -21,6 +21,7 @@ from typing import Any
 
 from skillcrawler.core.skill_manager import SkillManager
 from skillcrawler.main import build_configured_discover_requests
+from skillcrawler.config import sync_openEuler_skills_repo
 from src.core.config import DiscoverSchedulerConfig
 from src.core.database import AsyncSessionLocal
 from src.models.repository import SkillRepoRepository, SkillRepository
@@ -140,7 +141,10 @@ class DiscoverScheduler:
         结束时汇总平均耗时与最慢的仓库，便于排查慢仓库。
         每轮结果（含每仓明细）写入 result_dir 下的 JSON 文件。
         """
-        requests, config_keys = build_configured_discover_requests()
+        repository_path = sync_openEuler_skills_repo()
+        requests, config_keys = build_configured_discover_requests(
+            repository_path=repository_path,
+        )
         total = len(requests)
         run_started = time.monotonic()
         run_started_wall = datetime.now()
@@ -166,6 +170,7 @@ class DiscoverScheduler:
             manager = SkillManager(
                 skill_repository=SkillRepository(session),
                 skill_repo_repository=SkillRepoRepository(session),
+                catalog_path=repository_path,
             )
             for index, request in enumerate(requests, start=1):
                 label = request.url or "<missing-url>"

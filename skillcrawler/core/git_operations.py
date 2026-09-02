@@ -58,6 +58,20 @@ class GitOperations:
         command.extend([clone_url, str(clone_dir)])
         self._run_git_command_with_auth_retry(command, clone_url, repo_url, 'clone')
 
+    def sync_catalog_repository(self, repository_dir: Path, repository_url: str) -> None:
+        """Clone or fast-forward an openEuler-skills catalog repository."""
+        if not (repository_dir / '.git').exists():
+            repository_dir.parent.mkdir(parents=True, exist_ok=True)
+            self._run_git_command_with_auth_retry(
+                ['git', 'clone', '--depth', '1', repository_url, str(repository_dir)],
+                repository_url, repository_url, 'catalog clone',
+            )
+            return
+        self._run_git_command_with_auth_retry(
+            ['git', '-C', str(repository_dir), 'pull', '--ff-only'],
+            repository_url, repository_url, 'catalog pull',
+        )
+
     def update_existing_repository(
         self,
         clone_dir: Path,

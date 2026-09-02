@@ -56,7 +56,7 @@ app:
     - "http://localhost:8080"
     - "http://127.0.0.1:8080"
 
-# 后台定时 discover：按 skills/skill-repos.yaml 全量扫描仓库
+# 后台定时 discover：按 openEuler-skills catalog 全量扫描仓库
 # 环境变量覆盖示例：DISCOVER_SCHEDULER__ENABLED=true、DISCOVER_SCHEDULER__INTERVAL=weekly
 discover_scheduler:
   enabled: true

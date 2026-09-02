@@ -1,6 +1,6 @@
 """Popularity collection: fetch star/fork/watcher counts for skill repos.
 
-The collector reads the configured repo list (skills/skill-repos.yaml by
+The collector reads the configured repo list (the openEuler-skills catalog by
 default) and queries each hosting platform's public REST API for repository
 popularity metrics (stars, forks, watchers). Results are stored on the
 ``skill_repos`` table via :class:`SkillRepoRepository`.
@@ -351,20 +351,20 @@ class PopularityCollector:
     def __init__(self, fetcher: PopularityFetcher | None = None) -> None:
         self.fetcher = fetcher or PopularityFetcher()
 
-    def _parse_repo_list(self, config_path: Path | None) -> list[tuple[str, str]]:
+    def _parse_repo_list(self, repository_path: Path | None) -> list[tuple[str, str]]:
         """Extract (repo_url, repo_type) pairs from the crawler config file.
 
         The repo type is derived from the config section the URL appears in:
-        ``openeuler_repos`` -> "openeuler", ``enterprise_repos`` -> "enterprise",
-        ``personal_repos`` -> "personal".
+        ``community`` -> "community", ``enterprise`` -> "enterprise",
+        ``personal`` -> "personal".
         """
         from skillcrawler.config import load_crawler_config
 
-        config = load_crawler_config(config_path)
+        config = load_crawler_config(repository_path)
         repos: list[tuple[str, str]] = []
         seen: set[str] = set()
-        for key in ("openeuler_repos", "personal_repos", "enterprise_repos"):
-            repo_type = key.removesuffix("_repos")
+        for key in ("community", "personal", "enterprise"):
+            repo_type = key
             for item in config.get(key, []) or []:
                 url = item.get("url") if isinstance(item, dict) else None
                 if isinstance(url, str) and url.strip() and url.strip() not in seen:
@@ -388,12 +388,12 @@ class PopularityCollector:
 
     async def collect(
         self,
-        config_path: Path | None = None,
+        repository_path: Path | None = None,
         *,
         only: str | None = None,
     ) -> list[RepoPopularity]:
         """Collect popularity for configured repos, with bounded concurrency."""
-        repos = self._parse_repo_list(config_path)
+        repos = self._parse_repo_list(repository_path)
         if only:
             repos = [(url, repo_type) for url, repo_type in repos if self._source_for_url(url) == only]
         if not repos:

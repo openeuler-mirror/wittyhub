@@ -828,7 +828,7 @@ class SkillRepository:
                 key = row.display_name or "others"
             categories_map[key] = row.count
 
-        # Always return all canonical categories (from skill-repos.yaml), fill 0 for missing
+        # Always return all canonical categories, filling 0 for missing values.
         canonical_categories = CANONICAL_CATEGORIES
         categories = [
             {

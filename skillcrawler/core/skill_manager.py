@@ -44,6 +44,7 @@ class SkillRepositoryRequest(BaseModel):
     branch: str | None = None
     url: str | None = None
     platform: str | None = None
+    sig_name: str | None = None
 
 
 class SkillDiscoverStatus:
@@ -58,6 +59,7 @@ class SkillManager:
     skill_repository: SkillRepository
     skill_repo_repository: SkillRepoRepository
     workspace_base: Path | None = None
+    catalog_path: Path | None = None
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
     _openeuler_sig_by_repo_name: dict[str, str] | None = field(
@@ -73,7 +75,7 @@ class SkillManager:
         category_classifier: DeepSeekCategoryClassifier | None = None
         security_detector: SecurityDetector | None = None
         try:
-            category_classifier = DeepSeekCategoryClassifier()
+            category_classifier = DeepSeekCategoryClassifier(self.catalog_path)
         except Exception as exc:
             _logger.warning('Failed to initialize category classifier: %s', exc)
 
@@ -265,6 +267,7 @@ class SkillManager:
                 clone_dir=clone_dir,
                 repo_name=repo_name,
                 skill_paths=skill_paths,
+                author=normalized.sig_name,
             )
         except Exception as exc:
             error_summary = self._git_ops.summarize_exception(exc)
@@ -293,8 +296,9 @@ class SkillManager:
         clone_dir: Path,
         repo_name: str,
         skill_paths: list[str] | None = None,
+        author: str | None = None,
     ) -> SkillRepoModel:
-        author = self._resolve_skill_author(repo.platform, repo_name)
+        author = author or self._resolve_skill_author(repo.platform, repo_name)
         latest_skills, tagged_skills, repository_commit_id = await self._discover_skills(
             repo,
             clone_dir=clone_dir,
@@ -559,7 +563,7 @@ class SkillManager:
         return bool(current_commit_id and stored_commit_id == current_commit_id)
 
     def _resolve_skill_author(self, platform: str | None, repo_name: str) -> str | None:
-        if platform == 'openeuler':
+        if platform == 'community':
             return self._get_openeuler_sig_name(repo_name)
         return None
 
@@ -595,7 +599,10 @@ class SkillManager:
         if not url:
             raise ValueError('git skill repos require url')
         platform = request.platform.strip() if request.platform is not None else None
-        return SkillRepositoryRequest(branch=branch, url=url, platform=platform)
+        sig_name = request.sig_name.strip() if request.sig_name else None
+        return SkillRepositoryRequest(
+            branch=branch, url=url, platform=platform, sig_name=sig_name,
+        )
 
     @staticmethod
     def _derive_repo_name(request: SkillRepositoryRequest) -> str:

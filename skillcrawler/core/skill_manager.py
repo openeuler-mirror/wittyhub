@@ -305,6 +305,10 @@ class SkillManager:
             author=author,
             skill_paths=skill_paths,
         )
+        _logger.info(
+            'Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d',
+            repo.repo_name, len(latest_skills), len(tagged_skills),
+        )
         unique_skill_count = self._count_unique_skills(latest_skills)
         await self.skill_repository.store_skills_and_versions(
             repo.id,
@@ -339,6 +343,11 @@ class SkillManager:
         )
         version_snapshots = GitOperations.build_repository_version_snapshots(
             repository_git_metadata, as_optional_str, as_optional_str_list,
+        )
+        _logger.info(
+            'Discover: git metadata collected for %s: latest_tags=%d',
+            repo.repo_name,
+            len(repository_git_metadata.get('latest_tags', []) or []),
         )
 
         detected_branch: str | None = None

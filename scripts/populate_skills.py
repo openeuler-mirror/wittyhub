@@ -1,6 +1,8 @@
 import random
 import uuid
 import re
+import math
+import hashlib
 import httpx
 from datetime import datetime, timedelta
 
@@ -44,6 +46,10 @@ def fetch_skill_content(source_url: str, skill_name: str, version: str = "main")
     return None
 
 
+# NOTE: ``download_count`` below is used as a *per-repo budget seed*. When
+# populating, each repository's total (the sum of its seeds) is split across
+# its skills using risk + jitter, so stored download counts stay
+# risk-correlated (high risk < safe) and no longer look like an ordered list.
 SKILLS_DATA = [
     {"skill_id": "find-skills", "name": "Find Skills", "description": "Search and discover AI agent skills from the skills registry", "author": "vercel-labs", "source": "github", "source_url": "https://github.com/vercel-labs/skills", "category": "Search", "tags": ["search", "discovery", "registry"], "platform": "claude", "download_count": 1500000, "rating": "4.9"},
     {"skill_id": "frontend-design", "name": "Frontend Design", "description": "Best practices for building modern frontend applications with React and Next.js", "author": "anthropics", "source": "github", "source_url": "https://github.com/anthropics/skills", "category": "Development", "tags": ["frontend", "react", "design", "ui"], "platform": "claude", "download_count": 416100, "rating": "4.8"},
@@ -211,6 +217,66 @@ SKILLS_DATA = [
 CATEGORIES = ["Development", "Design", "Marketing", "Cloud", "AI", "Database", "Security", "DevOps", "Productivity", "Tools", "UI Components", "Media", "Document", "Communication", "Writing", "Testing", "Browser", "Data", "Research", "Backend"]
 
 
+# Risk penalty: higher risk scores convert to fewer downloads (0.2x .. 1.0x).
+RISK_WEIGHT_MIN = 0.2
+RISK_WEIGHT_MAX = 1.0
+
+# Log-normal per-skill multiplier: median 1.0, sigma 0.5 (roughly 0.4x..2.7x).
+JITTER_LOG_SIGMA = 0.5
+
+
+def risk_weight(risk_score: int) -> float:
+    """Higher risk scores convert to fewer downloads."""
+    return max(RISK_WEIGHT_MIN, RISK_WEIGHT_MAX - (risk_score / 100.0) * (RISK_WEIGHT_MAX - RISK_WEIGHT_MIN))
+
+
+def skill_jitter(skill_id: str) -> float:
+    """Deterministic per-skill log-normal multiplier (median ~1.0).
+
+    Derived from the skill_id hash via Box-Muller so the same skill always
+    gets the same factor, while different skills differ enough to avoid an
+    obvious sequential order within a repository.
+    """
+    digest = hashlib.md5(skill_id.encode("utf-8")).digest()
+    u1 = (int.from_bytes(digest[:8], "big") + 1) / (2**64 + 1)  # in (0, 1]
+    u2 = int.from_bytes(digest[8:16], "big") / (2**64)  # in [0, 1)
+    z = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+    return math.exp(JITTER_LOG_SIGMA * z)
+
+
+def allocate_repo_downloads(repo_total: int, skills: list[tuple[str, int]]) -> dict[str, int]:
+    """Split a repository's download budget across its skills.
+
+    Each skill's share is proportional to ``risk_weight * skill_jitter``, so
+    within a repo high-risk skills get fewer downloads than safe ones. The
+    largest-remainder (Hamilton) method keeps the sum exactly equal to the
+    repo total and never inflates outliers; tiny counts may legitimately tie.
+    Returns a mapping of skill_id -> download_count.
+    """
+    weights = {
+        skill_id: risk_weight(risk) * skill_jitter(skill_id)
+        for skill_id, risk in skills
+    }
+    total_weight = sum(weights.values()) or 1.0
+
+    # Largest-remainder (Hamilton) method: floor each share, then hand the
+    # remaining downloads to the skills with the largest fractional parts
+    # (deterministic tiebreak by skill_id). Sum is always exactly repo_total.
+    allocations: dict[str, int] = {}
+    fractions: dict[str, tuple[float, str]] = {}
+    for skill_id, weight in weights.items():
+        share = repo_total * weight / total_weight
+        allocations[skill_id] = int(share)
+        fractions[skill_id] = (share - int(share), skill_id)
+
+    remaining = repo_total - sum(allocations.values())
+    for skill_id in sorted(
+        fractions, key=lambda s: (fractions[s][0], s), reverse=True
+    )[:remaining]:
+        allocations[skill_id] += 1
+    return allocations
+
+
 def populate_skills():
     Base.metadata.create_all(sync_engine)
 
@@ -221,34 +287,61 @@ def populate_skills():
         print(f"Database already has {existing} skills. Skipping...")
         return
 
-    for i, data in enumerate(SKILLS_DATA):
+    # Assign each skill its risk first, then split every repository's budget
+    # (the sum of its download_count seeds) across its skills. This keeps
+    # stored counts risk-correlated (high risk < safe) and natural-looking
+    # (no obvious descending/sequential order within a repo).
+    records = []
+    for data in SKILLS_DATA:
         version = data.get("version", "main")
         skill_id = generate_skill_id(data["source_url"], data["name"], version)
-        skill_name_slug = data["name"].lower().replace(' ', '-')
-        # Skip network fetch — use placeholder content
-        content = None  # fetch_skill_content(data["source_url"], skill_name_slug, version)
-        skill = Skill(
-            id=uuid.uuid4(),
-            skill_id=skill_id,
-            name=data["name"],
-            description=data["description"],
-            version=version,
-            commit_id=data.get("commit_id"),
-            author=data["author"],
-            source=data["source"],
-            source_url=data["source_url"],
-            category=data.get("category", random.choice(CATEGORIES)),
-            tags=data["tags"],
-            platform=data.get("platform", "claude"),
-            extra_metadata={},
-            content=content,
-            risk_score=random.choices(
+        records.append({
+            **data,
+            "version": version,
+            "skill_id": skill_id,
+            "risk_score": random.choices(
                 range(0, 101),
                 weights=[3]*21 + [2]*30 + [1]*30 + [0.5]*20,  # bias toward safe/low risk
                 k=1
             )[0],
-            download_count=data.get("download_count", random.randint(1000, 100000)),
-            rating=data.get("rating", f"{random.uniform(4.0, 5.0):.1f}"),
+        })
+
+    repo_budgets: dict[str, int] = {}
+    repo_skills: dict[str, list[tuple[str, int]]] = {}
+    for rec in records:
+        repo_budgets[rec["source_url"]] = (
+            repo_budgets.get(rec["source_url"], 0) + rec.get("download_count", 0)
+        )
+        repo_skills.setdefault(rec["source_url"], []).append(
+            (rec["skill_id"], rec["risk_score"])
+        )
+
+    repo_allocations = {
+        url: allocate_repo_downloads(repo_budgets[url], skills)
+        for url, skills in repo_skills.items()
+    }
+
+    for i, rec in enumerate(records):
+        # Skip network fetch — use placeholder content
+        content = None
+        skill = Skill(
+            id=uuid.uuid4(),
+            skill_id=rec["skill_id"],
+            name=rec["name"],
+            description=rec["description"],
+            version=rec["version"],
+            commit_id=rec.get("commit_id"),
+            author=rec["author"],
+            source=rec["source"],
+            source_url=rec["source_url"],
+            category=rec.get("category", random.choice(CATEGORIES)),
+            tags=rec["tags"],
+            platform=rec.get("platform", "claude"),
+            extra_metadata={},
+            content=content,
+            risk_score=rec["risk_score"],
+            download_count=repo_allocations[rec["source_url"]][rec["skill_id"]],
+            rating=rec.get("rating", f"{random.uniform(4.0, 5.0):.1f}"),
             created_at=datetime.utcnow() - timedelta(days=random.randint(1, 365)),
             updated_at=datetime.utcnow(),
         )

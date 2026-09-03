@@ -276,8 +276,8 @@ class SkillScanner:
                 if commit_key is not None:
                     seen_commits.add(commit_key)
                 _logger.info(
-                    'Discovered skill(version): skill_id=%s version=%s source=%s',
-                    skill.skill_id, skill.version or '-', relative_path,
+                    'Discovered skill(version:%s): skill_id=%s, source=%s',
+                    skill.version or '-', skill.skill_id, relative_path,
                 )
                 discovered.append(skill)
 

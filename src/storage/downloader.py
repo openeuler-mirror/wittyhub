@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlparse
 import aiofiles
 
 from src.core.config import get_settings
-from src.models.orm import Skill, SkillRepoModel
+from src.models.orm import Skill, SkillRepoModel, SkillVersion
 from src.utils.skill_id import slugify_identifier
 
 settings = get_settings()
@@ -45,7 +45,7 @@ class DownloadManager:
     async def create_skill_archive(
         self,
         *,
-        skill: Skill,
+        skill: Skill | SkillVersion,
         repository: SkillRepoModel,
     ) -> SkillArchive:
         repository_path = self._validate_repository_path(repository.local_path)
@@ -235,7 +235,7 @@ class DownloadManager:
         cleaned = re.sub(r"[^0-9A-Za-z._-]+", "-", value).strip(".-_")
         return cleaned or "skill"
 
-    def _build_archive_filename(self, skill: Skill) -> str:
+    def _build_archive_filename(self, skill: Skill | SkillVersion) -> str:
         name = self._sanitize_filename(skill.name)
         if skill.version:
             version = self._sanitize_filename(skill.version)

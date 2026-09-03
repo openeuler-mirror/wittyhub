@@ -345,9 +345,9 @@ class SkillManager:
             repository_git_metadata, as_optional_str, as_optional_str_list,
         )
         _logger.info(
-            'Discover: git metadata collected for %s: latest_tags=%d',
+            'Discover: git metadata collected for %s, latest_tags: %s',
             repo.repo_name,
-            len(repository_git_metadata.get('latest_tags', []) or []),
+            repository_git_metadata.get('latest_tags', []),
         )
 
         detected_branch: str | None = None

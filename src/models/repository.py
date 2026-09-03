@@ -365,6 +365,22 @@ class SkillRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_version_with_repository(
+        self,
+        skill_id: str,
+        version: str,
+    ) -> SkillVersion | None:
+        result = await self.session.execute(
+            select(SkillVersion)
+            .options(selectinload(SkillVersion.skill_repo))
+            .where(
+                SkillVersion.skill_id == skill_id,
+                SkillVersion.version == version,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def load_scan_records(
         self,
         skill_repo_id: uuid.UUID,

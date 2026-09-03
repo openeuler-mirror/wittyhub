@@ -779,7 +779,7 @@ model:
 
 crawler:
   github_token: ""
-  max_tags_per_repo: 3
+  max_tags_per_repo: 5
 
 security:
   socket_api_key: ""

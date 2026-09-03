@@ -20,7 +20,6 @@ COPY migrations ./migrations
 COPY alembic.ini ./
 COPY deploy/api/entrypoint.sh /usr/local/bin/wittyhub-api-entrypoint
 COPY skillcrawler ./skillcrawler
-COPY skills ./skills
 
 RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
 

@@ -33,7 +33,7 @@ security:
   # JENKINS_QUIET_PERIOD / WITTYHUB_REPOSITORY_ROOT 环境变量）
   skillspector_jenkins_http_port: 8083
   skillspector_jenkins_num_executors: 10
-  skillspector_jenkins_quiet_period: 5
+  skillspector_jenkins_quiet_period: 1
   skillspector_repository_root: "/opt/wittyhub/skill-repositories"
 
 postgres:

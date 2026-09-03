@@ -35,7 +35,7 @@ _LOG_LEVEL = getattr(logging, settings.logging.level.strip().upper(), logging.IN
 
 logging.basicConfig(
     level=_LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    format="%(asctime)s %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(_LOG_DIR / "skillcrawler.log"),

@@ -306,8 +306,12 @@ class SkillManager:
             skill_paths=skill_paths,
         )
         _logger.info(
-            'Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d',
+            'Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d, '
+            'security_cache_hits=%d, security_audits_submitted=%d, security_audits_pending=%d',
             repo.repo_name, len(latest_skills), len(tagged_skills),
+            self._scanner._security_cache_hits,
+            self._scanner._security_audit_submitted,
+            self._scanner._security_audit_pending,
         )
         unique_skill_count = self._count_unique_skills(latest_skills)
         await self.skill_repository.store_skills_and_versions(

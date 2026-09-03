@@ -220,19 +220,12 @@ class TestSkillRepositoryUnit:
 
         assert manager.workspace_base == tmp_path.resolve()
 
-    def test_skillcrawler_platform_maps_to_config_key(self):
-        from skillcrawler.main import _config_key_for_platform, _config_keys_for_platform
+    def test_skillcrawler_platform_choices_use_catalog_groups(self):
+        from skillcrawler.main import PLATFORM_CHOICES, _normalize_platform
 
-        assert _config_key_for_platform("enterprise") == "enterprise_repos"
-        assert _config_key_for_platform("openeuler") == "openeuler_repos"
-        assert _config_key_for_platform("personal") == "personal_repos"
-        assert _config_key_for_platform("enterprise_repos") == "enterprise_repos"
-        assert _config_keys_for_platform(None) == [
-            "openeuler_repos",
-            "personal_repos",
-            "enterprise_repos",
-        ]
-        assert _config_keys_for_platform("personal") == ["personal_repos"]
+        assert PLATFORM_CHOICES == ("community", "enterprise", "personal")
+        with pytest.raises(ValueError, match="expected community"):
+            _normalize_platform("openeuler")
 
     def test_single_url_discover_infers_openeuler_platform(self):
         from skillcrawler.main import _build_single_url_discover_request
@@ -245,7 +238,7 @@ class TestSkillRepositoryUnit:
             )
         )
 
-        assert request.platform == "openeuler"
+        assert request.platform == "community"
 
     def test_single_url_discover_explicit_platform_wins(self):
         from skillcrawler.main import _build_single_url_discover_request
@@ -312,26 +305,38 @@ repositories:
         assert mapping["gitcode.com_openeuler_intel-openvino"] == "sig-ops"
         assert "gitcode.com_src-openeuler_ignored-package" not in mapping
 
-    def test_build_requests_from_config_keeps_openeuler_sig_lazy(self, tmp_path):
+    def test_build_requests_from_catalog_includes_community_sig_name(self, tmp_path):
         from skillcrawler.main import _build_requests_from_config
 
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(
-            """
-openeuler_repos:
-  - url: https://gitcode.com/openeuler/PilotGo-plugin-llmops
-""",
-            encoding="utf-8",
-        )
+        repos_dict = {
+            "community": [
+                {
+                    "url": "https://gitcode.com/openeuler/PilotGo-plugin-llmops",
+                    "sig_name": "sig-ops",
+                }
+            ]
+        }
 
         requests = _build_requests_from_config(
-            config_path,
-            "openeuler_repos",
-            "openeuler",
+            repos_dict,
+            "community",
         )
 
-        assert requests[0].platform == "openeuler"
-        assert not hasattr(requests[0], "sig_name")
+        assert requests[0].platform == "community"
+        assert requests[0].sig_name == "sig-ops"
+
+    def test_load_crawler_config_reads_catalog_directory_names(self, tmp_path):
+        from skillcrawler.config import load_crawler_config
+
+        skill_file = tmp_path / "community" / "sig-security-facility" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "name: security\nskill_repos:\n  - url: https://gitcode.com/openeuler/security\n",
+            encoding="utf-8",
+        )
+        config = load_crawler_config(tmp_path)
+        assert config["community"][0]["url"] == "https://gitcode.com/openeuler/security"
+        assert config["community"][0]["sig_name"] == "sig-security-facility"
 
     def test_skill_manager_resolves_openeuler_sig_lazily(self):
         from skillcrawler.core.skill_manager import SkillManager

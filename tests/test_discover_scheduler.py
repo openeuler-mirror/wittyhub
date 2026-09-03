@@ -101,7 +101,7 @@ class TestRunDiscoverOnce:
                 SimpleNamespace(url="https://gitcode.com/c/d"),
                 SimpleNamespace(url="https://gitcode.com/e/f"),
             ],
-            ["openeuler_repos"],
+            ["community"],
         )
 
     async def test_classifies_each_repo_and_logs_summary(self, requests, caplog, tmp_path):
@@ -198,7 +198,7 @@ class TestRunDiscoverOnce:
             "no_skill": 0,
             "failed": 0,
         }
-        assert document["config_keys"] == ["openeuler_repos"]
+        assert document["config_keys"] == ["community"]
         assert "started_at" in document
         assert "finished_at" in document
         assert "total_seconds" in document

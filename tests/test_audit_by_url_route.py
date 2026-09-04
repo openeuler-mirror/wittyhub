@@ -198,6 +198,43 @@ async def test_audit_by_url_report_downloads_markdown():
 
 
 @pytest.mark.asyncio
+async def test_audit_by_url_report_custom_filename():
+    """report 端点支持门禁传入的自定义下载文件名（skill 名 + 安全审计报告.md）；
+    中文等非 ASCII 名按 RFC 5987 用 filename*=UTF-8'' 携带，ASCII 名兜底，
+    并剔除可能破坏 Content-Disposition 的字符."""
+    db = AsyncMock()
+    report_md = "# Security Report"
+    service = _service(report_md=report_md)
+    with patch("src.api.routes.skills.SecurityService", return_value=service):
+        response = await audit_by_url_report(
+            build_number=42, filename='witty-agents安全审计报告"换行.md', db=db
+        )
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert "attachment" in disposition
+    # 非 ASCII 名走 filename*=UTF-8''，ASCII 兜底文件名 report-42.md
+    assert "filename=\"report-42.md\"" in disposition
+    assert "filename*=UTF-8''" in disposition
+    assert "witty-agents" in disposition
+
+
+@pytest.mark.asyncio
+async def test_audit_by_url_report_ascii_filename():
+    """纯 ASCII 自定义文件名直接放入 filename=，无需 filename*."""
+    db = AsyncMock()
+    report_md = "# Security Report"
+    service = _service(report_md=report_md)
+    with patch("src.api.routes.skills.SecurityService", return_value=service):
+        response = await audit_by_url_report(
+            build_number=42, filename="agent-ops-report.md", db=db
+        )
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert 'filename="agent-ops-report.md"' in disposition
+    assert "filename*" not in disposition
+
+
+@pytest.mark.asyncio
 async def test_audit_by_url_report_not_found():
     """report.md 取不到时返回 404."""
     db = AsyncMock()

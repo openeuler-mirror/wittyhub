@@ -71,6 +71,21 @@ class AppConfig(BaseSettings):
     admin_api_token: str = ""
 
 
+class DiscoverSchedulerConfig(BaseSettings):
+    """后台定时 discover 调度配置。
+
+    interval 支持 "daily"（每天）或 "weekly"（每周），触发时刻由 time
+    （本地时区 HH:MM）决定；weekly 时 weekday 指定星期（mon/tue/wed/
+    thu/fri/sat/sun）。
+    """
+
+    enabled: bool = False
+    interval: str = "daily"
+    time: str = "03:00"
+    weekday: str = "sun"
+    result_dir: str = ""  # 每轮结果 JSON 保存目录；空则用 storage.local_path/logs
+
+
 class LoggingConfig(BaseSettings):
     level: str = "INFO"
     format: str = "json"
@@ -90,6 +105,7 @@ class Settings(BaseSettings):
     crawler: CrawlerConfig = Field(default_factory=CrawlerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     app: AppConfig = Field(default_factory=AppConfig)
+    discover_scheduler: DiscoverSchedulerConfig = Field(default_factory=DiscoverSchedulerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     openeuler_repos: list[SkillRepoEntry] = Field(default_factory=list)
@@ -112,6 +128,7 @@ class Settings(BaseSettings):
             crawler=CrawlerConfig(**data.get("crawler", {})),
             security=SecurityConfig(**data.get("security", {})),
             app=AppConfig(**data.get("app", {})),
+            discover_scheduler=DiscoverSchedulerConfig(**data.get("discover_scheduler", {})),
             logging=LoggingConfig(**data.get("logging", {})),
             ai=AIConfig(**data.get("ai", {})),
             openeuler_repos=data.get("openeuler_repos", []) or [],

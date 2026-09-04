@@ -161,7 +161,7 @@ const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ??
 const installCommand = computed(() => {
   if (!skill.value) return ''
   const repository = skill.value.repo_url || skill.value.source_url
-  return `npx wittyhub install ${repository} --skill ${skill.value.name}`
+  return `npx wittyhub install ${skill.value.skill_id}`
 })
 
 function formatDate(dateStr: string | null): string {

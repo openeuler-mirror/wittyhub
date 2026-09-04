@@ -12,6 +12,7 @@ import aiofiles
 
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillRepoModel
+from src.utils.skill_id import slugify_identifier
 
 settings = get_settings()
 MAX_STORAGE_READ_BYTES = 20 * 1024 * 1024
@@ -136,17 +137,11 @@ class DownloadManager:
         if len(segments) < 2:
             raise SkillArchiveConflictError("Invalid Skill repository URL")
 
-        owner = DownloadManager._slugify_identifier(segments[-2])
-        repository_name = DownloadManager._slugify_identifier(segments[-1])
+        owner = slugify_identifier(segments[-2])
+        repository_name = slugify_identifier(segments[-1])
         if not owner or not repository_name:
             raise SkillArchiveConflictError("Invalid Skill repository URL")
         return f"{owner}/{repository_name}"
-
-    @staticmethod
-    def _slugify_identifier(value: str) -> str:
-        normalized = re.sub(r"[^a-z0-9._-]+", "-", value.strip().lower())
-        normalized = re.sub(r"-{2,}", "-", normalized)
-        return normalized.strip("-")
 
     @staticmethod
     def _validate_repository_path(local_path: str | None) -> Path:

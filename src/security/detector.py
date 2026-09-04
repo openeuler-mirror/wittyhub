@@ -21,7 +21,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
+
+
+class _SecurityDetectorLogAdapter(logging.LoggerAdapter):
+    """给本模块所有日志消息统一加 "SecurityDetector: " 前缀。"""
+
+    def process(self, msg: Any, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        return f"SecurityDetector: {msg}", kwargs
+
+
+logger: logging.LoggerAdapter[None] = _SecurityDetectorLogAdapter(
+    logging.getLogger(__name__), {}
+)
 
 ALLOWED_GIT_HOSTS = frozenset({
     "github.com",
@@ -183,7 +194,7 @@ def _log_skillspector_final_result(
 def _log_collector_event(event: str, **fields: Any) -> None:
     """Write one structured trace entry for an async collector decision."""
     payload = {"event": event, **fields}
-    logger.debug(
+    logger.info(
         "Skillspector collector: %s",
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
     )

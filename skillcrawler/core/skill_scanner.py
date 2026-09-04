@@ -15,7 +15,6 @@ from src.security.detector import SecurityDetector, SecurityReport
 from skillcrawler.core.skill_parser import (
     as_optional_str,
     as_optional_str_list,
-    build_public_skill_id,
     build_skill_md_url,
     derive_repository_skill_name,
     derive_skill_source,
@@ -24,6 +23,8 @@ from skillcrawler.core.skill_parser import (
 )
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import SkillRepository
+
+from src.utils.skill_id import build_skill_id, extract_owner_repo
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
@@ -139,7 +140,9 @@ class SkillScanner:
         for relative_path in skill_paths:
             scan_started_at = time.perf_counter()
             virtual_skill_file = repo_root / relative_path
-            skill_id = build_public_skill_id(repo, repo_root, virtual_skill_file)
+            skill_id = build_skill_id(
+                repo.source, extract_owner_repo(repo.url), relative_path,
+            )
             if skill_id in seen_skill_ids:
                 _logger.warning(
                     'Duplicate skill_id from different paths, keeping first '
@@ -173,8 +176,8 @@ class SkillScanner:
                 input_elapsed=input_elapsed,
                 existing_record=existing_skills.get(skill_id),
             )
-            _logger.debug(
-                'Discovered skill: skill_id=%s version=%s source=%s',
+            _logger.info(
+                'Discovered skill(latest): skill_id=%s version=%s source=%s',
                 skill.skill_id, skill.version or '-', relative_path,
             )
             discovered.append(skill)
@@ -228,7 +231,9 @@ class SkillScanner:
                     continue
                 input_elapsed = time.perf_counter() - scan_started_at
                 tree_hash = tree_hashes.get(relative_path)
-                skill_id = build_public_skill_id(repo, repo_root, virtual_skill_file)
+                skill_id = build_skill_id(
+                    repo.source, extract_owner_repo(repo.url), relative_path,
+                )
                 skill = await self._build_skill_record(
                     repo=repo,
                     skill_file=virtual_skill_file,
@@ -271,7 +276,7 @@ class SkillScanner:
                 if commit_key is not None:
                     seen_commits.add(commit_key)
                 _logger.info(
-                    'Discovered skill: skill_id=%s version=%s source=%s',
+                    'Discovered skill(version): skill_id=%s version=%s source=%s',
                     skill.skill_id, skill.version or '-', relative_path,
                 )
                 discovered.append(skill)

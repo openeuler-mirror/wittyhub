@@ -509,21 +509,27 @@ def _build_single_url_discover_request(
     )
 
 
-def _build_configured_discover_requests(
-    args: argparse.Namespace,
+def build_configured_discover_requests(
+    config_path: Path | None = None,
+    platform: str | None = None,
 ) -> tuple[list[SkillRepositoryRequest], list[str]]:
-    config_path = Path(args.config) if args.config else None
-    config_keys = _config_keys_for_platform(args.platform)
+    """从 crawler 配置（skills/skill-repos.yaml）构建 discover 请求列表。
+
+    供 CLI discover 与后台定时调度共用：读取全部三个 key
+    （openeuler_repos / personal_repos / enterprise_repos）并按 URL 去重。
+    指定 platform 时仅读取对应 key 且要求非空；否则每个 key 都允许为空。
+    """
+    config_keys = _config_keys_for_platform(platform)
     requests: list[SkillRepositoryRequest] = []
     seen_urls: set[str] = set()
 
     for config_key in config_keys:
-        platform = _platform_for_config_key(config_key)
+        key_platform = _platform_for_config_key(config_key)
         for request in _build_requests_from_config(
             config_path,
             config_key,
-            platform,
-            allow_empty=args.platform is None,
+            key_platform,
+            allow_empty=platform is None,
         ):
             if request.url in seen_urls:
                 continue
@@ -531,6 +537,15 @@ def _build_configured_discover_requests(
             requests.append(request)
 
     return requests, config_keys
+
+
+def _build_configured_discover_requests(
+    args: argparse.Namespace,
+) -> tuple[list[SkillRepositoryRequest], list[str]]:
+    return build_configured_discover_requests(
+        config_path=Path(args.config) if args.config else None,
+        platform=args.platform,
+    )
 
 
 async def _discover_single_existing_repository(

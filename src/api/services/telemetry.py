@@ -1,61 +1,48 @@
 import json
-import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillcrawler.core.skill_parser import (
-    build_public_skill_id_from_relative_path,
-    extract_owner_repo,
-)
+from src.utils.skill_id import build_skill_id, extract_owner_repo, slugify_identifier
 
 from src.models.repository import SkillRepository
 
 
-def _slugify_telemetry_value(value: str) -> str:
-    lowered = value.strip().lower()
-    if not lowered:
-        return ""
-    normalized = re.sub(r"[^a-z0-9._-]+", "-", lowered)
-    normalized = re.sub(r"-{2,}", "-", normalized)
-    return normalized.strip("-")
-
-
 def build_skill_id_from_telemetry(
     source_type: str | None,
-    source: str | None,
+    repo_url: str | None,
     skill_name: str,
     skill_files: dict[str, str] | None = None,
 ) -> str | None:
     if source_type not in {"github", "gitcode", "gitlab", "gitee"}:
         return None
-    if not source:
+    if not repo_url:
         return None
 
     try:
-        owner_repo = extract_owner_repo(source)
+        owner_repo = extract_owner_repo(repo_url)
     except ValueError:
         return None
 
-    # Prefer the repo-relative SKILL.md path. It uses the exact same
-    # derivation as the crawler (skill_parser.build_public_skill_id) that
-    # wrote the skill records, so install telemetry/audit lookups hit the
-    # same skill_id that exists in the database.
+    # Prefer the repo-relative SKILL.md path from the CLI.  This uses the
+    # exact same derivation as the crawler (build_skill_id), so install
+    # telemetry/audit lookups hit the same skill_id in the database.
     if skill_files:
         relative_path = skill_files.get(skill_name)
         if relative_path:
             normalized_path = relative_path.strip().replace("\\", "/").rstrip("/")
             try:
-                return build_public_skill_id_from_relative_path(
-                    source_type, owner_repo, normalized_path
-                )
+                return build_skill_id(source_type, owner_repo, normalized_path)
             except ValueError:
                 pass
 
-    # No path info available — fall back to the skill name slug.
-    skill_path = _slugify_telemetry_value(skill_name)
-    if not skill_path:
+    # No path info available — guess the SKILL.md path from the skill name.
+    skill_slug = slugify_identifier(skill_name)
+    if not skill_slug:
         return None
-    return f"{source_type}:{owner_repo}/{skill_path}"
+    try:
+        return build_skill_id(source_type, owner_repo, f"{skill_slug}/SKILL.md")
+    except ValueError:
+        return None
 
 
 class TelemetryService:
@@ -70,7 +57,7 @@ class TelemetryService:
         return await self._process_install(params)
 
     async def _process_install(self, params: dict[str, str]) -> list[str]:
-        source = params.get("source")
+        repo_url = params.get("source")
         source_type = params.get("sourceType")
         skills = [skill.strip() for skill in params.get("skills", "").split(",") if skill.strip()]
 
@@ -90,7 +77,7 @@ class TelemetryService:
 
         matched_skill_ids: list[str] = []
         for skill_name in skills:
-            skill_id = build_skill_id_from_telemetry(source_type, source, skill_name, skill_files)
+            skill_id = build_skill_id_from_telemetry(source_type, repo_url, skill_name, skill_files)
             if not skill_id:
                 continue
             updated = await self.skill_repo.increment_download(skill_id)

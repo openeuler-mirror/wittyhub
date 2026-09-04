@@ -56,6 +56,15 @@ app:
     - "http://localhost:8080"
     - "http://127.0.0.1:8080"
 
+# 后台定时 discover：按 skills/skill-repos.yaml 全量扫描仓库
+# 环境变量覆盖示例：DISCOVER_SCHEDULER__ENABLED=true、DISCOVER_SCHEDULER__INTERVAL=weekly
+discover_scheduler:
+  enabled: true
+  interval: "daily"   # 二选一： daily：每天 | weekly：每周
+  time: "00:00"       # 触发时刻（本地时区 HH:MM）
+  weekday: "sun"      # 仅 weekly 生效：mon/tue/wed/thu/fri/sat/sun
+  result_dir: ""      # 每轮结果 JSON 保存目录；留空则用 storage.local_path/logs
+
 logging:
   level: "INFO"
   format: "json"

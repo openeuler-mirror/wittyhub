@@ -18,12 +18,12 @@ from skillcrawler.core.skill_parser import (
     as_optional_str,
     as_optional_str_list,
     derive_skill_source,
-    extract_owner_repo,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
     should_skip_relative_path,
 )
 from skillcrawler.core.skill_scanner import SkillScanner
+from src.utils.skill_id import extract_owner_repo
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import (
@@ -84,7 +84,7 @@ class SkillManager:
             else:
                 _logger.info('SecurityDetector: skillspector not configured')
         except Exception as exc:
-            _logger.warning('Failed to initialize security detector: %s', exc)
+            _logger.warning('SecurityDetector: Failed to initialize security detector: %s', exc)
 
         self._git_ops = GitOperations()
         self._scanner = SkillScanner(
@@ -126,7 +126,7 @@ class SkillManager:
                 try:
                     shutil.rmtree(local_path)
                 except Exception as exc:
-                    _logger.warning(f'Failed to clean up directory {local_path}: {exc}')
+                    _logger.warning(f'Discover: Failed to clean up directory {local_path}: {exc}')
         await self.skill_repo_repository.delete_skill_repository(stored.id)
 
     async def discover_skills_from_single_existing_repository(
@@ -392,7 +392,7 @@ class SkillManager:
         ]
         await audit_repo.upsert_many_by_resource('skill', entries)
 
-        _logger.info('Upserted %d SecurityAudit records', len(pending))
+        _logger.info('SecurityDetector: Upserted %d SecurityAudit records', len(pending))
 
     @staticmethod
     def _has_new_security_audit(record: Skill | SkillVersion) -> bool:
@@ -417,7 +417,7 @@ class SkillManager:
         detector = self._scanner.security_detector
         if detector is None or not detector.has_skillspector:
             _logger.warning(
-                'Security retry skipped for repo %s: %d unscored records but '
+                'SecurityDetector: retry skipped for repo %s: %d unscored records but '
                 'Skillspector is unavailable',
                 repo.repo_name,
                 len(records),
@@ -437,7 +437,7 @@ class SkillManager:
             details = dict(report.details) if report is not None else {}
             if details.get('skillspector_build_number') is None:
                 _logger.warning(
-                    'Security retry failed to trigger: skill_id=%s version=%s',
+                    'SecurityDetector: retry failed to trigger: skill_id=%s version=%s',
                     record.skill_id,
                     record.version or '-',
                 )
@@ -465,7 +465,7 @@ class SkillManager:
 
         await self.skill_repository.session.commit()
         _logger.info(
-            'Security retry for unchanged repo %s: triggered=%d candidates=%d',
+            'SecurityDetector: retry for unchanged repo %s: triggered=%d candidates=%d',
             repo.repo_name,
             triggered,
             len(records),
@@ -515,7 +515,7 @@ class SkillManager:
         repo_url: str | None,
     ) -> None:
         if clone_dir.is_dir() and (clone_dir / '.git').exists():
-            _logger.info('Discover: existing clone found, pulling updates: %s', clone_dir)
+            _logger.info('Discover: updating skill repo: %s', clone_dir)
             self._git_ops.update_existing_repository(
                 clone_dir, clone_url,
                 branch=branch, repo_url=repo_url,
@@ -540,7 +540,7 @@ class SkillManager:
         existing_repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
         if existing_repository is not None:
             _logger.info(
-                f'Skill repo "{repo_name}" already exists with id "{existing_repository.id}", skipping creation'
+                f'Discover: Skill repo already exists, "{repo_name}": "{existing_repository.id}", skipping creation'
             )
             return existing_repository, False
 

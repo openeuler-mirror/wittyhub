@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Res
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skillcrawler.core.skill_parser import extract_owner_repo
+from src.utils.skill_id import extract_owner_repo
 
 from src.api.schemas.skill import (
     AuditByUrlRequest,
@@ -203,10 +203,10 @@ async def list_skills(
     category_list = category.split(",") if category else None
     platform_list = platform.split(",") if platform else None
     security_level_list = security_level.split(",") if security_level else None
-    # repo 过滤：匹配 skill_id 前缀 {source_type}/{owner}/{repo}/，
+    # repo 过滤：匹配 skill_id 前缀 {source_type}:{owner}/{repo}/，
     # 与 source_type 过滤（Skill.source 列）一起限定到具体仓库
     skill_id_prefix = (
-        f"{source_type.strip()}/{repo.strip()}"
+        f"{source_type.strip()}:{repo.strip()}"
         if source_type and source_type.strip() and repo and repo.strip()
         else None
     )

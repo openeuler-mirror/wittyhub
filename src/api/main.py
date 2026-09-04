@@ -48,6 +48,14 @@ def configure_logging() -> None:
         for handler in registered_logger.handlers:
             handler.setLevel(level)
 
+    # 压制 SQLAlchemy 池连接/归还及引擎的 DEBUG 日志
+    for noisy_parent in ("sqlalchemy.pool", "sqlalchemy.engine", "sqlalchemy.orm"):
+        logging.getLogger(noisy_parent).setLevel(logging.WARNING)
+        # 重置子 logger 为 NOTSET，使其继承父级的 WARNING，不打印DEBUG信息
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if name.startswith(noisy_parent + ".") and isinstance(logger, logging.Logger):
+                logger.setLevel(logging.NOTSET)
+
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
@@ -72,8 +80,16 @@ async def lifespan(app: FastAPI):
 
         collector = await start_skillspector_collector()
 
+    discover_scheduler = None
+    if settings.discover_scheduler.enabled:
+        from src.api.services.discover_scheduler import start_discover_scheduler
+
+        discover_scheduler = await start_discover_scheduler()
+
     yield
 
+    if discover_scheduler is not None:
+        await discover_scheduler.stop()
     if collector is not None:
         await collector.stop()
     logger.info("wittyhub shutting down")

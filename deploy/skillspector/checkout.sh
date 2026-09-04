@@ -3,7 +3,7 @@
 set -eu
 
 # 部分平台（如未启用 LFS 的 GitCode 项目）无法下载 Git LFS 大文件。
-# 跳过 LFS smudge，让 git archive 导出 LFS 指针文件（文本）而非二进制内容，
+# 跳过 LFS smudge，让 git checkout 导出 LFS 指针文件（文本）而非二进制内容，
 # 避免 checkout 阶段因下载 LFS blob 失败导致整个扫描失败。
 export GIT_LFS_SKIP_SMUDGE=1
 
@@ -84,7 +84,10 @@ if [ -z "$resolved_commit" ]; then
 fi
 echo "Resolved commit: $resolved_commit"
 
-archive_file="${PWD}/.wittyhub-scan.tar"
+# 注意：不能使用 git archive 导出。git archive 会遵循仓库 .gitattributes 中的
+# export-ignore 规则（例如 astronomer/airflow 对 .agents 设置了 export-ignore），
+# 导致导出的 tar 内容为空，后续 Detect Skill 阶段 test -d 失败。
+# git checkout 不受 export-ignore 影响，且同样支持按 pathspec 稀疏导出。
 if [ -n "$skill_path" ]; then
     echo "Exporting skill path: $skill_path"
     if ! git -c safe.directory="$archive_repository" -C "$archive_repository" \
@@ -93,13 +96,11 @@ if [ -n "$skill_path" ]; then
         exit 3
     fi
     git -c safe.directory="$archive_repository" -C "$archive_repository" \
-        archive --format=tar --output="$archive_file" "$archive_ref" -- "$skill_path"
+        checkout "$archive_ref" -- "$skill_path"
 else
     echo "Exporting repository root"
     git -c safe.directory="$archive_repository" -C "$archive_repository" \
-        archive --format=tar --output="$archive_file" "$archive_ref"
+        checkout "$archive_ref" -- .
 fi
 
-tar -xf "$archive_file"
-rm -f "$archive_file"
 echo "Prepared scan content from commit: $resolved_commit"

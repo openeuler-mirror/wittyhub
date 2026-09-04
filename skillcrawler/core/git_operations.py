@@ -266,6 +266,80 @@ class GitOperations:
                 hashes[path] = None
         return hashes
 
+    def materialize_skill_objects(
+        self,
+        repo_root: Path,
+        ref: str,
+        skill_path: str,
+    ) -> bool:
+        """确保技能路径下的所有 blob 已物化到本地缓存仓库。
+
+        缓存仓库是 ``--filter=blob:none`` 的 partial clone，本地只有
+        commit 和 tree 元数据，blob 按需拉取。skillspector 容器以只读
+        方式挂载缓存目录且无网络访问，因此容器需要的 blob 必须在此处
+        提前拉取。通过 ``cat-file --batch-check`` 读取 blob 会触发 Git
+        的 on-demand 懒拉取，在爬虫宿主机上执行（缓存可写、网络可用）。
+        """
+        if not (repo_root / '.git').exists():
+            return False
+
+        pathspec = skill_path.strip('/') if skill_path else '.'
+        ls_command = [
+            'git', '-C', str(repo_root), 'ls-tree', '-r',
+            '--format=%(objectname) %(objecttype)', ref, '--', pathspec,
+        ]
+        try:
+            listing = self._run_git_command(ls_command)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to list skill objects in %s at %s (%s): %s',
+                repo_root, ref, pathspec, exc,
+            )
+            return False
+
+        blob_shas = [
+            line.split()[0]
+            for line in listing.splitlines()
+            if line.split()[1:2] == ['blob']
+        ]
+        if not blob_shas:
+            return True
+
+        batch_command = [
+            'git', '-C', str(repo_root), 'cat-file', '--batch-check',
+        ]
+        env = os.environ.copy()
+        env.update(GIT_NON_INTERACTIVE_ENV)
+        try:
+            result = subprocess.run(
+                batch_command,
+                input='\n'.join(blob_shas) + '\n',
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=GIT_CLONE_TIMEOUT_SECONDS,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to materialize skill objects in %s at %s (%s): %s',
+                repo_root, ref, pathspec, exc,
+            )
+            return False
+
+        missing = [
+            line.split(' ')[0]
+            for line in result.stdout.splitlines()
+            if line.endswith(' missing')
+        ]
+        if missing:
+            _logger.warning(
+                'Skill objects missing after materialization in %s at %s (%s): %s',
+                repo_root, ref, pathspec, missing,
+            )
+            return False
+        return True
+
     # ── Version snapshots ──────────────────────────────────────────
 
     @staticmethod

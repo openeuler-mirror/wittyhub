@@ -509,7 +509,7 @@ repositories:
         repo = SimpleNamespace(
             id=uuid.uuid4(),
             source="gitcode",
-            url="https://gitcode.com/weijihui/test",
+            url="https://gitcode.com/acme/widgets",
             branch="master",
             platform=None,
         )
@@ -528,14 +528,79 @@ repositories:
         )
 
         assert {skill.skill_id for skill in skills} == {
-            "gitcode:weijihui/test/skill",
-            "gitcode:weijihui/test/skill-1",
+            "gitcode:acme/widgets/skill",
+            "gitcode:acme/widgets/skill-1",
         }
         assert {(v.version, v.commit_id) for v in tagged_skills} == {
             ("v1", v1_commit),
             ("v2", v2_commit),
         }
-        assert {v.skill_id for v in tagged_skills} == {"gitcode:weijihui/test/skill"}
+        assert {v.skill_id for v in tagged_skills} == {"gitcode:acme/widgets/skill"}
+
+    async def test_skill_scanner_pre_dedups_same_commit_tags(self, tmp_path):
+        """Tags pointing at the same commit must not re-run record assembly.
+
+        When two tags share one commit (e.g. v4 and V3), the second tag is
+        skipped before _build_skill_record, so security resolution (and its
+        Jenkins submission) is not invoked again for the duplicate.
+        """
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_dir = repository / "skills" / "skill-1"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: dup-skill\n---\n# Dup Skill\n", encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill")
+        shared_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v4")
+        _git(repository, "tag", "V3")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/acme/widgets",
+            branch="master",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": shared_commit,
+                "latest_tags": ["v4", "V3"],
+            },
+            version_snapshots=[
+                {"ref": "v4", "version": "v4", "commit_id": shared_commit, "version_source": "tag"},
+                {"ref": "V3", "version": "V3", "commit_id": shared_commit, "version_source": "tag"},
+            ],
+        )
+
+        # v4 is kept, V3 pointing at the same commit is pre-deduplicated away.
+        assert {v.version for v in tagged_skills} == {"v4"}
+        assert all(v.commit_id == shared_commit for v in tagged_skills)
+        # Security resolution ran once per discovered record, not twice.
+        assert scanner._security_cache_hits + scanner._security_audit_submitted == len(
+            skills
+        ) + len(tagged_skills)
+        # Pending audits are a subset of submitted ones.
+        assert scanner._security_audit_pending <= scanner._security_audit_submitted
 
     def test_skill_scanner_reuses_security_result_for_unchanged_skill_tree(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
@@ -781,6 +846,7 @@ repositories:
         repo = SimpleNamespace(
             id=updated_repo.id,
             platform=None,
+            repo_name="github.com_acme_skills",
         )
 
         with (
@@ -1154,6 +1220,75 @@ class TestGitOperationsTags:
 
         assert tags == []
         assert not orphaned.exists()
+
+
+class TestGitOperationsMaterialize:
+    def _init_repository(self, path: Path) -> None:
+        path.mkdir(parents=True)
+        _git(path, "init")
+        _git(path, "config", "user.email", "tests@example.com")
+        _git(path, "config", "user.name", "WittyHub Tests")
+
+    def test_materialize_skill_objects_fetches_missing_blobs(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        origin = tmp_path / "origin.git"
+        self._init_repository(origin)
+        _git(origin, "config", "uploadpack.allowFilter", "true")
+        skill_dir = origin / ".agents" / "skills" / "demo"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\n# demo\n", encoding="utf-8")
+        (skill_dir / "run.sh").write_text("#!/bin/sh\necho demo\n", encoding="utf-8")
+
+        commit = None
+        for round_index in range(2):
+            (skill_dir / "run.sh").write_text(
+                f"#!/bin/sh\necho demo v{round_index}\n", encoding="utf-8",
+            )
+            _git(origin, "add", ".")
+            _git(origin, "commit", "-m", f"change {round_index}")
+            commit = _git(origin, "rev-parse", "HEAD")
+
+        clone_dir = tmp_path / "clone"
+        _git(tmp_path, "clone", "--depth", "1", "--no-checkout", "--filter=blob:none",
+             f"file://{origin}", str(clone_dir))
+        # Older commits stay unfetched in the shallow partial clone.
+        older_commit = _git(origin, "rev-parse", "HEAD~1")
+        _git(clone_dir, "fetch", "--depth", "1", "--filter=blob:none",
+             f"origin", f"{older_commit}")
+
+        def blobs_missing(repo: Path, ref: str, path: str) -> bool:
+            objects = _git(
+                repo, "ls-tree", "-r",
+                "--format=%(objectname) %(objecttype)", ref, "--", path,
+            ).splitlines()
+            shas = [line.split()[0] for line in objects if line.split()[1] == "blob"]
+            # Query existence without triggering a lazy fetch.
+            result = subprocess.run(
+                ["git", "-C", str(repo), "cat-file", "--batch-check"],
+                input="\n".join(shas) + "\n",
+                capture_output=True, text=True,
+                env={
+                    **os.environ,
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "GIT_NO_LAZY_FETCH": "1",
+                },
+            )
+            return " missing" in result.stdout
+
+        assert blobs_missing(clone_dir, older_commit, ".agents/skills/demo")
+
+        git_ops = GitOperations(github_token=None)
+        assert git_ops.materialize_skill_objects(
+            clone_dir, older_commit, ".agents/skills/demo",
+        ) is True
+        assert not blobs_missing(clone_dir, older_commit, ".agents/skills/demo")
+
+    def test_materialize_skill_objects_without_git_dir_returns_false(self, tmp_path):
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token=None)
+        assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is False
 
 
 class TestSearchService:

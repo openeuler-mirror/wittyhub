@@ -553,6 +553,24 @@ class SkillScanner:
         if skill_path == '.':
             skill_path = ''
 
+        # skillspector 容器以只读方式挂载缓存仓库且无网络访问，
+        # 此处提前物化技能路径的所有 blob，避免容器内触发懒拉取失败。
+        if repo.local_path and commit_id:
+            if not self.git_ops.materialize_skill_objects(
+                Path(repo.local_path), commit_id, skill_path,
+            ):
+                _logger.warning(
+                    'Security audit skipped for skill %s: objects not materialized',
+                    skill_id,
+                )
+                return SecurityReport(
+                    resource_type='skill',
+                    resource_id=skill_id,
+                    risk_level='unknown',
+                    risk_signals=[],
+                    details={'error': 'materialize_failed', 'source': 'skillspector'},
+                )
+
         try:
             if self.security_async_mode:
                 build_number = await self.security_detector.trigger_skillspector(

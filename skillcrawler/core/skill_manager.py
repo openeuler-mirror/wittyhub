@@ -484,9 +484,11 @@ class SkillManager:
 
         await self.skill_repository.session.commit()
         _logger.info(
-            'SecurityDetector: retry for unchanged repo %s: triggered=%d candidates=%d',
+            'SecurityDetector: retry unscored audits for unchanged repo %s: '
+            'triggered=%d skipped=%d total_unscored=%d',
             repo.repo_name,
             triggered,
+            len(records) - triggered,
             len(records),
         )
         return len(records), triggered

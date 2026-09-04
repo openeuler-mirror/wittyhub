@@ -467,12 +467,7 @@ class SkillScanner:
             cached = security_cache.get(tree_hash)
             if cached is not None:
                 _logger.debug(
-                    'Reused security result from scan cache: skill_id=%s '
-                    'version=%s tree_hash=%s score=%s',
-                    skill_id,
-                    version or '-',
-                    tree_hash,
-                    cached.risk_score,
+                    'Reused cache submitted by security: skill_id=%s', skill_id,
                 )
                 self._security_cache_hits += 1
                 if cached.audit_triggered:

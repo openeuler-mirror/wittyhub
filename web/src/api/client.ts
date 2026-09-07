@@ -111,5 +111,20 @@ export const api = {
   async getCategories(): Promise<{ categories: Category[] }> {
     const { data } = await client.get('/index/categories')
     return data
+  },
+
+  /** Fire-and-forget delivery for the analytics SDK's aggregated report.
+   *
+   * ``payload`` is the OpenEuler analytics envelope ``{ header, body: [...] }``
+   * produced by the plugin and handed to our request callback; it is sent
+   * verbatim to the backend where each body event becomes a behavior_events row.
+   */
+  async track(payload: Record<string, unknown>): Promise<void> {
+    try {
+      await client.post('/events/track', payload)
+    } catch (e) {
+      // Tracking must never break the user journey — swallow errors.
+      console.error('Failed to report tracking event:', e)
+    }
   }
 }

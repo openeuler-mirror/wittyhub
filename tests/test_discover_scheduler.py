@@ -62,14 +62,13 @@ class TestConfigIntegration:
         assert settings.discover_scheduler.weekday == "sun"
 
     def test_config_yaml_section_parsed(self):
-        # config.yaml 中 discover_scheduler.enabled=false，get_settings 有缓存，
-        # 直接验证 from_yaml 的解析路径
+        # 直接验证 from_yaml 的解析路径（config.yaml 当前为 enabled=true, time=00:00）
         from src.core.config import Settings
 
         settings = Settings.from_yaml("config.yaml")
-        assert settings.discover_scheduler.enabled is False
+        assert settings.discover_scheduler.enabled is True
         assert settings.discover_scheduler.interval == "daily"
-        assert settings.discover_scheduler.time == "03:00"
+        assert settings.discover_scheduler.time == "00:00"
         assert settings.discover_scheduler.weekday == "sun"
 
     def test_invalid_interval_rejected_on_start(self):
@@ -102,7 +101,7 @@ class TestRunDiscoverOnce:
                 SimpleNamespace(url="https://gitcode.com/c/d"),
                 SimpleNamespace(url="https://gitcode.com/e/f"),
             ],
-            ["openeuler_repos"],
+            ["community"],
         )
 
     async def test_classifies_each_repo_and_logs_summary(self, requests, caplog, tmp_path):
@@ -199,7 +198,7 @@ class TestRunDiscoverOnce:
             "no_skill": 0,
             "failed": 0,
         }
-        assert document["config_keys"] == ["openeuler_repos"]
+        assert document["config_keys"] == ["community"]
         assert "started_at" in document
         assert "finished_at" in document
         assert "total_seconds" in document

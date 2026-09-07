@@ -501,13 +501,22 @@ async def get_skill_versions(
 async def download_skill(
     skill_id: SkillIdPath,
     request: Request,
+    version: Annotated[str | None, Query(description="指定版本号，从 skill_versions 表下载对应版本")] = None,
     db: AsyncSession = Depends(get_db),
 ):
     repo = SkillRepository(db)
-    skill = await repo.get_with_repository_by_skill_id(skill_id)
 
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
+    if version:
+        skill = await repo.get_version_with_repository(skill_id, version)
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill version not found")
+        resource_type = "skill_version"
+    else:
+        skill = await repo.get_with_repository_by_skill_id(skill_id)
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        resource_type = "skill"
+
     if not skill.skill_repo:
         raise HTTPException(status_code=409, detail="Skill repository metadata is missing")
 
@@ -526,7 +535,7 @@ async def download_skill(
 
     dl_history = DownloadHistoryRepository(db)
     await dl_history.create({
-        "resource_type": "skill",
+        "resource_type": resource_type,
         "resource_id": skill.id,
         "ip_address": request.client.host if request.client else None,
         "user_agent": request.headers.get("user-agent"),

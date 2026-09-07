@@ -152,12 +152,18 @@ def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
                 continue
             block_scalar_indicator = None
 
-        if stripped_line.startswith('- ') and current_key == 'triggers':
-            triggers = metadata.setdefault('triggers', [])
-            if isinstance(triggers, list):
-                trigger = stripped_line[2:].strip()
-                if trigger:
-                    triggers.append(trigger)
+        # YAML block list item: "- value" under any key (not just triggers)
+        if stripped_line.startswith('- ') and current_key is not None:
+            existing = metadata.get(current_key)
+            if not isinstance(existing, list):
+                # First list item — convert from scalar (usually empty
+                # string) to list, preserving a non-empty scalar as the
+                # first element (handles "key: val\n- item" edge case).
+                existing = [existing] if isinstance(existing, str) and existing else []
+                metadata[current_key] = existing
+            item = stripped_line[2:].strip()
+            if item:
+                existing.append(item)
             continue
 
         if ':' not in line:
@@ -201,7 +207,16 @@ def _parse_frontmatter_value(key: str, value: str) -> object:
         return True
     if lowered == 'false':
         return False
-    return value.strip('"\'')
+
+    # Inline array syntax [a, b, c] — YAML flow sequence, applies to all keys
+    if value.startswith('[') and value.endswith(']'):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        items = [item.strip().strip('"\'') for item in inner.split(',')]
+        return [item for item in items if item] or []
+
+    return value.strip('"\'' )
 
 
 # ── Misc helpers ───────────────────────────────────────────────────

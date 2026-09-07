@@ -28,7 +28,7 @@ def configure_logging() -> None:
         root_handler = logging.StreamHandler(sys.stdout)
         root_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s %(levelname)s %(name)s %(message)s"
+                "%(asctime)s %(levelname)s %(message)s"
             )
         )
         root_logger.addHandler(root_handler)

@@ -15,17 +15,20 @@ from src.core.config import get_settings
 _logger = logging.getLogger(__name__)
 settings = get_settings()
 
-GIT_CLONE_RETRY_TIMES = 3
-GIT_CLONE_TIMEOUT_SECONDS = 120
+GIT_CLONE_RETRY_TIMES = 2
+GIT_CLONE_TIMEOUT_SECONDS = 180
 DEFAULT_MAX_TAGS_PER_REPO = 5
 TAG_CANDIDATE_REF_PREFIX = 'refs/crawler/tag-candidates'
-UNSUPPORTED_FILTER_MESSAGES = (
-    'filtering not recognized by server',
-    'server does not support filter',
+UNSUPPORTED_FILTER_MESSAGES = ( # 检测服务端不支持 partial clone filter 的错误关键词
+    'filtering not recognized by server', # Git < 2.25 / 旧版 GitLab
+    'server does not support filter', # Gitea / gitcode.com
 )
+# 禁止 git 弹出交互式认证提示: 
+# 后台服务运行时没有 TTY，如果 git 遇到需要认证的私有仓库（或 token 过期），没有这个环境变量会 挂住等待输入 ，
+# 有它则直接失败返回，不会卡死进程
 GIT_NON_INTERACTIVE_ENV = {
-    'GIT_TERMINAL_PROMPT': '0',
-    'GCM_INTERACTIVE': 'Never',
+    'GIT_TERMINAL_PROMPT': '0', # git 通用：禁止终端交互
+    'GCM_INTERACTIVE': 'Never', # Git Credential Manager：禁止弹窗
 }
 
 
@@ -57,6 +60,20 @@ class GitOperations:
             command.extend(['--branch', branch])
         command.extend([clone_url, str(clone_dir)])
         self._run_git_command_with_auth_retry(command, clone_url, repo_url, 'clone')
+
+    def sync_catalog_repository(self, repository_dir: Path, repository_url: str) -> None:
+        """Clone or fast-forward an openEuler-skills catalog repository."""
+        if not (repository_dir / '.git').exists():
+            repository_dir.parent.mkdir(parents=True, exist_ok=True)
+            self._run_git_command_with_auth_retry(
+                ['git', 'clone', '--depth', '1', repository_url, str(repository_dir)],
+                repository_url, repository_url, 'catalog clone',
+            )
+            return
+        self._run_git_command_with_auth_retry(
+            ['git', '-C', str(repository_dir), 'pull', '--ff-only'],
+            repository_url, repository_url, 'catalog pull',
+        )
 
     def update_existing_repository(
         self,
@@ -249,6 +266,80 @@ class GitOperations:
                 hashes[path] = None
         return hashes
 
+    def materialize_skill_objects(
+        self,
+        repo_root: Path,
+        ref: str,
+        skill_path: str,
+    ) -> bool:
+        """确保技能路径下的所有 blob 已物化到本地缓存仓库。
+
+        缓存仓库是 ``--filter=blob:none`` 的 partial clone，本地只有
+        commit 和 tree 元数据，blob 按需拉取。skillspector 容器以只读
+        方式挂载缓存目录且无网络访问，因此容器需要的 blob 必须在此处
+        提前拉取。通过 ``cat-file --batch-check`` 读取 blob 会触发 Git
+        的 on-demand 懒拉取，在爬虫宿主机上执行（缓存可写、网络可用）。
+        """
+        if not (repo_root / '.git').exists():
+            return False
+
+        pathspec = skill_path.strip('/') if skill_path else '.'
+        ls_command = [
+            'git', '-C', str(repo_root), 'ls-tree', '-r',
+            '--format=%(objectname) %(objecttype)', ref, '--', pathspec,
+        ]
+        try:
+            listing = self._run_git_command(ls_command)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to list skill objects in %s at %s (%s): %s',
+                repo_root, ref, pathspec, exc,
+            )
+            return False
+
+        blob_shas = [
+            line.split()[0]
+            for line in listing.splitlines()
+            if line.split()[1:2] == ['blob']
+        ]
+        if not blob_shas:
+            return True
+
+        batch_command = [
+            'git', '-C', str(repo_root), 'cat-file', '--batch-check',
+        ]
+        env = os.environ.copy()
+        env.update(GIT_NON_INTERACTIVE_ENV)
+        try:
+            result = subprocess.run(
+                batch_command,
+                input='\n'.join(blob_shas) + '\n',
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=GIT_CLONE_TIMEOUT_SECONDS,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            _logger.warning(
+                'Failed to materialize skill objects in %s at %s (%s): %s',
+                repo_root, ref, pathspec, exc,
+            )
+            return False
+
+        missing = [
+            line.split(' ')[0]
+            for line in result.stdout.splitlines()
+            if line.endswith(' missing')
+        ]
+        if missing:
+            _logger.warning(
+                'Skill objects missing after materialization in %s at %s (%s): %s',
+                repo_root, ref, pathspec, missing,
+            )
+            return False
+        return True
+
     # ── Version snapshots ──────────────────────────────────────────
 
     @staticmethod
@@ -347,6 +438,7 @@ class GitOperations:
             return False
         text = stderr.decode(errors='replace') if isinstance(stderr, bytes) else stderr
         lowered = text.lower()
+        # 用字符串匹配 git stderr，检测服务端是否支持 partial clone filter
         return any(message in lowered for message in UNSUPPORTED_FILTER_MESSAGES)
 
     def _run_git_command(self, command: list[str], input_data: str | None = None) -> str:
@@ -431,6 +523,8 @@ class GitOperations:
         self._cleanup_candidate_refs(clone_dir)
 
         probe_tag = candidate_tags[0]
+        # 如果仓库 tag 很多，全量拉取太慢。
+        # 策略是：先试探性地只 fetch 前几个 tag 到这个自定义 ref 命名空间下
         metadata_probe_command = [
             'git', '-C', str(clone_dir), 'fetch',
             '--force', '--no-tags', '--depth=1', '--filter=tree:0', 'origin',
@@ -442,6 +536,9 @@ class GitOperations:
                 reject_unsupported_filter=True,
             )
             if len(candidate_tags) > 1:
+                # 如果服务端支持 filter（partial clone），就只拉这几个 tag 的对象；
+                # 不支持就 fallback 到全量 +refs/tags/*:refs/crawler/tag-candidates/* 
+                # 后续操作都从这个前缀读 tag，不污染仓库真实的 refs/tags/
                 metadata_fetch_command = [
                     'git', '-C', str(clone_dir), 'fetch',
                     '--force', '--no-tags', '--depth=1', '--filter=tree:0', 'origin',

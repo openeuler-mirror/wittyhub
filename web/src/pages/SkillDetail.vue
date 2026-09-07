@@ -11,15 +11,14 @@ import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
-import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
-import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
+import { OBreadcrumb, OBreadcrumbItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 
 const platformNames: Record<string, string> = {
-  openeuler: '社区SIG',
+  community: '社区SIG',
   enterprise: '企业组织',
   personal: '个人'
 }

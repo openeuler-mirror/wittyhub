@@ -55,6 +55,10 @@ class SkillScanner:
         self.category_classifier = category_classifier
         self.security_detector = security_detector
         self.security_async_mode = security_async_mode
+        # Per-scan security cache statistics (reset at the start of each scan_repo)
+        self._security_cache_hits: int = 0
+        self._security_audit_submitted: int = 0
+        self._security_audit_pending: int = 0
 
     async def start_scan(
         self,
@@ -65,6 +69,9 @@ class SkillScanner:
         author: str | None = None,
         skill_paths: list[str] | None = None,
     ) -> tuple[list[Skill], list[SkillVersion]]:
+        self._security_cache_hits = 0
+        self._security_audit_submitted = 0
+        self._security_audit_pending = 0
         if not repo_root.exists():
             raise ValueError(
                 f'Repository root does not exist for repository {repo.id}: {repo_root}'
@@ -91,6 +98,10 @@ class SkillScanner:
             for skill_id, skill in existing_skills.items()
             if getattr(skill, 'category', None)
         }
+        # Cross-version security result cache keyed by tree_hash: a tagged
+        # version whose content is identical to the already-audited latest
+        # (or an earlier tag) reuses the result instead of re-submitting.
+        security_cache: dict[str, SecurityResolution] = {}
         latest_skills = await self._scan_latest_skills(
             repo=repo,
             repo_root=repo_root,
@@ -100,6 +111,7 @@ class SkillScanner:
             author=author,
             existing_skills=existing_skills,
             category_cache=category_cache,
+            security_cache=security_cache,
         )
 
         tagged_skills: list[SkillVersion] = []
@@ -113,6 +125,7 @@ class SkillScanner:
                 author=author,
                 existing_versions=existing_versions,
                 category_cache=category_cache,
+                security_cache=security_cache,
             )
 
         return latest_skills, tagged_skills
@@ -127,6 +140,7 @@ class SkillScanner:
         author: str | None,
         existing_skills: dict[str, Skill],
         category_cache: dict[str, str | None],
+        security_cache: dict[str, SecurityResolution] | None = None,
     ) -> list[Skill]:
         discovered: list[Skill] = []
         # skill_id is derived from the SKILL.md directory name, so different
@@ -175,10 +189,11 @@ class SkillScanner:
                 scan_started_at=scan_started_at,
                 input_elapsed=input_elapsed,
                 existing_record=existing_skills.get(skill_id),
+                security_cache=security_cache,
             )
             _logger.info(
-                'Discovered skill(latest): skill_id=%s version=%s source=%s',
-                skill.skill_id, skill.version or '-', relative_path,
+                'Discovered skill(latest version:%s): skill_id=%s',
+                skill.version or '-', skill.skill_id,
             )
             discovered.append(skill)
         return discovered
@@ -193,6 +208,7 @@ class SkillScanner:
         author: str | None,
         existing_versions: dict[tuple[str, str | None], SkillVersion],
         category_cache: dict[str, str | None],
+        security_cache: dict[str, SecurityResolution] | None = None,
     ) -> list[SkillVersion]:
         discovered: list[SkillVersion] = []
         seen_versions: set[tuple[str, str]] = set()
@@ -234,6 +250,19 @@ class SkillScanner:
                 skill_id = build_skill_id(
                     repo.source, extract_owner_repo(repo.url), relative_path,
                 )
+                # Pre-dedup on commit before building the record: skips the
+                # expensive record assembly (incl. security resolution) for
+                # tags that point at an already-seen commit of the same skill.
+                pre_commit_key = (skill_id, commit_id) if commit_id else None
+                if pre_commit_key is not None and pre_commit_key in seen_commits:
+                    _logger.debug(
+                        'Skipped duplicate skill commit (pre-check): skill_id=%s '
+                        'version=%s commit_id=%s',
+                        skill_id,
+                        version or '-',
+                        commit_id or '-',
+                    )
+                    continue
                 skill = await self._build_skill_record(
                     repo=repo,
                     skill_file=virtual_skill_file,
@@ -252,9 +281,9 @@ class SkillScanner:
                     input_elapsed=input_elapsed,
                     return_skill_model=False,
                     existing_record=existing_versions.get((skill_id, version)),
+                    security_cache=security_cache,
                 )
                 version_key = (skill.skill_id, skill.version) if skill.version else None
-                commit_key = (skill.skill_id, skill.commit_id) if skill.commit_id else None
                 if version_key is not None and version_key in seen_versions:
                     _logger.debug(
                         'Skipped duplicate skill version: skill_id=%s version=%s commit_id=%s',
@@ -263,21 +292,14 @@ class SkillScanner:
                         skill.commit_id or '-',
                     )
                     continue
-                if commit_key is not None and commit_key in seen_commits:
-                    _logger.debug(
-                        'Skipped duplicate skill commit: skill_id=%s version=%s commit_id=%s',
-                        skill.skill_id,
-                        skill.version or '-',
-                        skill.commit_id or '-',
-                    )
-                    continue
                 if version_key is not None:
                     seen_versions.add(version_key)
-                if commit_key is not None:
-                    seen_commits.add(commit_key)
+                # Commit dedup happens in the pre-check above; this write feeds it.
+                if commit_id:
+                    seen_commits.add((skill_id, commit_id))
                 _logger.info(
-                    'Discovered skill(version): skill_id=%s version=%s source=%s',
-                    skill.skill_id, skill.version or '-', relative_path,
+                    'Discovered skill(version:%s): skill_id=%s',
+                    skill.version or '-', skill.skill_id,
                 )
                 discovered.append(skill)
 
@@ -303,6 +325,7 @@ class SkillScanner:
         *,
         return_skill_model: bool = True,
         existing_record: Skill | SkillVersion | None = None,
+        security_cache: dict[str, SecurityResolution] | None = None,
     ) -> Skill | SkillVersion:
         prepare_started_at = time.perf_counter()
         metadata, content = metadata_content
@@ -343,6 +366,7 @@ class SkillScanner:
             commit_id=commit_id,
             tree_hash=tree_hash,
             existing_record=existing_record,
+            security_cache=security_cache,
         )
         if security.audit_details:
             merged_metadata['security_audit'] = security.audit_details
@@ -408,6 +432,7 @@ class SkillScanner:
         commit_id: str | None,
         tree_hash: str | None,
         existing_record: Skill | SkillVersion | None,
+        security_cache: dict[str, SecurityResolution] | None = None,
     ) -> SecurityResolution:
         existing_metadata = (
             dict(existing_record.extra_metadata or {})
@@ -428,11 +453,30 @@ class SkillScanner:
                 tree_hash,
                 existing_record.risk_score,
             )
-            return SecurityResolution(
+            resolution = SecurityResolution(
                 risk_score=existing_record.risk_score,
                 audit_details=dict(audit_details) if audit_details else None,
                 audit_triggered=False,
             )
+            if security_cache is not None and tree_hash is not None:
+                security_cache[tree_hash] = resolution
+            self._security_cache_hits += 1
+            return resolution
+
+        if security_cache is not None and tree_hash is not None:
+            cached = security_cache.get(tree_hash)
+            if cached is not None:
+                _logger.debug(
+                    'Reused cache submitted by security: skill_id=%s', skill_id,
+                )
+                self._security_cache_hits += 1
+                if cached.audit_triggered:
+                    self._security_audit_pending += 1
+                return SecurityResolution(
+                    risk_score=cached.risk_score,
+                    audit_details=dict(cached.audit_details) if cached.audit_details else None,
+                    audit_triggered=cached.audit_triggered,
+                )
 
         report = await self._audit_skill_security(
             repo=repo,
@@ -441,7 +485,7 @@ class SkillScanner:
             skill_id=skill_id,
         )
         risk_score, audit_details = self._extract_audit_artifacts(report)
-        return SecurityResolution(
+        resolution = SecurityResolution(
             risk_score=risk_score,
             audit_details=audit_details,
             audit_triggered=bool(
@@ -450,6 +494,19 @@ class SkillScanner:
                 and audit_details.get('skillspector_build_number') is not None
             ),
         )
+        self._security_audit_submitted += 1
+        if resolution.audit_triggered:
+            self._security_audit_pending += 1
+        # Only cache usable outcomes: a final score (sync result / DB reuse)
+        # or an async audit awaiting retrieval. Failed audits stay out so
+        # identical-content versions retry instead of inheriting the failure.
+        if (
+            security_cache is not None
+            and tree_hash is not None
+            and (resolution.risk_score is not None or resolution.audit_triggered)
+        ):
+            security_cache[tree_hash] = resolution
+        return resolution
 
     async def _classify_skill_category(
         self,
@@ -495,6 +552,24 @@ class SkillScanner:
         skill_path = Path(relative_path).parent.as_posix()
         if skill_path == '.':
             skill_path = ''
+
+        # skillspector 容器以只读方式挂载缓存仓库且无网络访问，
+        # 此处提前物化技能路径的所有 blob，避免容器内触发懒拉取失败。
+        if repo.local_path and commit_id:
+            if not self.git_ops.materialize_skill_objects(
+                Path(repo.local_path), commit_id, skill_path,
+            ):
+                _logger.warning(
+                    'Security audit skipped for skill %s: objects not materialized',
+                    skill_id,
+                )
+                return SecurityReport(
+                    resource_type='skill',
+                    resource_id=skill_id,
+                    risk_level='unknown',
+                    risk_signals=[],
+                    details={'error': 'materialize_failed', 'source': 'skillspector'},
+                )
 
         try:
             if self.security_async_mode:

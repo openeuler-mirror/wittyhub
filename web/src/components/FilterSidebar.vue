@@ -5,12 +5,12 @@ import { useSkillStore } from '@/stores/skill'
 const skillStore = useSkillStore()
 
 const platformLabel: Record<string, string> = {
-  openeuler: '社区SIG',
+  community: '社区SIG',
   enterprise: '企业组织',
   personal: '个人'
 }
 
-const platformKeys = ['openeuler', 'enterprise', 'personal']
+const platformKeys = ['community', 'enterprise', 'personal']
 
 const providers = computed(() => {
   const platformCounts: Record<string, number> = {}

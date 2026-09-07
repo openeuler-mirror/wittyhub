@@ -42,7 +42,7 @@ class CrawlerConfig(BaseSettings):
     github_token: str = ""
     gitcode_token: str = ""
     github_username: str = "git"
-    max_tags_per_repo: int = 3
+    max_tags_per_repo: int = 5
 
 
 class SkillRepoEntry(BaseSettings):

@@ -33,7 +33,7 @@ security:
   # JENKINS_QUIET_PERIOD / WITTYHUB_REPOSITORY_ROOT 环境变量）
   skillspector_jenkins_http_port: 8083
   skillspector_jenkins_num_executors: 10
-  skillspector_jenkins_quiet_period: 5
+  skillspector_jenkins_quiet_period: 1
   skillspector_repository_root: "/opt/wittyhub/skill-repositories"
 
 postgres:
@@ -56,7 +56,7 @@ app:
     - "http://localhost:8080"
     - "http://127.0.0.1:8080"
 
-# 后台定时 discover：按 skills/skill-repos.yaml 全量扫描仓库
+# 后台定时 discover：按 openEuler-skills catalog 全量扫描仓库
 # 环境变量覆盖示例：DISCOVER_SCHEDULER__ENABLED=true、DISCOVER_SCHEDULER__INTERVAL=weekly
 discover_scheduler:
   enabled: true

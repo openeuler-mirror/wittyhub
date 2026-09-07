@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from skillcrawler.config import load_crawler_config
+from skillcrawler.config import load_skill_categories
 from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -20,9 +20,8 @@ class CategoryClassificationError(RuntimeError):
 
 
 class DeepSeekCategoryClassifier:
-    def __init__(self, config_path: Path | None = None):
-        self.config_path = config_path
-        self._config = load_crawler_config(config_path)
+    def __init__(self, repository_path: Path | None = None):
+        self.repository_path = repository_path
         self.categories = self._load_categories()
         self.model_name = self._load_model_name()
         self.api_key = self._load_api_key()
@@ -61,11 +60,7 @@ class DeepSeekCategoryClassifier:
         return self._normalize_category(response_text)
 
     def _load_categories(self) -> list[str]:
-        categories = self._config.get("categories") or []
-        if not isinstance(categories, list):
-            return []
-        normalized = [str(item).strip() for item in categories if str(item).strip()]
-        return normalized
+        return load_skill_categories(self.repository_path)
 
     def _load_model_name(self) -> str:
         return settings.model.name.strip()

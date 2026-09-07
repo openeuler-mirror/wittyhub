@@ -6,7 +6,7 @@
 
 `skillcrawler` 负责：
 
-1. 从 `skills/skill-repos.yaml` 或命令行参数接收 Git 仓库地址
+1. 默认同步 `https://gitcode.com/openeuler/openEuler-skills`，扫描其中各分类目录下的 `skill.yaml`；也可用命令行指定本地目录
 2. clone / fetch 仓库到本地工作目录
 3. 扫描仓库中的可用 `SKILL.md`
 4. 必要时创建或更新 `skill_repos` 记录
@@ -26,7 +26,7 @@ skillcrawler/main.py
 ```text
 skillcrawler/
 ├── main.py                     # CLI 入口：query / discover / delete
-├── config.py                   # 仓库列表配置加载：默认 skills/skill-repos.yaml
+├── config.py                   # openEuler-skills catalog 与仓库列表配置加载
 └── core/
     ├── category_classifier.py  # AI 分类
     ├── git_operations.py       # Git clone/fetch/tag/commit/认证
@@ -125,8 +125,8 @@ python skillcrawler/main.py query --id <repo_id>
 
 | 参数 | 说明 |
 |------|------|
-| `-p` / `--platform` | 选择 `openeuler` / `enterprise` / `personal` 仓库列表；不传时读取全部列表 |
-| `-c` / `--config` | 临时指定仓库列表 YAML；默认 `skills/skill-repos.yaml` |
+| `-p` / `--platform` | 选择 `community` / `enterprise` / `personal` 仓库列表；不传时读取全部列表 |
+| `-r` / `--repository-path` | 指定已有的 openEuler-skills 本地目录；默认下载到 `<storage.local_path>/skill-repositories/openEuler-skills` |
 | `-u` / `--url` | 扫描单个仓库 URL，不依赖配置列表 |
 | `-b` / `--branch` | 与 `--url` 搭配使用，指定分支 |
 | `-i` / `--id` | 重新 discover 指定数据库仓库记录 |
@@ -141,7 +141,7 @@ python skillcrawler/main.py discover
 扫描指定平台配置列表：
 
 ```bash
-python skillcrawler/main.py discover --platform openeuler
+python skillcrawler/main.py discover --platform community
 python skillcrawler/main.py discover --platform enterprise
 python skillcrawler/main.py discover --platform personal
 ```
@@ -154,7 +154,7 @@ python skillcrawler/main.py discover --url https://gitcode.com/openeuler/wittyhu
 
 单个 URL 平台识别规则：
 
-- `https://gitcode.com/openeuler/<repo>` 会自动识别为 `platform=openeuler`
+- `https://gitcode.com/openeuler/<repo>` 会自动识别为 `platform=community`
 - 如果显式传入 `--platform`，以显式参数为准
 
 扫描单个仓库指定分支：
@@ -185,33 +185,28 @@ python skillcrawler/main.py delete --id <repo_id>
 
 ## 4. 仓库列表配置
 
-默认仓库列表文件：
+默认仓库列表来源：
 
 ```text
-skills/skill-repos.yaml
+openEuler-skills/{community,enterprise,personal}/*/skill.yaml
 ```
 
 示例：
 
 ```yaml
-openeuler_repos:
+# community/Infrastructure/skill.yaml
+name: Infrastructure
+skill_repos:
   - url: https://gitcode.com/openeuler/IB_Robot
-  - url: https://gitcode.com/openeuler/PilotGo-plugin-llmops
-
-personal_repos: []
-
-enterprise_repos:
-  - url: https://github.com/huggingface/diffusers
-  - url: https://github.com/kotlin/kotlin-agent-skills
 ```
 
 平台映射：
 
-| 配置 key | 写入 platform |
+| 目录分组 | 写入 platform |
 |----------|---------------|
-| `openeuler_repos` | `openeuler` |
-| `personal_repos` | `personal` |
-| `enterprise_repos` | `enterprise` |
+| `community` | `community` |
+| `personal` | `personal` |
+| `enterprise` | `enterprise` |
 
 ---
 
@@ -220,7 +215,7 @@ enterprise_repos:
 ```mermaid
 flowchart TD
     A[python skillcrawler/main.py discover] --> B{入口参数}
-    B -->|默认 / --platform| C[读取 skills/skill-repos.yaml]
+    B -->|默认 / --platform| C[同步并读取 openEuler-skills catalog]
     B -->|--url| D[构造单仓库请求]
     B -->|--id| E[读取指定 skill_repos 记录]
 

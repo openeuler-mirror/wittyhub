@@ -263,3 +263,42 @@ class DownloadHistory(Base):
         Index("idx_downloads_resource", "resource_type", "resource_id"),
         Index("idx_downloads_date", desc("downloaded_at")),
     )
+
+
+class BehaviorEvent(Base):
+    """Front-end user behavior tracking event (page_view, search_submit, ...).
+
+    One row per reported interaction. ``props`` stores openEuler-style flattened
+    dimensions (module / level1 / sort / filter ...); hot columns such as
+    ``skill_id`` and ``keyword`` are kept first-class so Grafana (a PostgreSQL
+    data source) can aggregate by them cheaply.
+    """
+
+    __tablename__ = "behavior_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Event name, e.g. page_view / search_submit / list_click_card / detail_view / download_zip / copy_cli
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Source page / module this event belongs to, e.g. home / skill_detail / filter
+    module: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Route path where the event happened, e.g. /skills/search?q=xxx
+    path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Previous path / document.referrer, used for funnel attribution
+    referrer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    skill_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    keyword: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 0-based position the item was clicked when event happened in a list
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Remaining flattened key/value dimensions
+    props: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_events_date", desc("created_at")),
+        Index("idx_events_event", "event"),
+        Index("idx_events_module", "module"),
+        Index("idx_events_skill", "skill_id"),
+    )

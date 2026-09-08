@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from src.api.routes import agents, events, health, index, skills
+from src.api.routes import agents, health, index, skills
 from src.api.middleware import install_response_wrapper
 from src.core.config import get_settings
 from src.core.rate_limit import limiter
@@ -120,7 +120,6 @@ def create_app() -> FastAPI:
     app.include_router(skills.router, prefix="/api/v1/skills")
     app.include_router(agents.router, prefix="/api/v1/agents")
     app.include_router(index.router, prefix="/api/v1/index")
-    app.include_router(events.router, prefix="/api/v1")
 
     return app
 

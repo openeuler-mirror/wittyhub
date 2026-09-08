@@ -14,8 +14,9 @@ const app = createApp(App)
 // Register the OpenEuler-style analytics plugin (same component used by
 // openEuler-portal). It enables the `v-analytics` directive and the wired
 // `oaReport` helper; every reported event is delivered to *this* function,
-// which forwards it (SDK-batched `{ header, body }`) to wittyhub's backend so
-// a Grafana "PostgreSQL" data source can read it from behavior_events.
+// which forwards it (SDK-batched `{ header, body }`) to the shared openEuler
+// dsapi collector (https://dsapi.test.osinfra.cn/query/track/openeuler) via a
+// same-origin /api-dsapi prefix, mirroring openEuler-portal's reporting.
 app.use(initOpenDesignAnalytics, {
   appKey: 'wittyhub',
   // wittyhub has no cookie-consent gate; analytics is enabled by default.

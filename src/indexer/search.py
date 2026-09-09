@@ -7,6 +7,7 @@ from typing import Any
 
 from src.api.services.categories import category_label
 from src.models.orm import Skill
+from src.utils.skill_id import to_new_skill_id
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
@@ -320,7 +321,7 @@ class SearchService:
         for row in rows:
             results.append({
                 "id": str(row["id"]),
-                "skill_id": row["skill_id"],
+                "skill_id": to_new_skill_id(row["skill_id"]),
                 "name": row["name"],
                 "description": row["description"],
                 "version": row["version"],
@@ -418,7 +419,7 @@ class SearchService:
                 continue
             results.append({
                 "id": str(row.id),
-                "skill_id": row.skill_id,
+                "skill_id": to_new_skill_id(row.skill_id),
                 "name": row.name,
                 "description": row.description,
                 "version": row.version,

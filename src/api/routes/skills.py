@@ -40,6 +40,7 @@ from src.storage.downloader import (
     SkillArchiveError,
     SkillArchiveNotFoundError,
 )
+from src.utils.skill_id import to_new_skill_id
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -59,20 +60,23 @@ def _derive_scan_skill_path(source: str, source_url: str, skill_id: str) -> str:
         if relative.endswith("SKILL.md"):
             return relative.rsplit("/", 1)[0] if "/" in relative else ""
 
-    # 2) 从 skill_id 推导：{source}/{owner}/{repo}/<skill dir>
+    # 2) 从 skill_id 推导：{source_type}:{owner}/{repo}/{skill_dir}
+    #    新格式只携带 SKILL.md 所在目录名，无法还原祖先目录（由 source_url 分支兜底）
     try:
         owner_repo = extract_owner_repo(source_url)
     except ValueError:
         return ""
-    prefix = f"{source}/{owner_repo}"
+    prefix = f"{source}:{owner_repo}"
     if skill_id == prefix:
         return ""  # 整仓库即 skill，扫仓库根
     if skill_id.startswith(prefix + "/"):
-        skill_path = skill_id.removeprefix(prefix + "/").strip("/")
-        repository_name = owner_repo.rsplit("/", 1)[-1]
-        if not skill_path or skill_path == repository_name:
+        skill_dir = skill_id.removeprefix(prefix + "/").strip("/")
+        if not skill_dir or "/" in skill_dir:
             return ""
-        return skill_path
+        repository_name = owner_repo.rsplit("/", 1)[-1]
+        if skill_dir == repository_name:
+            return ""
+        return skill_dir
     return ""
 
 
@@ -160,7 +164,8 @@ async def receive_telemetry(
 def skill_to_response(skill) -> SkillResponse:
     return SkillResponse(
         id=str(skill.id),
-        skill_id=skill.skill_id,
+        # 对外统一输出新格式 skill_id（历史数据可能仍为旧格式）
+        skill_id=to_new_skill_id(skill.skill_id),
         name=skill.name,
         description=skill.description,
         version=skill.version,

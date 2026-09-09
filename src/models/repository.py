@@ -11,7 +11,6 @@ from src.api.services.categories import CANONICAL_CATEGORIES, category_label
 from src.models.orm import (
     Agent,
     AgentVersion,
-    BehaviorEvent,
     DownloadHistory,
     SecurityAudit,
     Skill,
@@ -1106,23 +1105,6 @@ class DownloadHistoryRepository:
 
     async def create(self, download_data: dict[str, Any]) -> DownloadHistory:
         record = DownloadHistory(**download_data)
-        self.session.add(record)
-        await self.session.flush()
-        await self.session.refresh(record)
-        return record
-
-
-class BehaviorEventRepository:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-    async def create(self, event_data: dict[str, Any]) -> BehaviorEvent:
-        """Persist a single tracked event.
-
-        Does not commit here — the caller (route) is responsible for the
-        transaction boundary so high-frequency events can be flushed together.
-        """
-        record = BehaviorEvent(**event_data)
         self.session.add(record)
         await self.session.flush()
         await self.session.refresh(record)

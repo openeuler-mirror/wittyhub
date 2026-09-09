@@ -11,3 +11,8 @@ __pycache__/
 tmp/
 .reasonix/
 reasonix.toml
+# 本地安装的 OpenDesign skill（不做 git 管理）
+web/**/skills/opendesign-components/
+web/**/skills/opendesign-tokens/
+# 本地设计稿导出资源（Pixso），不做 git 管理
+SkillsHub/

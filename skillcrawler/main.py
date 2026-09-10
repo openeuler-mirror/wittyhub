@@ -517,38 +517,7 @@ def build_configured_discover_requests(
     return requests, platform_keys
 
 
-async def _discover_single_existing_repository(
-    manager: "SkillManager",
-    repo_id: str,
-    *,
-    force: bool,
-) -> int:
-    repository = await manager.discover_skills_from_single_existing_repository(repo_id, force=force)
-    _print_table(
-        [_successful_existing_repository_row("1", repository)],
-        DISCOVER_RESULT_COLUMNS,
-        empty_message="No skill repos to discover.",
-    )
-    print()
-    logger.info("Discover summary: total=1 success=1 failed=0 skipped=0")
-    return 0
-
-
-def _successful_existing_repository_row(index: str, repository: Any) -> dict[str, str]:
-    return {
-        "#": index,
-        "result": "success",
-        "status": str(repository.skill_discover_status or "-"),
-        "skills": str(repository.skill_num),
-        "name": _display_skill_repo_name(repository),
-        "url": repository.url or "-",
-        "error": "-",
-    }
-
-
 async def _run_discover(manager: "SkillManager", args: argparse.Namespace) -> int:
-    if args.id:
-        return await _run_discover_existing_repo_by_id(manager, args)
     if args.url:
         return await _run_discover_single_url(manager, args)
     return await _run_discover_from_config(manager, args)
@@ -584,24 +553,6 @@ async def _run_discover_from_config(
         manager,
         requests,
         source_label=f" from {', '.join(config_keys)}",
-    )
-
-
-async def _run_discover_existing_repo_by_id(
-    manager: "SkillManager",
-    args: argparse.Namespace,
-) -> int:
-    if args.url or args.branch:
-        raise _build_cli_error(
-            "discover",
-            "discover --id no longer supports --url/--branch; update skill repo config separately",
-            "python main.py discover --id <repo_id>",
-        )
-
-    return await _discover_single_existing_repository(
-        manager,
-        args.id,
-        force=args.force,
     )
 
 
@@ -735,9 +686,8 @@ def _add_query_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_discover_parser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "discover",
-        help="Register, clone, and scan skills from config or existing repos",
+        help="Register, clone, and scan skills from config or single URL",
     )
-    parser.add_argument("-i", "--id", help="Existing skill repo ID to rediscover")
     parser.add_argument("-u", "--url", help="Single Git repo URL to discover")
     parser.add_argument("-b", "--branch", help="Git branch to clone with --url")
     parser.add_argument(
@@ -752,12 +702,6 @@ def _add_discover_parser(subparsers: argparse._SubParsersAction) -> None:
         choices=PLATFORM_CHOICES,
         default=None,
         help="Config repo list to read (default: all repo lists)",
-    )
-    parser.add_argument(
-        "-f", "--force",
-        dest="force",
-        action="store_true",
-        help="Force rediscover existing repos even when status is discovering",
     )
 
 

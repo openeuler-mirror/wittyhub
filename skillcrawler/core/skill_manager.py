@@ -134,64 +134,6 @@ class SkillManager:
                     _logger.warning(f'Discover: Failed to clean up directory {local_path}: {exc}')
         await self.skill_repo_repository.delete_skill_repository(stored.id)
 
-    async def discover_skills_from_single_existing_repository(
-        self,
-        repository_id: str,
-        *,
-        force: bool = False,
-    ) -> SkillRepoModel:
-        repository = await self.get_repository_by_id(repository_id)
-        if not force and repository.skill_discover_status == SkillDiscoverStatus.DISCOVERING:
-            raise ValueError('Skill repo discovery is already in progress')
-
-        # Cache values needed by the error path before any commit/rollback can
-        # expire the ORM instance. Accessing expired attributes after rollback
-        # may attempt async lazy loading outside greenlet_spawn.
-        repository_id_value = repository.id
-        repository_name = repository.repo_name
-        repository_skill_num = repository.skill_num
-        repository_url = repository.url
-        repository_branch = repository.branch
-        repository_platform = repository.platform
-
-        await self._set_discovery_status(repository, SkillDiscoverStatus.DISCOVERING)
-        try:
-            request = SkillRepositoryRequest(
-                url=repository_url,
-                branch=repository_branch,
-                platform=repository_platform,
-            )
-            repo_name = self._derive_repo_name(request)
-            clone_dir = self._local_repository_path(repo_name)
-            self._sync_git_repository(
-                clone_dir=clone_dir,
-                clone_url=normalize_clone_url_for_git(repository_url),
-                branch=repository_branch,
-                repo_url=repository_url,
-            )
-            return await self._discover_and_store_skills(
-                repository,
-                clone_dir=clone_dir,
-                repo_name=repo_name,
-            )
-        except Exception as exc:
-            error_summary = self._git_ops.summarize_exception(exc)
-            _logger.warning(
-                'Failed to discover skills from skill repo %s (%s): %s',
-                repository_id_value, repository_name, error_summary,
-            )
-            await self.rollback()
-            await self.skill_repo_repository.update_skill_repository(
-                repository_id_value,
-                skill_discover_status=SkillDiscoverStatus.FAILED,
-                skill_num=repository_skill_num,
-            )
-            if isinstance(exc, CategoryClassificationError):
-                raise
-            raise ValueError(
-                f'Failed to discover skills from skill repo {repository_id_value}: {error_summary}'
-            ) from exc
-
     async def get_repository_by_id(self, repository_id: str) -> SkillRepoModel:
         repository = await self.skill_repo_repository.get_skill_repository_by_id(repository_id)
         if repository is None:

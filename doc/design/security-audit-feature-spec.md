@@ -20,58 +20,114 @@ security:
   enable_audit: true   # 关闭则跳过全部审计
 ```
 
+```mermaid
+flowchart TD
+    A[拉取仓库更新] --> B[数据库记录已存在]
+    B --> C{当前 HEAD 与数据库 commit 相同?}
+    C -->|相同| D[存在 risk_score 为 NULL 的记录?]
+    D -->|是| E[重试触发这些记录的审计]
+    D -->|否| F[标记 unchanged 并返回]
+    C -->|不同| G[重新扫描 SKILL.md]
+    G --> H[安全检测结果复用判断]
+    H -->|内容未变| I[复用已有结果，不重复提交]
+    H -->|内容有变| J[物化 blob 后异步触发 Skillspector]
+    J --> K[保存安全检测任务信息]
+```
+
 ---
 
 ## 三、完整审计链路
 
-### 3.1 同步模式（API 创建 Skill）
+### 3.1 爬虫 discover 链路（主要触发源）
 
 ```
-POST /skills/
+skillcrawler（后台定时 discover）
 
-routes/skills.py : create_skill()
+skill_manager.py : discover_skill_repository()
   │
-  ├── skill_repo_id 解析（查已有或新建 SkillRepoModel）  ← 路由层处理
-  ├── SkillRepository.create()                           ← 入库（纯数据写入，不触发审计）
+  ├── 拉取仓库更新（partial clone: --depth 1 --no-checkout --filter=blob:none）
   │
-  ├── enable_audit == false ──▶ 返回（risk_score = NULL）
+  ├── 当前 HEAD 与数据库 repository_commit_id 相同（_is_commit_unchanged）
+  │     └── _retry_unscored_security_audits()
+  │           ├── 查询该仓库 risk_score 为 NULL 的 skills/skill_versions
+  │           ├── 有 → 逐条重新触发 Skillspector（自愈上次失败的审计）
+  │           │      日志: retry unscored audits for unchanged repo %s:
+  │           │             triggered=%d skipped=%d total_unscored=%d
+  │           └── 无 → 标记 unchanged 直接返回（不触发审计）
   │
-  └── enable_audit == true
+  └── HEAD 已变更 → 完整扫描
         │
-        ▼
-  SecurityService.audit_skill()
-    │
-    ├── scanners 默认: 自动检测
-    │     ├── has_skillspector → ["skillspector"]
-    │     └── 否则 → []（无可用扫描器）
-    │
-    ├── Skillspector（已配置时）
-    │     SkillspectorClient.run_scan()
-    │       ├── POST Jenkins /buildWithParameters
-    │       ├── 轮询 build 状态（每5秒，最多150秒）
-    │       ├── GET /artifact/reports/skillspector/report.json
-    │       └── report_to_risk_signals()
-    │     → risk_score = report.risk_assessment.score  （直接使用 SkillSpector 风险分）
-    │
-    └── 持久化（audit_skill 内部完成）
-          ├── INSERT security_audits（风险信号 + 完整 report.json）
-          ├── UPDATE skills.risk_score
-          └── COMMIT
+        ├── _scan_latest_skills()   ← HEAD 上的技能
+        ├── _scan_tagged_skills()  ← 最近 N 个 tag（config: max_tags_per_repo，默认 5）
+        │     ├── commit 预去重: (skill_id, commit_id) 已见 → 跳过组装
+        │     └── version 去重: (skill_id, version) 已见 → 丢弃重复记录
+        │
+        └── 两者组装每个 skill 时均调用 _build_skill_record()
+              → _resolve_security_result() 决定是否触发审计（见下方三层复用）
+                ├── 可复用 → 不提交 Jenkins，直接使用历史/缓存评分
+                └── 需新提交 → _audit_skill_security()
+                      ├── 物化 blob（partial clone 无 blob，需预先拉取）
+                      ├── async_mode=True  → trigger_skillspector()
+                      │     details: { skillspector_async: true, build_number: N }
+                      │     risk_score 暂为 NULL，等 Collector 回写
 
-routes/skills.py
-  └── 返回 SkillResponse（risk_score 已由 audit_skill 写入）
+  安全审计复用判定与提交（skill_scanner.py : _resolve_security_result，三层策略）
+    │  返回 SecurityResolution(risk_score, audit_details, audit_triggered)
+    │
+    ├── ① DB 历史复用: existing_record.tree_hash == 新 tree_hash 且 risk_score 非 NULL
+    │      → 直接复用历史评分，不提交 Jenkins
+    ├── ② 扫描级缓存复用: security_cache[tree_hash]（同一次扫描内，latest 与 tag 内容相同）
+    │      → 复用首次提交结果（含等待 Jenkins 回写的 pending 状态）
+    └── ③ 新提交: _audit_skill_security()
+          ├── 物化 blob（见 3.1.1）
+          ├── trigger_skillspector() → 触发 Jenkins 异步审计
+          └── 返回details记录: { skillspector_async: true, skillspector_build_number: N }
+
+扫描完成日志（skill_manager.py）:（见 3.1.2）
+  Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d,
+  security_cache_hits=%d, security_audits_submitted=%d, security_audits_pending=%d
+
+异步结果回写: SkillspectorCollector（见 3.2 异步模式）
 ```
 
-### 3.2 异步模式
+#### 3.1.1 blob 物化（触发 Jenkins 前置步骤）
+
+缓存仓库是 `--filter=blob:none` 的 partial clone，本地只有 commit 和 tree 元数据。
+skillspector 容器以只读方式挂载缓存目录且无网络访问，无法在容器内懒拉取 blob。
+因此爬虫在宿主机上（缓存可写、网络可用）触发 Jenkins 前调用
+`git_operations.materialize_skill_objects()`：
 
 ```
-async_mode=True
+ls-tree 列出技能路径下全部 blob
+  → cat-file --batch-check 触发 Git on-demand 懒拉取（写入 .git/objects/pack/）
+  → 校验输出无 missing
+```
 
-SkillspectorClient.trigger_scan()
-  └── POST Jenkins /buildWithParameters → fire-and-forget
-       details 记录: { skillspector_async: true, skillspector_build_number: N }
+物化失败时跳过本次审计（`details.error = materialize_failed`，不缓存结果），
+下轮 discover 检测到 risk_score 仍为 NULL 会自动重试。
 
-后台: SkillspectorCollector（每 30s，仅 enable_audit=true + 凭证已配时启动）
+#### 3.1.2 统计指标说明
+
+| 指标 | 含义 |
+|------|------|
+| `security_cache_hits` | 命中 ①DB 复用 或 ②扫描级缓存的次数 |
+| `security_audits_submitted` | 新提交到 Jenkins 的审计次数 |
+| `security_audits_pending` | 已提交且等待 Jenkins 回写结果的次数（submitted 的子集） |
+
+三者关系: 
+- `cache_hits + submitted = latest_skills + tagged_skills`（去重后的记录总数）
+- `pending ≤ submitted`
+
+### 3.2 异步模式下后台收集安全审计结果
+
+```
+async_mode=True（爬虫 discover 或 API 手动触发均可启用）
+
+  SkillspectorClient.trigger_scan()
+    └── POST Jenkins /buildWithParameters
+        details 记录: { skillspector_async: true, skillspector_build_number: N }
+
+后台收集: SkillspectorCollector（每 30s，仅 enable_audit=true + 凭证已配时启动）
   ├── 查询 pending audits（skillspector_async=true, collected=null）
   ├── wait_for_build(N)
   ├── fetch_report(N)
@@ -80,19 +136,25 @@ SkillspectorClient.trigger_scan()
 
 启动: `src/security/detector.py` → `start_skillspector_collector()`（内部自行导入 `AsyncSessionLocal`），由 `src/api/main.py` lifespan 调用。
 
-### 3.3 手动触发
-
-```
-POST /skills/{skill_id}/audit?scanners=skillspector
-```
-
-调用 `SecurityService.audit_skill()` 重新扫描并返回最新 `SecurityAuditResponse`。
-
 ---
 
 ## 四、模块架构
 
 ```
+skillcrawler/                      ← 爬虫侧（discover 主要触发源）
+  core/skill_manager.py
+  │   ├── discover_skill_repository()      ← 入口: commit 未变 → 重试未评分审计
+  │   ├── _retry_unscored_security_audits() ← 重试 risk_score=NULL 的记录
+  │   └── _store_to_security_audits()     ← 扫描后写入 security_audits
+  core/skill_scanner.py
+  │   ├── _scan_latest_skills()           ← HEAD 技能扫描
+  │   ├── _scan_tagged_skills()           ← tag 技能扫描（commit/version 去重）
+  │   ├── _resolve_security_result()      ← 三层复用（DB / 扫描缓存 / 新提交）
+  │   └── _audit_skill_security()         ← 物化 blob + 触发 Jenkins
+  └── core/git_operations.py
+      ├── get_skill_tree_hashes()         ← 目录级 tree hash（复用 key）
+      └── materialize_skill_objects()     ← 触发前物化技能路径 blob
+
 src/security/detector.py          ← 唯一核心（扫描逻辑 + Collector 工厂函数）
   ├── SecurityDetector             ← 总入口
   ├── SkillspectorClient           ← Jenkins HTTP 交互
@@ -103,7 +165,6 @@ src/api/services/security.py      ← 编排层
   └── SecurityService.audit_skill()
 
 src/api/routes/skills.py          ← 业务入口
-  ├── create_skill()              ← POST /skills/        skill_repo_id 解析 → 入库 → 审计
   ├── trigger_skill_audit()       ← POST /skills/{id}/audit  手动触发
   └── audit_skill()               ← GET  /skills/{id}/audit  查询结果
 
@@ -159,31 +220,150 @@ src/api/main.py                   ← lifespan 调用 start_skillspector_collect
 
 ## 六、对外 API 接口
 
-### 6.1 创建 Skill（自动审计）
+### 6.1 已入库 Skill 重审
 
 ```
-POST /api/v1/skills/
+POST /api/v1/skills/{skill_id}/audit
 ```
 
-请求体 → `SkillCreate schema`。`enable_audit=true` 时入库后自动触发审计，`risk_score` 由 `audit_skill()` 写入并返回。审计失败不影响入库。
+鉴权: `require_admin_token`。对已入库 Skill 重新触发安全审计。
 
-### 6.2 查询审计结果
+| Query 参数 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `scanners` | `str` | 否 | 逗号分隔: `skillspector`。默认自动检测可用扫描器 |
+| `async_mode` | `bool` | 否 | `true` = 仅触发不等待结果（默认 `false`） |
+
+**调用链路**:
+
+```
+routes/skills.py : trigger_skill_audit()
+  ├── skill 不存在 → 404
+  ├── enable_audit == false → 503
+  │
+  └── SecurityService.audit_skill()
+        ├── source_url 优先取 skill.repo_url（Jenkins 需要合法 git 仓库 URL）
+        ├── version 取 skill.commit_id（Jenkins 需要真实 git ref）
+        ├── skill_path 由 _derive_scan_skill_path() 推导
+        │
+        ├── async_mode == false（同步）
+        │     ├── detect_skillspector() → 轮询 Jenkins（每5秒，最多150秒）
+        │     ├── GET /artifact/reports/skillspector/report.json
+        │     ├── report_to_risk_signals()
+        │     └── risk_score = report.risk_assessment.score（SkillSpector 风险分）
+        │
+        └── async_mode == true（异步）
+              ├── trigger_skillspector() → 触发 Jenkins 异步审计
+              └── risk_level = unknown, risk_score = NULL（等 Collector 回写）
+
+  持久化（audit_skill 内部 upsert_by_resource 保证幂等）
+    ├── upsert security_audits（风险信号 + 完整 report.json）
+    ├── update skills.risk_score
+    └── commit
+```
+
+**返回** `SecurityAuditResponse`（含 `risk_level` / `risk_signals` / `details`）。
+
+### 6.2 外部 Git URL 一次性审计（PR 门禁）
+
+```
+POST /api/v1/skills/audit-by-url
+```
+
+鉴权: `require_admin_token`。对未入库的 Git 仓库或 SKILL.md 链接执行一次性审计，不写库。
+用于 openEuler-skills PR 门禁：在内容合入索引前执行安全审计，**仅返回结果**。
+
+**请求体** `AuditByUrlRequest`:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `repo_url` | `str` | 二选一 | 仓库 URL（审计整个仓库） |
+| `skill_url` | `str` | 二选一 | `.../blob/<ref>/<path>/SKILL.md`（审计单个 skill） |
+| `branch` | `str` | 否 | 指定分支，默认 `ls-remote` 解析 |
+| `scanners` | `str` | 否 | 逗号分隔扫描器列表 |
+| `async_mode` | `bool` | 否 | `true`，直接返回 `build_number` |
+
+**调用链路**:
+
+```
+routes/skills.py : audit_by_url()
+  ├── repo_url 和 skill_url 均为空 → 422
+  ├── _derive_audit_target() 解析 git_url / ref / skill_path（纯解析，无网络）
+  ├── validate_git_url() → SSRF 校验
+  ├── ref 为空 → _resolve_default_branch()（git ls-remote，线程池执行）
+  │
+  └── SecurityService.audit_external(git_url, ref, skill_path, ...)
+        ├── async_mode == false → 同步等待 Jenkins 返回完整报告
+        └── async_mode == true  → 触发 Jenkins 异步审计，返回 build_number
+
+  不持久化，details 中携带 skillspector_build_number 供轮询
+```
+
+**返回** `AuditByUrlResponse`（含 `risk_level` / `risk_score` / `risk_signals` / `details`，不持久化）。
+
+### 6.3 异步审计结果轮询
+
+```
+GET /api/v1/skills/audit-by-url/result?build_number=N
+```
+
+鉴权: `require_admin_token`。轮询 `audit-by-url` 异步扫描的结果。
+
+| Query 参数 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `build_number` | `int` | 是 | Jenkins build 编号（≥1） |
+
+**调用链路**:
+
+```
+routes/skills.py : audit_by_url_result()
+  └── SecurityService.get_external_result(build_number)
+        ├── Jenkins build 仍在运行 → status = "pending"
+        ├── 报告已收集 → status = "done" + 完整审计结果
+        └── Jenkins 失败 → status = "error"
+```
+
+**返回** `AuditByUrlResultResponse`:
+
+```json
+{
+    "status": "pending" | "done" | "error",
+    "risk_level": "low",
+    "risk_score": 85,
+    "risk_signals": [ /* ... */ ],
+    "details": { /* skillspector_report 等 */ }
+}
+```
+
+### 6.4 审计报告下载
+
+```
+GET /api/v1/skills/audit-by-url/report?build_number=N&filename=...
+```
+
+**无鉴权**（PR 门禁评论中的详情链接，可直接浏览器打开）。按需从 Jenkins artifact 拉取 `report.md`，返回 `text/markdown` 附件下载。
+
+| Query 参数 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `build_number` | `int` | 是 | Jenkins build 编号 |
+| `filename` | `str` | 否 | 自定义下载文件名，非 ASCII 使用 RFC 5987 编码 |
+
+**调用链路**:
+
+```
+routes/skills.py : audit_by_url_report()
+  └── SecurityService.get_external_report_md(build_number)
+        ├── 从 Jenkins artifact 按需拉取 report.md
+        └── 返回 text/markdown + Content-Disposition 附件下载
+              非 ASCII 文件名使用 RFC 5987 filename* 编码
+```
+
+### 6.5 查询审计结果
 
 ```
 GET /api/v1/skills/{skill_id}/audit
 ```
 
 返回最近一次审计记录，无记录返回 `{"error": "No audit found"}`。
-
-### 6.3 手动触发审计
-
-```
-POST /api/v1/skills/{skill_id}/audit
-```
-
-| Query 参数 | 类型 | 必填 | 说明 |
-|------|------|:---:|------|
-| `scanners` | `str` | 否 | `skillspector`。默认自动检测可用扫描器 |
 
 **返回** `SecurityAuditResponse`:
 
@@ -221,20 +401,37 @@ POST /api/v1/skills/{skill_id}/audit
 }
 ```
 
-### 6.4 SecurityService.audit_skill() 内部接口
+### 6.6 SecurityService 内部接口
 
 ```python
+# 已入库 Skill 审计（写库）
 async def audit_skill(
     skill_id: str,                        # skill 唯一标识
     source: str,                          # "github" / "gitcode" / "clawhub"
-    source_url: str,                      # 仓库 URL
-    metadata: dict[str, Any],             # { version, content, skill_path }
+    source_url: str,                      # 仓库 URL（优先 repo_url）
+    metadata: dict[str, Any],             # { version, commit_id, content, skill_path }
     scanners: list[str] | None = None,    # None → 自动检测可用扫描器
-    async_mode: bool = False,             # True → skillspector fire-and-forget
+    async_mode: bool = False,             # True → 仅触发不等待结果，返回 build_number
 ) -> dict[str, Any]:
+
+# 外部 Git URL 一次性审计（不写库，PR 门禁用）
+async def audit_external(
+    git_url: str,                         # 合法 git 仓库 URL
+    ref: str = "main",                    # git ref（branch / tag / commit）
+    skill_path: str = "",                 # 仓库内 skill 子路径（空=整仓库）
+    scanners: list[str] | None = None,
+    async_mode: bool = False,
+) -> dict[str, Any]:
+
+# 轮询 audit_external 异步结果
+async def get_external_result(build_number: int) -> dict[str, Any]:
+    # → { status: "pending"|"done"|"error", risk_level, risk_score, ... }
+
+# 拉取 audit_external 的 report.md
+async def get_external_report_md(build_number: int) -> str | None:
 ```
 
-**返回**:
+**audit_skill 返回**:
 
 ```json
 {
@@ -244,6 +441,24 @@ async def audit_skill(
     ],
     "risk_score": 75,
     "scanners": ["skillspector"]
+}
+```
+
+**audit_external 返回**（不持久化）:
+
+```json
+{
+    "git_url": "https://github.com/owner/repo",
+    "ref": "main",
+    "skill_path": "skills/my-skill",
+    "risk_level": "low",
+    "risk_score": 10,
+    "risk_signals": [ /* ... */ ],
+    "details": {
+        "scanners": ["skillspector"],
+        "skillspector_build_number": 42,
+        "skillspector_async": true
+    }
 }
 ```
 
@@ -428,8 +643,12 @@ SC4 模块实时查询 [OSV.dev](https://osv.dev) 检查依赖包已知 CVE：
 | # | 原则 | 说明 |
 |---|------|------|
 | 1 | **入库与审计分离** | `SkillRepository.create()` 只做数据写入；`routes/skills.py` 在入库后调用 `SecurityService.audit_skill()` 触发审计 |
-| 2 | **skill_repo_id 路由层解析** | 无 `skill_repo_id` 时在 `create_skill` 路由层从 `source_url` 解析 `repo_name`（去协议头、去 `.git`、`/` 换 `_`），查重或新建 `SkillRepoModel` |
+| 2 | **skill_repo_id 路由层解析** | 无 `skill_repo_id` 时在 discover skill入库时从 `source_url` 解析 `repo_name`（去协议头、去 `.git`、`/` 换 `_`），查重或新建 `SkillRepoModel` |
 | 3 | **只读展示** | `GET /audit` 仅返回已存储结果，不触发新扫描 |
 | 4 | **降级容错** | 无可用扫描器或 Jenkins 不可用时，降级为 `risk_level=unknown`，审计失败不影响入库 |
 | 5 | **异步优先** | 批量场景用 `async_mode`，后台 `SkillspectorCollector` 每 30s 轮询回写 |
 | 6 | **评分体系统一** | 全部使用 NVIDIA SkillSpector 原生风险分（0–100，高分=危险），包括直接扫描和降级回退 |
+| 7 | **内容寻址复用** | 以目录级 tree hash 为 key：跨轮次（DB 记录）和同轮扫描内（security_cache）复用审计结果，内容未变的版本不重复提交 Jenkins |
+| 8 | **失败自愈** | 未拿到评分（risk_score=NULL）的记录，即使仓库 commit 未变，也会在后续 discover 轮次自动重试审计；失败的审计结果不进缓存，避免失败被继承 |
+| 9 | **容器只读解耦** | 爬虫宿主机负责 blob 物化（partial clone 懒拉取），skillspector 容器只读挂载缓存、无网络依赖，两侧职责隔离 |
+| 10 | **未评分不曝光** | `risk_score` 为 NULL（安全检测未完成）的技能在搜索/列表查询中全局排除，用户不会看到未审计内容 |

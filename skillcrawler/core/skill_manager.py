@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+from skillcrawler.core.category_classifier import (
+    CategoryClassificationError,
+    DeepSeekCategoryClassifier,
+)
 from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.openeuler_sig import build_openeuler_repo_sig_mapping
 from skillcrawler.core.skill_parser import (
@@ -183,6 +186,8 @@ class SkillManager:
                 skill_discover_status=SkillDiscoverStatus.FAILED,
                 skill_num=repository_skill_num,
             )
+            if isinstance(exc, CategoryClassificationError):
+                raise
             raise ValueError(
                 f'Failed to discover skills from skill repo {repository_id_value}: {error_summary}'
             ) from exc
@@ -281,6 +286,8 @@ class SkillManager:
                 skill_discover_status=SkillDiscoverStatus.FAILED,
                 skill_num=repository_skill_num,
             )
+            if isinstance(exc, CategoryClassificationError):
+                raise
             raise ValueError(
                 f'Failed to discover skills from skill repo {repository_id_value}: {error_summary}'
             ) from exc

@@ -11,6 +11,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/
     gcc \
     git \
     libpq-dev \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./

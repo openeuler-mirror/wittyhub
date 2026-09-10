@@ -111,5 +111,43 @@ export const api = {
   async getCategories(): Promise<{ categories: Category[] }> {
     const { data } = await client.get('/index/categories')
     return data
+  },
+
+  /** Fire-and-forget delivery for the analytics SDK's aggregated report.
+   *
+   * ``payload`` is the OpenEuler analytics envelope ``{ header, body: [...] }``
+   * produced by the plugin and handed to our request callback; it is forwarded
+   * verbatim to the shared openEuler data-collection endpoint (dsapi), mirroring
+   * how openEuler-portal reports its own tracking events. See the reference at
+   * tmp/openEuler-portal/app/.vitepress/src/api/api-analytics.ts.
+   */
+  async track(payload: Record<string, unknown>): Promise<void> {
+    try {
+      // Tag the collection-only envelope with our own value on the existing
+      // `service` dimension (mirrors openEuler-portal's per-module $service).
+      // This lets Grafana/other consumers tell wittyhub rows apart from the
+      // openEuler portal data sharing the same dsapi endpoint, WITHOUT adding
+      // handler-level events; per-event business dimensions (`module`, etc.)
+      // stay untouched so they keep working as the primary filter too.
+      const head = (payload.header ?? {}) as Record<string, unknown>
+      const body = payload.body ?? []
+      const tagged = {
+        ...payload,
+        header: { ...head, service: 'wittyhub' },
+        body: Array.isArray(body)
+          ? (body as Record<string, unknown>[]).map((ev) => {
+              const props = ((ev as { properties?: object }).properties ?? {}) as Record<string, unknown>
+              return { ...ev, properties: { ...props, service: 'wittyhub' } }
+            })
+          : body,
+      }
+      // Send on a fresh session (not the wrapped `client`) so the backend's
+      // { code, msg, data } unwrap interceptor never interferes; this endpoint
+      // is a third-party collector reached cross-origin.
+      await axios.post('/api-dsapi/query/track/openeuler', tagged)
+    } catch (e) {
+      // Tracking must never break the user journey — swallow errors.
+      console.error('Failed to report tracking event:', e)
+    }
   }
 }

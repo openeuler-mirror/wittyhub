@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAppStore } from '@/stores/app'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading, OLink } from '@opensig/opendesign'
 import FilterSidebar from '@/components/FilterSidebar.vue'
 import SkillCard from '@/components/SkillCard.vue'
@@ -123,6 +124,7 @@ onBeforeUnmount(() => {
 function handleSearch() {
   const q = searchInput.value.trim()
   if (q) {
+    oaReport('search_submit', { module: 'home', keyword: q })
     router.push({
       path: '/skills/search',
       query: { q }
@@ -136,6 +138,7 @@ function handleSearch() {
 
 function handleClear() {
   searchInput.value = ''
+  oaReport('search_clear', { module: 'home' })
   router.push('/')
   skillStore.setFilter('keyword', '')
   skillStore.fetchSkills()
@@ -148,17 +151,20 @@ function setSortBy(sort: 'hot' | 'latest' | 'downloads') {
 
 // 切换排序（热门/最新）时回到第一页
 function onSortByChange() {
+  oaReport('sort_change', { module: 'home', by: skillStore.filter.sortBy })
   skillStore.setFilter('page', 1)
   skillStore.fetchSkills()
 }
 
 function setSortPeriod(period: string) {
+  oaReport('sort_period_change', { module: 'home', period })
   skillStore.setFilter('sortPeriod', period)
   skillStore.setFilter('page', 1)
   skillStore.fetchSkills()
 }
 
 function setViewMode(mode: 'card' | 'list') {
+  oaReport('view_mode_change', { module: 'home', view: mode })
   skillStore.setFilter('viewMode', mode)
 }
 
@@ -308,7 +314,7 @@ function onPaginationChange(
           <!-- Skill 列表 -->
           <template v-else-if="!skillStore.loading">
             <div v-if="skillStore.filter.viewMode === 'card'" ref="cardGridRef" class="grid grid-cols-3 gap-4">
-              <SkillCard v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
+              <SkillCard v-for="(skill, index) in skillStore.skills" :key="skill.id" :skill="skill" :rank="index" />
             </div>
             <div v-else class="border border-gray-200 rounded-lg dark:border-gray-700 overflow-hidden">
               <!-- 列表视图表头 -->
@@ -319,7 +325,7 @@ function onPaginationChange(
                 <div class="w-[100px]">下载量</div>
                 <div class="w-36">贡献者</div>
               </div>
-              <SkillListItem v-for="skill in skillStore.skills" :key="skill.id" :skill="skill" />
+              <SkillListItem v-for="(skill, index) in skillStore.skills" :key="skill.id" :skill="skill" :rank="index" />
             </div>
           </template>
 

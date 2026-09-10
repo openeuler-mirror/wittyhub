@@ -2,10 +2,16 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { Skill } from '@/api/types'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const props = defineProps<{
   skill: Skill
+  rank?: number
 }>()
+
+function onClickListItem() {
+  oaReport('list_click_card', { module: 'skill_list', skill_id: props.skill.skill_id, rank: props.rank })
+}
 
 function getSkillRoutePath(skillId: string): string {
   return `/skills/${encodeURIComponent(skillId)}`
@@ -31,6 +37,7 @@ function truncate(text: string | null, length: number): string {
   <RouterLink
     :to="getSkillRoutePath(skill.skill_id)"
     class="flex items-center gap-8 px-6 py-4 border-b border-gray-200 bg-white hover:bg-gray-50 transition-colors last:border-b-0 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 group"
+    @click="onClickListItem"
   >
     <div class="flex-1 min-w-0 max-w-[560px]">
       <div class="flex items-center mb-1">

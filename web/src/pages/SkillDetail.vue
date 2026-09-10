@@ -11,7 +11,9 @@ import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
-import { OBreadcrumb, OBreadcrumbItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
+import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
+import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,6 +48,7 @@ function openExternalUrl() {
   if (!externalUrl.value) return
   window.open(externalUrl.value, '_blank', 'noopener')
   externalDialogVisible.value = false
+  oaReport('click_external_source', { module: 'skill_detail', skill_id: skill.value?.skill_id, host: (() => { try { return new URL(externalUrl.value).host } catch { return '' } })() })
 }
 
 // ===== Shiki 代码高亮 =====
@@ -190,6 +193,7 @@ async function copyCliCommand() {
       document.body.removeChild(textarea)
     }
     cliCopied.value = true
+    oaReport('copy_cli', { module: 'skill_detail', skill_id: skill.value.skill_id })
     setTimeout(() => { cliCopied.value = false }, 2000)
   } catch (e) {
     console.error('复制失败:', e)
@@ -212,6 +216,7 @@ function copyVersionCmd() {
       document.body.removeChild(textarea)
     }
     copiedVersion.value = true
+    oaReport('copy_version_cmd', { module: 'skill_detail', skill_id: skill.value?.skill_id })
     setTimeout(() => { copiedVersion.value = false }, 2000)
   } catch (e) {
     console.error('复制失败:', e)
@@ -231,8 +236,10 @@ async function downloadSkill() {
     a.click()
     a.remove()
     window.URL.revokeObjectURL(url)
+    oaReport('download_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, success: true })
   } catch (e) {
     console.error('下载失败:', e)
+    oaReport('download_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, success: false })
   } finally {
     downloading.value = false
   }
@@ -255,6 +262,11 @@ onMounted(async () => {
     ])
     skill.value = skillRes
     versions.value = versionsRes.versions || []
+    oaReport('detail_view', {
+      module: 'skill_detail',
+      skill_id: skill.value.skill_id,
+      skill_name: skill.value.name
+    })
     if (versions.value.length > 0) {
       selectedVersion.value = versions.value[0].version
     }

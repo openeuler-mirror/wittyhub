@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSkillStore } from '@/stores/skill'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const skillStore = useSkillStore()
 
@@ -66,7 +67,9 @@ function toggleArrayItem(arr: string[], item: string): string[] {
 }
 
 function selectCategory(name: string) {
-  skillStore.setFilter('category', toggleArrayItem(skillStore.filter.category, name))
+  const next = toggleArrayItem(skillStore.filter.category, name)
+  oaReport('filter_change', { module: 'filter', dim: 'category', value: next.join(',') })
+  skillStore.setFilter('category', next)
   skillStore.fetchSkills()
 }
 
@@ -74,6 +77,7 @@ function selectProvider(name: string) {
   const current = skillStore.filter.provider
   // 单选语义：再次点击已选中的项保持选中不变
   if (current.length === 1 && current[0] === name) return
+  oaReport('filter_change', { module: 'filter', dim: 'provider', value: name })
   skillStore.setFilter('provider', [name])
   skillStore.fetchSkills()
 }
@@ -82,11 +86,13 @@ function selectSecurityLevel(name: string) {
   const current = skillStore.filter.securityLevel
   // 单选语义：再次点击已选中的项保持选中不变
   if (current.length === 1 && current[0] === name) return
+  oaReport('filter_change', { module: 'filter', dim: 'security_level', value: name })
   skillStore.setFilter('securityLevel', [name])
   skillStore.fetchSkills()
 }
 
 function clearFilters() {
+  oaReport('filter_clear', { module: 'filter' })
   skillStore.resetFilter()
   skillStore.fetchSkills()
 }

@@ -109,7 +109,11 @@ class SecurityService:
             "details": merged_details,
         }
 
-        await self.audit_repo.create(audit_data)
+        # 使用 upsert_by_resource 保证幂等：同一 (resource_type, resource_id)
+        # 只保留一条记录。并发触发同一 skill 审计时，后续请求会更新已有记录
+        # 而非新建，避免重复入库。同时重置 skillspector_collected 标志，
+        # 让后台收集器重新拉取 Jenkins 结果。
+        await self.audit_repo.upsert_by_resource("skill", skill.id, audit_data)
         await self.skill_repo.update(skill_id, {"risk_score": risk_score})
 
         await self.session.commit()

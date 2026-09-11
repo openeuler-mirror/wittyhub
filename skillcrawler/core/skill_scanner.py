@@ -60,12 +60,41 @@ class SkillScanner:
         self._security_audit_submitted: int = 0
         self._security_audit_pending: int = 0
 
+    # ── Version snapshots ──────────────────────────────────────────
+
+    @staticmethod
+    def _build_version_snapshots(
+        repository_git_metadata: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """Build tag version snapshots from raw git metadata.
+
+        Pure transformation: Tag list + commit-id map → snapshot dicts.
+        No git commands are executed here.
+        """
+        latest_tags = as_optional_str_list(
+            repository_git_metadata.get('latest_tags'),
+        ) or []
+        latest_tag_commits = repository_git_metadata.get('latest_tag_commits') or {}
+        snapshots: list[dict[str, str]] = []
+
+        for tag in latest_tags:
+            commit_id = as_optional_str(latest_tag_commits.get(tag))
+            if commit_id is None:
+                continue
+            snapshots.append({
+                'ref': tag,
+                'version': tag,
+                'commit_id': commit_id,
+                'version_source': 'tag',
+            })
+
+        return snapshots
+
     async def start_scan(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
         repository_git_metadata: dict[str, Any] | None = None,
-        version_snapshots: list[dict[str, str]] | None = None,
         author: str | None = None,
         skill_paths: list[str] | None = None,
     ) -> tuple[list[Skill], list[SkillVersion]]:
@@ -115,6 +144,7 @@ class SkillScanner:
         )
 
         tagged_skills: list[SkillVersion] = []
+        version_snapshots = self._build_version_snapshots(repository_git_metadata)
         if version_snapshots:
             tagged_skills = await self._scan_tagged_skills(
                 repo=repo,

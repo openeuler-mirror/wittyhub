@@ -520,11 +520,8 @@ repositories:
             repository_git_metadata={
                 "commit_id": repo_head_commit,
                 "latest_tags": ["v1", "v2"],
+                "latest_tag_commits": {"v1": v1_commit, "v2": v2_commit},
             },
-            version_snapshots=[
-                {"ref": "v1", "version": "v1", "commit_id": v1_commit, "version_source": "tag"},
-                {"ref": "v2", "version": "v2", "commit_id": v2_commit, "version_source": "tag"},
-            ],
         )
 
         assert {skill.skill_id for skill in skills} == {
@@ -585,11 +582,8 @@ repositories:
             repository_git_metadata={
                 "commit_id": shared_commit,
                 "latest_tags": ["v4", "V3"],
+                "latest_tag_commits": {"v4": shared_commit, "V3": shared_commit},
             },
-            version_snapshots=[
-                {"ref": "v4", "version": "v4", "commit_id": shared_commit, "version_source": "tag"},
-                {"ref": "V3", "version": "V3", "commit_id": shared_commit, "version_source": "tag"},
-            ],
         )
 
         # v4 is kept, V3 pointing at the same commit is pre-deduplicated away.

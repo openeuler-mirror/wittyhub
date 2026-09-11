@@ -19,7 +19,6 @@ from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.openeuler_sig import build_openeuler_repo_sig_mapping
 from skillcrawler.core.skill_parser import (
     as_optional_str,
-    as_optional_str_list,
     derive_skill_source,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
@@ -294,9 +293,6 @@ class SkillManager:
             clone_url,
             repo.url,
         )
-        version_snapshots = GitOperations.build_repository_version_snapshots(
-            repository_git_metadata, as_optional_str, as_optional_str_list,
-        )
         _logger.info(
             'Discover: git metadata collected for %s, latest_tags: %s',
             repo.repo_name,
@@ -317,7 +313,6 @@ class SkillManager:
             repo=repo,
             repo_root=clone_dir,
             repository_git_metadata=repository_git_metadata,
-            version_snapshots=version_snapshots or None,
             author=author,
             skill_paths=skill_paths,
         )

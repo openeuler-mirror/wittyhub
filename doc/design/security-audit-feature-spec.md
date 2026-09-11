@@ -36,18 +36,19 @@ flowchart TD
 
 ---
 
-## 三、完整审计链路
+## 三、discover触发审计链路
 
 ### 3.1 爬虫 discover 链路（主要触发源）
 
+本节只展开 discover 链路中与安全审计相关的分支。clone 策略、Tag 拉取、
+commit/version 两级去重等通用扫描流程与安全审计无关，不在此展开：
+
 ```
-skillcrawler（后台定时 discover）
+skillcrawler discover（后台定时或 CLI）
 
 skill_manager.py : discover_skill_repository()
   │
-  ├── 拉取仓库更新（partial clone: --depth 1 --no-checkout --filter=blob:none）
-  │
-  ├── 当前 HEAD 与数据库 repository_commit_id 相同（_is_commit_unchanged）
+  ├── commit 未变化（短路分支）
   │     └── _retry_unscored_security_audits()
   │           ├── 查询该仓库 risk_score 为 NULL 的 skills/skill_versions
   │           ├── 有 → 逐条重新触发 Skillspector（自愈上次失败的审计）
@@ -55,21 +56,9 @@ skill_manager.py : discover_skill_repository()
   │           │             triggered=%d skipped=%d total_unscored=%d
   │           └── 无 → 标记 unchanged 直接返回（不触发审计）
   │
-  └── HEAD 已变更 → 完整扫描
-        │
-        ├── _scan_latest_skills()   ← HEAD 上的技能
-        ├── _scan_tagged_skills()  ← 最近 N 个 tag（config: max_tags_per_repo，默认 5）
-        │     ├── commit 预去重: (skill_id, commit_id) 已见 → 跳过组装
-        │     └── version 去重: (skill_id, version) 已见 → 丢弃重复记录
-        │
-        └── 两者组装每个 skill 时均调用 _build_skill_record()
-              → _resolve_security_result() 决定是否触发审计（见下方三层复用）
-                ├── 可复用 → 不提交 Jenkins，直接使用历史/缓存评分
-                └── 需新提交 → _audit_skill_security()
-                      ├── 物化 blob（partial clone 无 blob，需预先拉取）
-                      ├── async_mode=True  → trigger_skillspector()
-                      │     details: { skillspector_async: true, build_number: N }
-                      │     risk_score 暂为 NULL，等 Collector 回写
+  └── HEAD 已变更 → 完整扫描（latest + 最近 N 个 Tag）
+        └── 每条记录组装时调用 _resolve_security_result() 决定是否触发审计
+              （见下方三层复用）
 
   安全审计复用判定与提交（skill_scanner.py : _resolve_security_result，三层策略）
     │  返回 SecurityResolution(risk_score, audit_details, audit_triggered)
@@ -82,6 +71,13 @@ skill_manager.py : discover_skill_repository()
           ├── 物化 blob（见 3.1.1）
           ├── trigger_skillspector() → 触发 Jenkins 异步审计
           └── 返回details记录: { skillspector_async: true, skillspector_build_number: N }
+
+  三层复用的两条行为规则:
+    - 失败结果不缓存: 审计失败（risk_score=None 且非异步 pending）不写入
+      security_cache，相同内容的后续版本重新提交重试，避免失败传播
+    - 异步模式正确性: 缓存命中保留 audit_triggered=true 与原 build_number，
+      复用记录仍写入各自 SecurityAudit 行；Collector 按 audit.id 逐行回填，
+      同 build_number 的多行（跨版本复用产生）可被独立更新（见 3.2）
 
 扫描完成日志（skill_manager.py）:（见 3.1.2）
   Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d,
@@ -114,9 +110,15 @@ ls-tree 列出技能路径下全部 blob
 | `security_audits_submitted` | 新提交到 Jenkins 的审计次数 |
 | `security_audits_pending` | 已提交且等待 Jenkins 回写结果的次数（submitted 的子集） |
 
-三者关系: 
-- `cache_hits + submitted = latest_skills + tagged_skills`（去重后的记录总数）
-- `pending ≤ submitted`
+三者关系:
+- `cache_hits + submitted` = `_resolve_security_result` 的实际调用次数：三条解析路径
+  （①DB 复用、②扫描级缓存命中、③提交新 Job）各恰好累计一个计数器；安全检测未启用
+  或 Jenkins 配置无效时，③ 为空跑（返回空结果、不写缓存），仍计入 `submitted`
+- 因此 `cache_hits + submitted ≥ latest_skills + tagged_skills`（后者是去重后的最终
+  记录数）：commit 预去重把重复 `(skill_id, commit_id)` 挡在解析之前，但 version
+  后置去重发生在记录组装之后，被丢弃的版本已消耗一次解析
+- `pending ≤ submitted`；`pending` 含缓存复用的异步 pending（沿用旧 build number，
+  不产生新 Jenkins 任务）
 
 ### 3.2 异步模式下后台收集安全审计结果
 
@@ -132,7 +134,27 @@ async_mode=True（爬虫 discover 或 API 手动触发均可启用）
   ├── wait_for_build(N)
   ├── fetch_report(N)
   └── 回写 skills.risk_score（风险分）+ security_audits
+        按 audit.id 逐行回填；同 build_number 的多行（跨版本缓存复用产生）
+        可被独立更新，互不影响
 ```
+
+收集流程的终态处理与重试规则：
+
+```mermaid
+flowchart TD
+    A[每 30 秒运行] --> B[查询最多 100 条 pending audit]
+    B --> C[查询 Jenkins Build 状态]
+    C -->|仍不可用| D[保留 pending]
+    C -->|ABORTED / NOT_BUILT| E[标记 collected]
+    C -->|其他终态| F[下载 report.json]
+    F -->|成功| G[解析风险并更新 Skill/SkillVersion]
+    F -->|失败且 HTTP 不是 404| H[累计下载次数]
+    H -->|少于 3 次| D
+    H -->|达到 3 次| I[标记 report_unavailable 和 collected]
+    F -->|HTTP 404| I
+```
+
+collector 不属于 `python skillcrawler/main.py discover` 进程。discover 退出后，只要 API 正常运行，collector 仍可继续收集报告。
 
 启动: `src/security/detector.py` → `start_skillspector_collector()`（内部自行导入 `AsyncSessionLocal`），由 `src/api/main.py` lifespan 调用。
 
@@ -503,7 +525,7 @@ SkillSpector 风险分 = min(Σ(漏洞数 × 分级分值) × 可执行脚本加
 | **0–20** | `low` | ✅ SAFE | 无显著漏洞，可放心安装 |
 | — | `unknown` | ❓ 未扫描 | 无可用扫描器或扫描未产生结果，风险不明确 |
 
-#### 降级回退
+#### 7.3.1 降级回退
 
 当 SkillSpector 不可用时，根据风险信号数量估算风险分：
 
@@ -521,7 +543,7 @@ SkillSpector 风险分 = min(Σ(漏洞数 × 分级分值) × 可执行脚本加
 | Jenkins 不可达 | `risk_level = unknown` → `risk_score = NULL` |
 | 审计异常 | 捕获异常不阻塞入库，`risk_score` 保持 NULL |
 
-### 7.5 影响评分的 17 大类因素（SkillSpector 68 项检测模式）
+### 7.4 影响评分的 17 大类因素（SkillSpector 68 项检测模式）
 
 | 类别 | ID | 等级 | 检测项 | 说明 |
 |:-----|:--:|:----:|--------|------|
@@ -649,6 +671,6 @@ SC4 模块实时查询 [OSV.dev](https://osv.dev) 检查依赖包已知 CVE：
 | 5 | **异步优先** | 批量场景用 `async_mode`，后台 `SkillspectorCollector` 每 30s 轮询回写 |
 | 6 | **评分体系统一** | 全部使用 NVIDIA SkillSpector 原生风险分（0–100，高分=危险），包括直接扫描和降级回退 |
 | 7 | **内容寻址复用** | 以目录级 tree hash 为 key：跨轮次（DB 记录）和同轮扫描内（security_cache）复用审计结果，内容未变的版本不重复提交 Jenkins |
-| 8 | **失败自愈** | 未拿到评分（risk_score=NULL）的记录，即使仓库 commit 未变，也会在后续 discover 轮次自动重试审计；失败的审计结果不进缓存，避免失败被继承 |
+| 8 | **失败自愈** | 未拿到评分（risk_score=NULL）的记录，即使仓库 commit 未变，也会在后续 discover 轮次自动重试审计；失败的审计结果不进缓存，避免失败被继承；缓存复用产生的多行 pending 按各自 audit.id 独立回填（见 3.1/3.2） |
 | 9 | **容器只读解耦** | 爬虫宿主机负责 blob 物化（partial clone 懒拉取），skillspector 容器只读挂载缓存、无网络依赖，两侧职责隔离 |
 | 10 | **未评分不曝光** | `risk_score` 为 NULL（安全检测未完成）的技能在搜索/列表查询中全局排除，用户不会看到未审计内容 |

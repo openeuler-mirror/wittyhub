@@ -323,14 +323,23 @@ class SkillManager:
         latest_skills: list[Skill],
         tagged_skills: list[SkillVersion],
     ) -> None:
-        """Create ``SecurityAudit`` records for async-triggered skills."""
+        """Create ``SecurityAudit`` records for async-triggered skills.
+
+        触发失败（Jenkins 不可达等）的记录同样落库 risk_level=unknown，
+        与 API 审计路径（SecurityService.audit_skill）保持一致，
+        保证审计链路故障时审计状态仍可观测。
+        """
         records: list[Skill | SkillVersion] = [*latest_skills, *tagged_skills]
         # Records without a database id were never persisted (e.g. dropped as
         # skill_id duplicates); writing their audit would violate the
         # resource_id NOT NULL constraint and fail the whole transaction.
         pending = [
             record for record in records
-            if self._has_new_security_audit(record) and record.id is not None
+            if (
+                self._has_new_security_audit(record)
+                or self._has_attempted_security_audit(record)
+            )
+            and record.id is not None
         ]
 
         if not pending:
@@ -361,6 +370,11 @@ class SkillManager:
     def _has_new_security_audit(record: Skill | SkillVersion) -> bool:
         """Return whether this scan triggered a new audit for the record."""
         return bool(getattr(record, '_security_audit_triggered', False))
+
+    @staticmethod
+    def _has_attempted_security_audit(record: Skill | SkillVersion) -> bool:
+        """Return whether an async audit was attempted even if trigger failed."""
+        return bool(getattr(record, '_security_audit_attempted', False))
 
     async def _retry_unscored_security_audits(
         self,

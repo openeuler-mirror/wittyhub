@@ -7,9 +7,10 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+from sqlalchemy import update
 
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
@@ -244,14 +245,20 @@ class SkillManager:
             normalized,
             repo_name,
         )
-        if not created_new and self._is_commit_unchanged(repository, clone_dir):
-            candidates, triggered = await self._retry_unscored_security_audits(repository)
-            if candidates:
-                setattr(repository, "_security_retry_candidates", candidates)
-                setattr(repository, "_security_retriggered", triggered)
+        if not created_new:
+            # A repo previously collected directly (platform='') that is later
+            # registered in the anchor catalog (platform='community') must have
+            # its list-source fields (platform/source) migrated even when the
+            # git commit has not changed.
+            repository = await self._sync_catalog_source(repository, normalized)
+            if self._is_commit_unchanged(repository, clone_dir):
+                candidates, triggered = await self._retry_unscored_security_audits(repository)
+                if candidates:
+                    setattr(repository, "_security_retry_candidates", candidates)
+                    setattr(repository, "_security_retriggered", triggered)
+                    return repository
+                setattr(repository, "_unchanged", True)
                 return repository
-            setattr(repository, "_unchanged", True)
-            return repository
 
         # Cache values needed by the error path before any commit/rollback can
         # expire the ORM instance, otherwise accessing them after rollback triggers
@@ -567,6 +574,76 @@ class SkillManager:
 
         repository = await self.create_skill_repository(normalized_request, repo_name)
         return repository, True
+
+    async def _sync_catalog_source(
+        self,
+        repo: SkillRepoModel,
+        normalized_request: SkillRepositoryRequest,
+    ) -> SkillRepoModel:
+        """Refresh skill_repos / skills list-source fields to the catalog view.
+
+        A repository previously collected directly (``discover --url``, platform
+        empty) that is later registered in the anchor catalog (e.g.
+        ``platform='community'``) must migrate its ``platform``/``source``
+        fields on the next collection, even when the git commit is unchanged.
+        Without this the skill list keeps showing the old source until the
+        repository content changes.
+        """
+        target_source: str | None = None
+        try:
+            target_source, _ = derive_skill_source(normalized_request.url)
+        except ValueError:
+            _logger.warning(
+                'Discover: cannot derive source for %s from %s; source migration skipped',
+                repo.repo_name,
+                normalized_request.url,
+            )
+        target_platform = normalized_request.platform
+
+        current_source = getattr(repo, 'source', None)
+        current_platform = getattr(repo, 'platform', None)
+
+        source_changed = bool(target_source) and target_source != current_source
+        platform_changed = bool(target_platform) and target_platform != current_platform
+        if not source_changed and not platform_changed:
+            return repo
+
+        _logger.info(
+            'Discover: migrating list source for %s: source %r -> %r, platform %r -> %r',
+            repo.repo_name,
+            current_source,
+            target_source if source_changed else current_source,
+            current_platform,
+            target_platform if platform_changed else current_platform,
+        )
+
+        repo_values: dict[str, Any] = {}
+        skill_values: dict[str, Any] = {}
+        if source_changed:
+            repo_values['source'] = target_source
+            skill_values['source'] = target_source
+        if platform_changed:
+            repo_values['platform'] = target_platform
+            skill_values['platform'] = target_platform
+
+        await self.skill_repo_repository.update_skill_repository(
+            repo.id,
+            commit=False,
+            **repo_values,
+        )
+        if skill_values:
+            await self.skill_repository.session.execute(
+                update(Skill)
+                .where(Skill.skill_repo_id == repo.id)
+                .values(**skill_values)
+            )
+            await self.skill_repository.session.execute(
+                update(SkillVersion)
+                .where(SkillVersion.skill_repo_id == repo.id)
+                .values(**skill_values)
+            )
+        await self.skill_repository.session.commit()
+        return await self.get_repository_by_id(repo.id)
 
     def _is_commit_unchanged(
         self,

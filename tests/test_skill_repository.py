@@ -727,7 +727,17 @@ repositories:
             patch.object(
                 SkillManager,
                 "_get_or_create_skill_repository",
-                AsyncMock(return_value=(SimpleNamespace(id=uuid.uuid4()), False)),
+                AsyncMock(
+                    return_value=(
+                        SimpleNamespace(
+                            id=uuid.uuid4(),
+                            repo_name="acme_agent-skills",
+                            source="github",
+                            platform=None,
+                        ),
+                        False,
+                    )
+                ),
             ),
             patch.object(SkillManager, "_discover_and_store_skills", discover_mock),
         ):
@@ -744,7 +754,12 @@ repositories:
         manager = SkillManager(MagicMock(), MagicMock())
         retry_mock = AsyncMock(return_value=(3, 2))
         discover_mock = AsyncMock()
-        repository = SimpleNamespace(id=uuid.uuid4())
+        repository = SimpleNamespace(
+            id=uuid.uuid4(),
+            repo_name="acme_agent-skills",
+            source="github",
+            platform=None,
+        )
         with (
             patch.object(SkillManager, "_sync_git_repository"),
             patch.object(SkillManager, "_list_skill_paths", return_value=["SKILL.md"]),
@@ -769,6 +784,89 @@ repositories:
         assert getattr(result, "_security_retriggered") == 2
         retry_mock.assert_awaited_once_with(repository)
         discover_mock.assert_not_called()
+
+    async def test_sync_catalog_source_migrates_platform_for_existing_repo(self):
+        """Issue #9: a directly-collected repo (platform empty) registered in the
+        anchor catalog must migrate skill_repos / skills platform to community."""
+        from sqlalchemy.sql.dml import Update
+
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        session = MagicMock()
+        session.execute = AsyncMock()
+        session.commit = AsyncMock()
+        skill_repository = MagicMock()
+        skill_repository.session = session
+        repo_repository = MagicMock()
+        repo_repository.update_skill_repository = AsyncMock(
+            return_value=SimpleNamespace(id=1)
+        )
+        repo_repository.get_skill_repository_by_id = AsyncMock(
+            return_value=SimpleNamespace(id=1)
+        )
+        manager = SkillManager(skill_repository, repo_repository)
+
+        repository = SimpleNamespace(
+            id=1,
+            repo_name="openeuler_demo-skills",
+            source="gitcode",
+            platform="",
+        )
+
+        returned = await manager._sync_catalog_source(
+            repository,
+            SkillRepositoryRequest(
+                url="https://gitcode.com/openeuler/demo-skills",
+                platform="community",
+            ),
+        )
+
+        assert returned is not None
+        repo_repository.update_skill_repository.assert_awaited_once()
+        kwargs = repo_repository.update_skill_repository.await_args.kwargs
+        assert kwargs["platform"] == "community"
+        assert kwargs["commit"] is False
+        # skills + skill_versions rows are migrated to the catalog platform
+        executed = [call.args[0] for call in session.execute.await_args_list]
+        assert len(executed) == 2
+        for stmt in executed:
+            assert isinstance(stmt, Update)
+        assert session.commit.await_count == 1
+        from sqlalchemy.dialects import postgresql
+
+        migrated = executed[0].compile(dialect=postgresql.dialect()).params
+        assert migrated["platform"] == "community"
+
+    async def test_sync_catalog_source_skips_when_platform_unchanged(self):
+        """Issue #9: no migration (and no writes) when the catalog view matches."""
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        session = MagicMock()
+        session.execute = AsyncMock()
+        skill_repository = MagicMock()
+        skill_repository.session = session
+        repo_repository = MagicMock()
+        manager = SkillManager(skill_repository, repo_repository)
+
+        repository = SimpleNamespace(
+            id=1,
+            repo_name="openeuler_demo-skills",
+            source="gitcode",
+            platform="community",
+        )
+
+        returned = await manager._sync_catalog_source(
+            repository,
+            SkillRepositoryRequest(
+                url="https://gitcode.com/openeuler/demo-skills",
+                platform="community",
+            ),
+        )
+
+        assert returned is repository
+        repo_repository.update_skill_repository.assert_not_called()
+        session.execute.assert_not_called()
+        session.commit.assert_not_called()
 
     async def test_retry_unscored_security_audits_updates_pending_audit(self):
         from skillcrawler.core.skill_manager import SkillManager, settings

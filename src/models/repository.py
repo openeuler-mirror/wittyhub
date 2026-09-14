@@ -905,9 +905,17 @@ class SkillRepository:
         )
         security_levels = [{"name": row.level, "count": row.count} for row in security_result.fetchall()]
 
+        # 下载总量
+        downloads_result = await self.session.execute(
+            select(func.coalesce(func.sum(latest_skills.c.download_count), 0))
+            .select_from(latest_skills)
+        )
+        total_downloads = downloads_result.scalar() or 0
+
         return {
             "total_skills": total_skills,
             "total_categories": total_categories,
+            "total_downloads": total_downloads,
             "categories": categories,
             "platforms": platforms,
             "security_levels": security_levels,

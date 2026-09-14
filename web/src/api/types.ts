@@ -91,6 +91,7 @@ export interface SkillVersion {
 export interface Stats {
   total_skills: number
   total_categories: number
+  total_downloads: number
   categories: Category[]
   platforms: { name: string; count: number }[]
   security_levels: { name: string; count: number }[]

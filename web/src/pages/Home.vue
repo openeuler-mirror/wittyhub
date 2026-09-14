@@ -121,6 +121,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResizeAlign)
 })
 
+// 下载量格式化：超过一万显示 xxx.xw（w=万），否则原样
+function formatDownloads(n?: number): string {
+  if (n == null) return '0'
+  if (n < 10000) return n.toLocaleString()
+  return `${(n / 10000).toFixed(1)}w`
+}
+
 function handleSearch() {
   const q = searchInput.value.trim()
   if (q) {
@@ -192,14 +199,23 @@ function onPaginationChange(
       </div>
 
       <div class="container-wide relative h-full flex flex-col items-center justify-center text-center">
-        <h1 class="hero-title">openEuler SkillHub</h1>
-        <p class="hero-subtitle">与开发者共同探索、评估、贡献AI技能</p>
+        <h1 class="hero-title">探索、评估和获取可复用的Skills</h1>
+        <p class="hero-subtitle">为openEuler社区AI Agent与开发者工作流提供安全、可信的能力集市</p>
         <p class="hero-stats">
-          <span class="hero-stats-number">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
-          Skills
+          <span class="hero-stats-item">
+            <span class="hero-stats-number">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
+            <span class="hero-stats-label">Skills</span>
+          </span>
           <span class="mx-2 text-[var(--o-color-text3)]">|</span>
-          <span class="hero-stats-number">{{ skillStore.stats?.total_categories || '15' }}</span>
-          领域分类
+          <span class="hero-stats-item">
+            <span class="hero-stats-number">{{ skillStore.stats?.total_categories || '15' }}</span>
+            <span class="hero-stats-label">领域分类</span>
+          </span>
+          <span class="mx-2 text-[var(--o-color-text3)]">|</span>
+          <span class="hero-stats-item">
+            <span class="hero-stats-number">{{ formatDownloads(skillStore.stats?.total_downloads) }}</span>
+            <span class="hero-stats-label">下载量</span>
+          </span>
         </p>
 
         <!-- 搜索框 -->
@@ -414,38 +430,67 @@ function onPaginationChange(
 
 /* Hero 标题 */
 .hero-title {
+  color: rgba(0,0,0,1);
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-medium);
+  font-weight: SemiBold;
   font-size: 40px;
   line-height: 56px;
-  color: var(--o-color-info1);
-  text-align: center;
-  margin-bottom: 12px;
+  letter-spacing: 0px;
+  text-align: left;
+  margin-bottom: 8px
 }
 
 .hero-subtitle {
+  color: rgba(0,0,0,0.6);
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-medium);
-  font-size: var(--o-r-font_size-text2);
-  line-height: var(--o-r-line_height-text2);
-  color: var(--o-color-info1);
-  text-align: center;
-  margin-bottom: 8px;
+  font-weight: regular;
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: left;
+  margin-bottom: 8px
 }
 
 .hero-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-medium);
-  font-size: var(--o-r-font_size-text1);
-  line-height: var(--o-r-line_height-text1);
-  color: var(--o-color-info3);
   text-align: center;
   margin-bottom: 32px;
 }
 
+.hero-stats-item {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
 .hero-stats-number {
-  font-weight: var(--o-font_weight-medium);
-  color: var(--o-color-text3);
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 28px;
+  line-height: 40px;
+  letter-spacing: 0px;
+  text-align: center;
+  color: var(--o-color-primary1);
+}
+
+.hero-stats-label {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+[data-o-theme="e.dark"] .hero-stats-label,
+.dark .hero-stats-label {
+  color: var(--o-color-info3);
 }
 
 /* 列表视图表头 */

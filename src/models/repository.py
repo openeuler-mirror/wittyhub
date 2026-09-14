@@ -671,10 +671,11 @@ class SkillRepository:
         total = await self.session.scalar(count_query)
 
         if sort_by == "download_count" and sort_period in ("week", "month"):
+            now = datetime.now(timezone.utc)
             if sort_period == "week":
-                cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+                cutoff = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
             else:
-                cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                cutoff = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
             dl_subquery = (
                 select(
@@ -773,17 +774,18 @@ class SkillRepository:
 
         return (version_result.rowcount or 0) > 0 or (summary_result.rowcount or 0) > 0
 
-    async def increment_download(self, skill_id: str) -> bool:
+    async def increment_download(self, skill_id: str) -> uuid.UUID | None:
+        """累加下载计数，返回该 Skill 的主键 UUID（未命中返回 None），供调用方落 DownloadHistory。"""
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
-            return False
+            return None
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
             .values(download_count=Skill.download_count + 1)
         )
         await self.session.flush()
-        return True
+        return existing.id
 
     async def update_last_indexed(self, skill_id: str) -> None:
         existing = await self.get_by_skill_id(skill_id)

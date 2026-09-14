@@ -141,19 +141,28 @@ async def receive_telemetry(
     db: AsyncSession = Depends(get_db),
 ):
     """Receive telemetry data from wittyhub CLI and update counters for installs.
-    request params: 
-    {   
-        'v': '1.5.13', 
-        'event': 'install', 
-        'source': 'vercel-labs/agent-skills', 
-        'skills': 'deploy-to-vercel', 
-        'agents': 'amp,antigravity,antigravity-cli,cline,codex,cursor,deepagents,gemini-cli,github-copilot,kimi-code-cli,opencode,warp,zed,openclaw', 
+
+    Matched skills also get a download_history record (with IP/User-Agent),
+    which feeds the weekly/monthly download ranking.
+
+    request params:
+    {
+        'v': '1.5.13',
+        'event': 'install',
+        'source': 'vercel-labs/agent-skills',
+        'sourceType': 'github',
+        'skills': 'deploy-to-vercel',
+        'agents': 'amp,antigravity,antigravity-cli,cline,codex,cursor,deepagents,gemini-cli,github-copilot,kimi-code-cli,opencode,warp,zed,openclaw',
         'skillFiles': '{"deploy-to-vercel":"skills/deploy-to-vercel/SKILL.md"}'
     }
     """
     params = dict(request.query_params)
     telemetry_service = TelemetryService(db)
-    matched_skill_ids = await telemetry_service.process(params)
+    matched_skill_ids = await telemetry_service.process(
+        params,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return {"ok": True, "matched_skill_ids": matched_skill_ids}
 
 

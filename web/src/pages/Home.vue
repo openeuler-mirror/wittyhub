@@ -26,8 +26,8 @@ const searchInput = ref('')
 
 const sortOptions = [
   { label: '全部时间', value: 'all' },
-  { label: '近7天', value: 'week' },
-  { label: '近30天', value: 'month' }
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' }
 ]
 
 const pageSizeOptions = [12, 24, 48, 96]

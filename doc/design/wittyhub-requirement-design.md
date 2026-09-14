@@ -56,7 +56,7 @@
 | R-10 | 多版本支持 | P1 | 已实现 | Skill版本管理，历史版本查询 |
 | R-11 | 爬虫自动发现 | P1 | 已实现 | skillcrawler discover：配置仓库触发 + 单 URL/单仓库重扫 |
 | R-12 | AI语义搜索 | P2 | 已实现 | pgvector向量检索 + 混合搜索 |
-| R-13 | 排行榜功能 | P2 | 部分实现 | 列表支持下载量排序；独立排行榜页（/skills/leaderboard）待开发 |
+| R-13 | 排行榜功能 | P2 | 部分实现 | 列表支持下载量排序（本周=周一起、本月=1日起的自然周/月窗口，基于 download_history 统计）；独立排行榜页（/skills/leaderboard）待开发 |
 | R-14 | 开发者页 | P2 | 待开发 | 开发者信息页 |
 | R-15 | 标签页浏览 | P2 | 待开发 | 同标签Skill列表页 |
 
@@ -702,7 +702,7 @@ CREATE TABLE download_history (
 | GET | `/skills/{skill_id}/audit/report` | 获取安全审计 Markdown 报告 |
 | POST | `/skills/{skill_id}/audit` | 触发安全审计（by-URL 扫描） |
 | GET | `/skills/versions/{skill_id}` | 获取版本历史列表 |
-| GET | `/skills/telemetry` | 前端遥测数据上报端点 |
+| GET | `/skills/telemetry` | CLI 遥测数据上报端点：累加命中 Skill 的下载计数，并同步落 `download_history` 记录（含 IP/User-Agent），计入本周/本月下载量排序统计 |
 
 #### Agents API
 

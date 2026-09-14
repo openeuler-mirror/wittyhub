@@ -14,38 +14,19 @@ const platformLabel: Record<string, string> = {
 const platformKeys = ['community', 'enterprise', 'personal']
 
 const providers = computed(() => {
-  const platformCounts: Record<string, number> = {}
-  for (const p of skillStore.stats?.platforms ?? []) {
-    platformCounts[p.name] = p.count
-  }
   return platformKeys.map(key => ({
     name: platformLabel[key],
-    value: key,
-    count: platformCounts[key] ?? 0
+    value: key
   }))
 })
 
-const providerTotal = computed(() => providers.value.reduce((s, p) => s + p.count, 0))
-
 const allCategories = computed(() => skillStore.categories)
-const categoryTotal = computed(() => allCategories.value.reduce((s, c) => s + c.count, 0))
 
 const ALL_SECURITY_LEVELS = ['安全', '低风险', '中风险', '高风险']
 
 const securityLevels = computed(() => {
-  const levelCounts: Record<string, number> = {}
-  for (const l of skillStore.stats?.security_levels ?? []) {
-    if (l.name !== '未检测') {
-      levelCounts[l.name] = l.count
-    }
-  }
-  return ALL_SECURITY_LEVELS.map(name => ({
-    name,
-    count: levelCounts[name] ?? 0
-  }))
+  return ALL_SECURITY_LEVELS.map(name => ({ name }))
 })
-
-const securityLevelTotal = computed(() => securityLevels.value.reduce((s, l) => s + l.count, 0))
 
 function selectProviderAll() {
   skillStore.setFilter('provider', [])
@@ -119,7 +100,6 @@ const hasActiveFilter = computed(() => {
               </span>
               全部
             </span>
-            <span class="filter-count">{{ providerTotal }}</span>
           </div>
           <div
             v-for="p in providers"
@@ -133,7 +113,6 @@ const hasActiveFilter = computed(() => {
               </span>
               {{ p.name }}
             </span>
-            <span class="filter-count">{{ p.count }}</span>
           </div>
         </div>
       </div>
@@ -154,7 +133,6 @@ const hasActiveFilter = computed(() => {
               </span>
               全部
             </span>
-            <span class="filter-count">{{ categoryTotal }}</span>
           </div>
           <div
             v-for="cat in allCategories"
@@ -171,7 +149,6 @@ const hasActiveFilter = computed(() => {
               </span>
               {{ cat.label || cat.name }}
             </span>
-            <span class="filter-count">{{ cat.count }}</span>
           </div>
         </div>
       </div>
@@ -189,7 +166,6 @@ const hasActiveFilter = computed(() => {
               </span>
               全部
             </span>
-            <span class="filter-count">{{ securityLevelTotal }}</span>
           </div>
           <div
             v-for="level in securityLevels"
@@ -203,7 +179,6 @@ const hasActiveFilter = computed(() => {
               </span>
               {{ level.name }}
             </span>
-            <span class="filter-count">{{ level.count }}</span>
           </div>
         </div>
       </div>
@@ -268,13 +243,9 @@ const hasActiveFilter = computed(() => {
 .filter-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 8px 12px;
   border-radius: var(--o-radius-s);
   cursor: pointer;
-  font-size: var(--o-r-font_size-tip1);
-  line-height: var(--o-r-line_height-tip1);
-  color: var(--o-color-info1);
   transition: all var(--o-duration-s) var(--o-easing-standard);
   user-select: none;
 }
@@ -295,7 +266,6 @@ const hasActiveFilter = computed(() => {
 }
 
 .filter-item-active {
-  color: var(--o-color-primary1);
   font-weight: var(--o-font_weight-medium);
   background-color: #CEDBF5;
   border-radius: var(--o-radius-s);
@@ -309,15 +279,6 @@ const hasActiveFilter = computed(() => {
 [data-o-theme="e.dark"] .filter-item-active,
 .dark .filter-item-active {
   background-color: #353539;
-}
-
-.filter-count {
-  font-size: var(--o-r-font_size-tip2);
-  color: var(--o-color-info3);
-}
-
-.filter-item-active .filter-count {
-  color: var(--o-color-primary1);
 }
 
 .filter-radio {

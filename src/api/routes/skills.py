@@ -484,12 +484,16 @@ async def get_skill_versions(
     if not latest_skill and not tagged_versions:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    versions = [latest_skill]
-    if tagged_versions is not None:
-        versions.extend(tagged_versions)
+    # 只返回 skill_versions 表的历史版本（Tag 版本），不包含 skills 表的 latest 行
+    versions = list(tagged_versions) if tagged_versions else []
+    source_url = (
+        latest_skill.source_url
+        if latest_skill
+        else (versions[0].source_url if versions else "")
+    )
 
     return SkillVersionsResponse(
-        source_url=latest_skill.source_url,
+        source_url=source_url,
         skill_id=skill_id,
         versions=[skill_to_response(s) for s in versions],
     )

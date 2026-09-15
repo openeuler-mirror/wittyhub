@@ -82,7 +82,7 @@ export interface SkillVersion {
   commit_id: string | null
   author: string | null
   message: string | null
-  released_at: string | null
+  created_at: string
   download_count: number
   install_command?: string
   content: string | null

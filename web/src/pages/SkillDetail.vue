@@ -32,8 +32,6 @@ const error = ref('')
 const activeTab = ref<'versions' | 'usage'>('usage')
 const downloading = ref(false)
 const toastVisible = ref(false)
-const copiedVersion = ref(false)
-const cliCopied = ref(false)
 // 第三方链接跳转提示
 const externalDialogVisible = ref(false)
 const externalUrl = ref('')
@@ -160,11 +158,61 @@ function getSecurityLevel(score: number | null): { label: string; class: string 
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
-const installCommand = computed(() => {
+
+// 统一 skill_id 到新格式 {source_type}:{owner}/{repo}/{skill_dir}。
+// 历史数据可能仍为旧格式 {source_type}/{owner}/{repo}/<path...>，
+// 优先用 source_url 的 SKILL.md 路径确定目录名，确保提示词恒为新格式。
+function toNewSkillId(skillId: string, sourceUrl?: string | null): string {
+  const sourceTypes = ['github', 'gitcode', 'gitlab', 'gitee']
+  const id = (skillId || '').trim()
+  const colon = id.indexOf(':')
+  if (colon > 0 && sourceTypes.includes(id.slice(0, colon).toLowerCase())) {
+    return id // 已是新格式
+  }
+  const parts = id.split('/').filter(Boolean)
+  const sourceType = parts[0]?.toLowerCase() ?? ''
+  if (!sourceTypes.includes(sourceType) || parts.length < 3) return id
+  const owner = parts[1]!
+  const repo = parts[2]!
+  let skillDir: string | undefined
+  const blobMatch = sourceUrl?.match(/\/blob\/[^/]+\/(.+?)\/?SKILL\.md$/i)
+  if (blobMatch) {
+    skillDir = blobMatch[1]!.split('/').filter(Boolean).pop()
+  }
+  if (!skillDir) {
+    skillDir = parts.slice(3).filter((p) => p !== '.').pop() ?? repo
+  }
+  return `${sourceType}:${owner}/${repo}/${skillDir}`
+}
+
+// AI 提示词：复制后发送给任意 AI Agent，由其读取安装指南并执行安装
+const installPrompt = computed(() => {
   if (!skill.value) return ''
-  const repository = skill.value.repo_url || skill.value.source_url
-  return `npx wittyhub install ${skill.value.skill_id}`
+  const skillId = toNewSkillId(skill.value.skill_id, skill.value.source_url)
+  return `请根据 https://skillhub.openeuler.org/install/skillhub.md，安装 ${skillId}。`
 })
+
+async function copyInstallPrompt() {
+  if (!skill.value) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(installPrompt.value)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = installPrompt.value
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    showCopyToast()
+    oaReport('copy_ai_prompt', { module: 'skill_detail', skill_id: skill.value.skill_id })
+  } catch (e) {
+    console.error('复制失败:', e)
+  }
+}
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-'
@@ -173,54 +221,6 @@ function formatDate(dateStr: string | null): string {
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
-}
-
-async function copyCliCommand() {
-  if (!skill.value) return
-  const command = installCommand.value
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(command)
-    } else {
-      // fallback for HTTP contexts
-      const textarea = document.createElement('textarea')
-      textarea.value = command
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    cliCopied.value = true
-    oaReport('copy_cli', { module: 'skill_detail', skill_id: skill.value.skill_id })
-    setTimeout(() => { cliCopied.value = false }, 2000)
-  } catch (e) {
-    console.error('复制失败:', e)
-  }
-}
-
-function copyVersionCmd() {
-  const command = installCommand.value
-  try {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(command)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = command
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    copiedVersion.value = true
-    oaReport('copy_version_cmd', { module: 'skill_detail', skill_id: skill.value?.skill_id })
-    setTimeout(() => { copiedVersion.value = false }, 2000)
-  } catch (e) {
-    console.error('复制失败:', e)
-  }
 }
 
 async function downloadSkill() {
@@ -405,33 +405,47 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- ========== 右侧：CLI 安装独立卡片 ========== -->
+        <!-- ========== 右侧：安装卡片（设计稿-使用描述画板） ========== -->
         <aside class="detail-body-sidebar">
           <div class="sidebar-sticky">
             <div class="action-card">
-              <div class="cli-section">
-                <h3 class="cli-label">CLI 安装</h3>
-                <div class="cli-divider"></div>
-                <div class="cli-input-group">
-                  <code class="cli-command">{{ installCommand }}</code>
-                  <button class="cli-copy-btn" :class="{ 'is-copied': cliCopied }" @click="copyCliCommand" :aria-label="cliCopied ? '已复制' : '复制'">
-                    <span v-if="!cliCopied" class="btn-icon-sm" v-html="copySvg"></span>
-                    <span v-else class="btn-icon-sm copied-icon">
-                      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="12" cy="12" r="10" fill="currentColor"/>
-                        <path d="M8 12l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
+              <h3 class="install-title">安装</h3>
+              <div class="install-divider"></div>
 
-            <!-- 下载按钮 -->
-            <button class="download-btn" :disabled="downloading" @click="downloadSkill">
-              <span class="download-btn-icon" v-html="downloadSvg"></span>
-              <span>{{ downloading ? '下载中...' : '下载ZIP包安装' }}</span>
-            </button>
+              <!-- 方式一：复制提示词发送给 AI 直接安装 -->
+              <p class="method-label">方式一：复制提示词发送给你的 AI 直接安装</p>
+              <code class="prompt-box">{{ installPrompt }}</code>
+              <OButton
+                class="install-action"
+                color="primary"
+                variant="outline"
+                size="large"
+                round="pill"
+                @click="copyInstallPrompt"
+              >
+                <template #icon>
+                  <span class="action-icon" v-html="copySvg"></span>
+                </template>
+                复制提示词
+              </OButton>
+
+              <!-- 方式二：下载 ZIP 包安装 -->
+              <p class="method-label method-label-second">方式二：下载ZIP包安装</p>
+              <OButton
+                class="install-action"
+                color="primary"
+                variant="outline"
+                size="large"
+                round="pill"
+                :loading="downloading"
+                @click="downloadSkill"
+              >
+                <template #icon>
+                  <span class="action-icon" v-html="downloadSvg"></span>
+                </template>
+                {{ downloading ? '下载中...' : '立即下载' }}
+              </OButton>
+            </div>
 
             <!-- Skill 信息卡片 -->
             <div class="info-card">
@@ -724,11 +738,10 @@ onMounted(async () => {
 
 .action-card {
   background: var(--o-color-fill2);
-  border-radius: 8px;
-  padding: 20px;
+  border-radius: 4px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
 .info-card {
@@ -799,115 +812,73 @@ onMounted(async () => {
   }
 }
 
-/* ===== 下载按钮 ===== */
-.download-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px 20px;
-  border-radius: 100px;
-  font-size: var(--o-r-font_size-tip1);
+/* ===== 安装卡片（设计稿-使用描述画板） ===== */
+.install-title {
+  margin: 0 0 24px;
+  font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-medium);
-  border: none;
-  cursor: pointer;
-  background: var(--o-color-primary1);
-  color: #fff;
-  transition: background 0.2s;
-
-  @include hover {
-    background: color-mix(in srgb, var(--o-color-primary1) 85%, #000);
-  }
-
-  &:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
-
-  .download-btn-icon {
-    width: 18px;
-    height: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    :deep(svg) {
-      width: 18px;
-      height: 18px;
-    }
-  }
+  font-size: 22px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
 }
 
+.install-divider {
+  height: 1px;
+  background: var(--o-color-control4);
+  margin-bottom: 24px;
+}
 
-/* ===== CLI 安装区 ===== */
-.cli-section {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+.method-label {
+  margin: 0 0 12px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 14px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
 
-  .cli-label {
-    font-size: var(--o-font_size-h3);
-    font-weight: var(--o-font_weight-medium);
-    line-height: var(--o-line_height-h3);
-    color: var(--o-color-info1);
-    margin: 0;
-  }
+.method-label-second {
+  margin-top: 24px;
+}
 
-  .cli-divider {
-    height: 1px;
-    background: var(--o-color-control4);
-    margin: 0;
-  }
+.prompt-box {
+  display: block;
+  min-height: 60px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: var(--o-color-fill1);
+  border-radius: 4px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--o-color-info3);
+  word-break: break-all;
+  white-space: normal;
+}
 
-  .cli-input-group {
-    display: flex;
+.install-action {
+  width: 100%;
+  justify-content: center;
+  font-family: HarmonyHeiTi;
+
+  /* 图标与文字同色（primary1），与组件库描边按钮规范一致 */
+  .action-icon {
+    display: inline-flex;
     align-items: center;
-    background: var(--o-color-fill3);
-    border: none;
-    border-radius: 6px;
-  }
-
-  .cli-command {
-    flex: 1;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    padding: 0 12px;
-    font-size: 13px;
-    font-family: var(--o-font_family-code);
-    color: var(--o-color-info1);
-    background: var(--o-color-fill3);
-    word-break: keep-all;
-    white-space: nowrap;
-    overflow-x: auto;
-    border-radius: 6px;
-
-    &::-webkit-scrollbar {
-      height: 4px;
-    }
-
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background: var(--o-color-control4);
-      border-radius: 3px;
-    }
-  }
-
-  .cli-copy-btn {
     width: 24px;
     height: 24px;
-    margin-right: 12px;
-    color: var(--o-color-info3);
-    cursor: pointer;
-    transition: color 0.2s;
-    flex-shrink: 0;
 
-    @include hover {
-      color: var(--o-color-primary1);
+    :deep(svg) {
+      width: 24px;
+      height: 24px;
+      display: block;
+      fill: currentColor;
     }
   }
 }

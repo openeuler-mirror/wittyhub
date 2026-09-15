@@ -37,6 +37,8 @@ class SecurityResolution:
     risk_score: int | None
     audit_details: dict[str, Any] | None
     audit_triggered: bool
+    # async 审计已发起（无论触发成功与否），用于失败时也落 unknown 审计记录
+    audit_attempted: bool = False
 
 
 class SkillScanner:
@@ -60,12 +62,41 @@ class SkillScanner:
         self._security_audit_submitted: int = 0
         self._security_audit_pending: int = 0
 
+    # ── Version snapshots ──────────────────────────────────────────
+
+    @staticmethod
+    def _build_version_snapshots(
+        repository_git_metadata: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """Build tag version snapshots from raw git metadata.
+
+        Pure transformation: Tag list + commit-id map → snapshot dicts.
+        No git commands are executed here.
+        """
+        latest_tags = as_optional_str_list(
+            repository_git_metadata.get('latest_tags'),
+        ) or []
+        latest_tag_commits = repository_git_metadata.get('latest_tag_commits') or {}
+        snapshots: list[dict[str, str]] = []
+
+        for tag in latest_tags:
+            commit_id = as_optional_str(latest_tag_commits.get(tag))
+            if commit_id is None:
+                continue
+            snapshots.append({
+                'ref': tag,
+                'version': tag,
+                'commit_id': commit_id,
+                'version_source': 'tag',
+            })
+
+        return snapshots
+
     async def start_scan(
         self,
         repo: SkillRepoModel,
         repo_root: Path,
         repository_git_metadata: dict[str, Any] | None = None,
-        version_snapshots: list[dict[str, str]] | None = None,
         author: str | None = None,
         skill_paths: list[str] | None = None,
     ) -> tuple[list[Skill], list[SkillVersion]]:
@@ -115,6 +146,7 @@ class SkillScanner:
         )
 
         tagged_skills: list[SkillVersion] = []
+        version_snapshots = self._build_version_snapshots(repository_git_metadata)
         if version_snapshots:
             tagged_skills = await self._scan_tagged_skills(
                 repo=repo,
@@ -397,6 +429,7 @@ class SkillScanner:
         model_class = Skill if return_skill_model else SkillVersion
         record = model_class(**common)
         setattr(record, '_security_audit_triggered', security.audit_triggered)
+        setattr(record, '_security_audit_attempted', security.audit_attempted)
         assemble_elapsed = time.perf_counter() - assemble_started_at
         total_elapsed = time.perf_counter() - scan_started_at
         accounted_elapsed = (
@@ -476,6 +509,7 @@ class SkillScanner:
                     risk_score=cached.risk_score,
                     audit_details=dict(cached.audit_details) if cached.audit_details else None,
                     audit_triggered=cached.audit_triggered,
+                    audit_attempted=cached.audit_attempted,
                 )
 
         report = await self._audit_skill_security(
@@ -492,6 +526,10 @@ class SkillScanner:
                 audit_details
                 and audit_details.get('skillspector_async')
                 and audit_details.get('skillspector_build_number') is not None
+            ),
+            audit_attempted=bool(
+                audit_details
+                and audit_details.get('skillspector_async')
             ),
         )
         self._security_audit_submitted += 1
@@ -595,12 +633,21 @@ class SkillScanner:
             _logger.warning(
                 'Security audit failed for skill %s', skill_id, exc_info=True,
             )
+            failed_details: dict[str, Any] = {
+                'error': 'audit_failed',
+                'source': 'skillspector',
+            }
+            if self.security_async_mode:
+                # 保持与触发失败落库路径一致：标记 async 尝试已发起，
+                # 以便 SkillManager 写入 risk_level=unknown 审计记录
+                failed_details['skillspector_async'] = True
+                failed_details['skillspector_build_number'] = None
             report = SecurityReport(
                 resource_type='skill',
                 resource_id=skill_id,
                 risk_level='unknown',
                 risk_signals=[],
-                details={'error': 'audit_failed', 'source': 'skillspector'},
+                details=failed_details,
             )
 
         return report

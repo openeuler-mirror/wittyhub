@@ -43,7 +43,7 @@ USER root
 RUN sed -i 's|http://deb.debian.org|https://repo.huaweicloud.com|g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 python3-pip git curl ca-certificates && \
+        python3 python3-pip git curl ca-certificates tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # 从 Stage 1 复制预构建的 wheels

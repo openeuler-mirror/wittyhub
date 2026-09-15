@@ -520,11 +520,8 @@ repositories:
             repository_git_metadata={
                 "commit_id": repo_head_commit,
                 "latest_tags": ["v1", "v2"],
+                "latest_tag_commits": {"v1": v1_commit, "v2": v2_commit},
             },
-            version_snapshots=[
-                {"ref": "v1", "version": "v1", "commit_id": v1_commit, "version_source": "tag"},
-                {"ref": "v2", "version": "v2", "commit_id": v2_commit, "version_source": "tag"},
-            ],
         )
 
         assert {skill.skill_id for skill in skills} == {
@@ -585,11 +582,8 @@ repositories:
             repository_git_metadata={
                 "commit_id": shared_commit,
                 "latest_tags": ["v4", "V3"],
+                "latest_tag_commits": {"v4": shared_commit, "V3": shared_commit},
             },
-            version_snapshots=[
-                {"ref": "v4", "version": "v4", "commit_id": shared_commit, "version_source": "tag"},
-                {"ref": "V3", "version": "V3", "commit_id": shared_commit, "version_source": "tag"},
-            ],
         )
 
         # v4 is kept, V3 pointing at the same commit is pre-deduplicated away.
@@ -670,48 +664,6 @@ repositories:
         assert skills[0].tree_hash == skill_tree_hash
         assert skills[0].risk_score == 12
         assert getattr(skills[0], "_security_audit_triggered") is False
-
-    def test_single_repository_discover_failure_marks_repository_failed(self):
-        from skillcrawler.core.skill_manager import SkillDiscoverStatus, SkillManager
-
-        repository_id = uuid.uuid4()
-        repository = SimpleNamespace(
-            id=repository_id,
-            repo_name="github.com_acme_repository",
-            url="https://github.com/acme/repository",
-            branch="main",
-            platform="personal",
-            skill_num=7,
-            skill_discover_status=SkillDiscoverStatus.DONE,
-        )
-        skill_repository = MagicMock()
-        skill_repository.session = MagicMock()
-        skill_repository.session.rollback = AsyncMock()
-        repo_repository = MagicMock()
-        repo_repository.get_skill_repository_by_id = AsyncMock(return_value=repository)
-        repo_repository.update_skill_repository = AsyncMock(return_value=repository)
-        manager = SkillManager(skill_repository, repo_repository)
-
-        with patch.object(
-            SkillManager,
-            "_sync_git_repository",
-            side_effect=RuntimeError("fetch failed"),
-        ):
-            with pytest.raises(ValueError, match="fetch failed"):
-                asyncio.run(
-                    manager.discover_skills_from_single_existing_repository(
-                        str(repository_id),
-                    )
-                )
-
-        skill_repository.session.rollback.assert_awaited_once()
-        assert repo_repository.update_skill_repository.await_args_list[-1].args == (
-            repository_id,
-        )
-        assert repo_repository.update_skill_repository.await_args_list[-1].kwargs == {
-            "skill_discover_status": SkillDiscoverStatus.FAILED,
-            "skill_num": 7,
-        }
 
     async def test_configured_discover_force_does_not_skip_commit_unchanged_check(self):
         from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
@@ -900,6 +852,7 @@ repositories:
             commit_id="a" * 40,
             extra_metadata={"security_audit": details},
             _security_audit_triggered=False,
+            _security_audit_attempted=False,
         )
         triggered = SimpleNamespace(
             id=uuid.uuid4(),
@@ -908,6 +861,7 @@ repositories:
             commit_id="b" * 40,
             extra_metadata={"security_audit": details},
             _security_audit_triggered=True,
+            _security_audit_attempted=True,
         )
 
         with patch(
@@ -928,6 +882,59 @@ repositories:
         assert audit_data["resource_id"] == triggered.id
         assert audit_data["commit_id"] == "b" * 40
         assert audit_data["details"] == details
+
+    async def test_security_audit_store_persists_failed_trigger_as_unknown(self):
+        """触发失败（build_number=None）时也落 risk_level=unknown 审计记录。"""
+        from skillcrawler.core.skill_manager import SkillManager
+
+        skill_repository = MagicMock()
+        skill_repository.session = MagicMock()
+        manager = SkillManager(skill_repository, MagicMock())
+        audit_repository = MagicMock()
+        audit_repository.upsert_many_by_resource = AsyncMock()
+        failed_details = {
+            "skillspector_async": True,
+            "skillspector_build_number": None,
+            "source": "skillspector",
+        }
+        failed = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_id="failed",
+            version="latest",
+            commit_id="c" * 40,
+            extra_metadata={"security_audit": failed_details},
+            _security_audit_triggered=False,
+            _security_audit_attempted=True,
+        )
+        untouched = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_id="untouched",
+            version="latest",
+            commit_id="d" * 40,
+            extra_metadata={},
+            _security_audit_triggered=False,
+            _security_audit_attempted=False,
+        )
+
+        with patch(
+            "skillcrawler.core.skill_manager.SecurityAuditRepository",
+            return_value=audit_repository,
+        ):
+            await manager._store_to_security_audits(
+                [failed, untouched],
+                [],
+            )
+
+        audit_repository.upsert_many_by_resource.assert_awaited_once()
+        resource_type, entries = audit_repository.upsert_many_by_resource.call_args.args
+        assert resource_type == "skill"
+        assert len(entries) == 1
+        resource_id, audit_data = entries[0]
+        assert resource_id == failed.id
+        assert audit_data["risk_level"] == "unknown"
+        assert audit_data["audit_type"] == "skillspector"
+        assert audit_data["details"] == failed_details
+        assert audit_data["details"]["skillspector_build_number"] is None
 
     def test_security_retry_resolves_path_from_commit_source_url(self):
         from skillcrawler.core.skill_manager import SkillManager

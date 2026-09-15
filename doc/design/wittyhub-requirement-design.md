@@ -45,18 +45,18 @@
 | 编号 | 需求项 | 优先级 | 状态 | 说明 |
 |------|--------|--------|------|------|
 | R-01 | CLI/API检索下载 | P0 | 已实现 | 支持关键词、分类、标签搜索 |
-| R-02 | 多级安全检测 | P0 | 已实现 | Socket.dev API + 静态分析，提供风险评分 |
+| R-02 | 多级安全检测 | P0 | 已实现 | Jenkins SkillSpector（NVIDIA）深度扫描，提供风险评分 |
 | R-03 | 分类标签系统 | P1 | 已实现 | 顶层大类 + 标签筛选 |
 | R-04 | Web浏览功能 | P1 | 已实现 | 首页、搜索结果、详情、分类浏览、排行榜 |
 | R-05 | 数据库索引存储 | P0 | 已实现 | PostgreSQL存储索引，不存储Skill内容 |
 | R-06 | 全文搜索引擎 | P0 | 已实现 | PostgreSQL tsvector 全文检索 |
-| R-07 | CLI工具 | P0 | 已实现 | search, list, get, install, download, audit命令 |
+| R-07 | CLI工具 | P0 | 已实现 | wittyhub CLI（add, use, list, update, audit, get, init 等命令） |
 | R-08 | Web前端 | P1 | 已实现 | Vue.js + TypeScript + Tailwind CSS |
 | R-09 | Docker部署 | P0 | 已实现 | Docker Compose一键部署 |
 | R-10 | 多版本支持 | P1 | 已实现 | Skill版本管理，历史版本查询 |
-| R-11 | 爬虫自动发现 | P1 | 待开发 | 主动扫描+配置仓库触发+用户提交 |
+| R-11 | 爬虫自动发现 | P1 | 已实现 | skillcrawler discover：配置仓库触发 + 单 URL/单仓库重扫 |
 | R-12 | AI语义搜索 | P2 | 已实现 | pgvector向量检索 + 混合搜索 |
-| R-13 | 排行榜功能 | P2 | 已实现 | 下载量排行榜 |
+| R-13 | 排行榜功能 | P2 | 部分实现 | 列表支持下载量排序；独立排行榜页（/skills/leaderboard）待开发 |
 | R-14 | 开发者页 | P2 | 待开发 | 开发者信息页 |
 | R-15 | 标签页浏览 | P2 | 待开发 | 同标签Skill列表页 |
 
@@ -146,7 +146,7 @@
 │  │   System Admin    │ │     │  └─────────────────┘  │     │                        │
 │  │   - 触发重索引    │ │     │                        │     │                        │
 │  │   - 查看统计       │ │     │  ┌─────────────────┐  │     │                        │
-│  └───────────────────┘ │     │  │ Socket.dev API │  │     │                        │
+│  └───────────────────┘ │     │  │ SkillSpector   │  │     │                        │
 │                         │     │  │  - 安全检测    │  │     │                        │
 └─────────────────────────┘     │  └─────────────────┘  │     └─────────────────────────┘
                                  │                        │
@@ -199,8 +199,8 @@
 │                                                                                         │
 │  3. 安全检测流程 (Security Scanning)                                                    │
 │     ┌──────────┐      ┌─────────────┐      ┌──────────────┐      ┌───────────────┐     │
-│     │  New/    │ ───► │   Security  │ ───► │  Socket.dev  │ ───► │ Risk Score &  │     │
-│     │  Update  │      │   Detector  │      │  API/Static  │      │ Alert Report  │     │
+│     │  New/    │ ───► │   Security  │ ───► │   Jenkins    │ ───► │ Risk Score &  │     │
+│     │  Update  │      │   Detector  │      │ SkillSpector │      │ Alert Report  │     │
 │     └──────────┘      └─────────────┘      └──────────────┘      └───────────────┘     │
 │                                                                                         │
 │  4. 下载流程 (Download)                                                                 │
@@ -225,7 +225,7 @@
 | GitHub API | REST API | 下载仓库存档、获取文件内容 | JSON |
 | GitCode API | REST API | 下载仓库存档（国内镜像） | JSON |
 | Gitee API | REST API | 下载仓库存档（国内平台） | JSON |
-| Socket.dev API | REST API | npm包安全检测、风险评分 | JSON |
+| Jenkins SkillSpector | Jenkins REST API | Skill 目录深度安全扫描、风险评分 | JSON |
 | Local Storage | 文件系统 | CLI安装的Skill本地存储 | 目录/文件 |
 
 ---
@@ -278,7 +278,7 @@
 | CLI框架 | Typer | Python类型安全的CLI框架 |
 | HTTP客户端 | httpx | 同步/异步HTTP客户端 |
 | 容器化 | Docker Compose | 快速部署、一键启动 |
-| 安全检测 | Socket.dev API + 自研规则引擎 | 专业供应链安全检测、多级防护 |
+| 安全检测 | Jenkins + SkillSpector（NVIDIA） | Agent Skills 专业供应链安全检测、风险评分 |
 | 配置管理 | YAML | 集中配置，环境分离 |
 
 ### 5.2 项目目录结构
@@ -308,7 +308,7 @@ wittyhub/
 │   ├── indexer/               # 搜索引擎
 │   │   └── search.py          # PostgreSQL tsvector 搜索
 │   ├── security/              # 安全检测
-│   │   └── detector.py        # Socket.dev + 静态分析
+│   │   └── detector.py        # Jenkins SkillSpector 客户端 + 后台报告收集
 │   ├── storage/               # 文件存储
 │   │   └── downloader.py      # 下载管理
 │   └── migrations/            # 数据库迁移
@@ -382,93 +382,91 @@ wittyhub/
 | `src/api/routes/skills.py` | Skills CRUD, 下载, 审计 | `GET /skills/`, `GET /skills/{id}`, `POST /skills/`, `GET /skills/{id}/download`, `GET /skills/{id}/audit` |
 | `src/api/routes/agents.py` | Agents CRUD | `GET /agents/`, `GET /agents/{id}` |
 | `src/api/routes/index.py` | 搜索, 索引, 统计 | `GET /index/search`, `POST /index/reindex`, `GET /index/stats`, `GET /index/categories` |
-| `src/api/models/models.py` | SQLAlchemy 模型 | `Skill`, `Agent`, `SecurityAudit`, `DownloadHistory` |
-| `src/api/models/repository.py` | 数据库操作 | `SkillRepository`, `AgentRepository`, `SecurityAuditRepository` |
+| `src/models/orm.py` | SQLAlchemy ORM 模型 | `Skill`, `SkillVersion`, `SkillRepoModel`, `Agent`, `SecurityAudit`, `DownloadHistory` |
+| `src/models/repository.py` | 数据库操作 | `SkillRepository`, `AgentRepository`, `SecurityAuditRepository`, `DownloadHistoryRepository` |
 | `src/indexer/search.py` | PostgreSQL tsvector + pgvector 混合搜索 | `SearchService.search_skills()` |
 | `src/ai/embedding.py` | Embedding 服务 | `generate_embeddings()` |
-| `src/security/detector.py` | 安全检测 | `SecurityDetector`, `StaticSecurityAnalyzer` |
-| `src/storage/downloader.py` | 下载管理 | `DownloadManager.get_download_url()` |
+| `src/security/detector.py` | 安全检测 | `SkillSpectorClient`, `SecurityResultCollector` |
+| `src/storage/downloader.py` | 下载管理 | `DownloadManager.create_skill_archive()` |
 | `src/core/config.py` | 配置管理 | `Settings` (从 YAML 加载) |
-| `cli/main.py` | CLI 命令 | `list`, `search`, `get`, `install`, `download`, `audit`, `reindex` |
+| `wittyhub-cli` (独立 npm 包) | CLI 命令 | `add`, `use`, `list`, `update`, `audit`, `get`, `init` |
 
 ---
 
 ## 6. CLI 工具设计
 
+> CLI 已独立为 npm 包 `wittyhub`（仓库 `wittyhub-cli`），由平台 API
+> 提供检索/下载/审计数据。本节描述 CLI 的命令面与本地存储约定。
+
 ### 6.1 CLI 功能概览
 
 ```
-wittyhub - Agent/Skill 检索与下载平台 CLI
+wittyhub - open agent skills ecosystem CLI
 
 用法:
-  wittyhub [选项] 命令 [参数]
+  wittyhub <command> [options]
 
 命令:
-  list       列出已安装的 Skills
-  search     搜索 Skill
-  get        显示 Skill 详细信息
-  download   获取 Skill 下载链接
-  install    安装 Skill 到本地
-  audit      显示 Skill 安全审计结果
-  reindex    触发服务器重新索引
+  add <pkg>              从 git 仓库/URL/本地路径安装 Skills
+  use <pkg>@<skill>       免安装直接使用某个 Skill
+  list (ls)               列出已安装的 Skills
+  update [skills...]      更新已安装的 Skill 到最新版本
+  get <source> --skill    查看 Skill 详情（author/category/version/description/tags）
+  audit <source> --skill  显示 Skill 安全审计结果（风险等级 + 风险信号）
+  init [name]             创建新的 SKILL.md 模板
+  experimental_install    从 skills-lock.json 恢复已安装 Skills
+  experimental_sync       从 node_modules 同步 Skills 到 agent 目录
 
 选项:
-  --version  显示版本号
-  --help     显示帮助信息
+  --version               显示版本号
+  --help                  显示帮助信息
 ```
 
 ### 6.2 命令详解
 
-#### 6.2.1 search - 搜索命令
+#### 6.2.1 add - 安装命令
 
 ```
-wittyhub search [关键词] [选项]
-
-选项:
-  --limit, -l <数量>         返回结果数量 (默认 20)
-
-示例:
-  wittyhub search "代码调试"
-  wittyhub search --limit 10
-```
-
-#### 6.2.2 install - 安装命令
-
-```
-wittyhub install <skill-id> [选项]
+wittyhub add <source> [选项]
 
 参数:
-  <skill-id>                 Skill 的唯一标识 (如 vercel-labs/skills/find-skills)
+  <source>                 git 仓库地址 / GitHub 简写 / 本地路径
 
 选项:
-  --target, -t <目录>        安装目标目录 (默认 ~/.agents/skills)
+  --list                   只列出可用 Skills，不安装
+  -g, --global             安装到全局 agent 目录
+  -y, --yes                跳过交互确认
 
 示例:
-  wittyhub install vercel-labs/skills/find-skills
-  wittyhub install anthropics/skills/frontend-design --target ./my-skills
+  wittyhub add vercel-labs/agent-skills
+  wittyhub add https://github.com/anthropics/skills --list
 ```
 
-#### 6.2.3 其他命令
+#### 6.2.2 其他命令
 
 | 命令 | 说明 |
 |------|------|
-| `list` | 列出本地已安装的 Skills |
-| `get <skill-id>` | 显示 Skill 详细信息 |
-| `download <skill-id>` | 获取 Skill 下载链接 |
-| `audit <skill-id>` | 显示 Skill 安全审计结果 |
-| `reindex` | 触发服务器重新索引所有 Skills |
+| `use <pkg>@<skill>` | 免安装直接使用某个 Skill |
+| `list` (`ls`) | 列出本地已安装的 Skills |
+| `update [skills...]` | 更新已安装的 Skill 到最新版本 |
+| `get <source> --skill <skill>` | 查看 Skill 详情 |
+| `audit <source> --skill <skill>` | 显示 Skill 安全审计结果 |
+| `init [name]` | 创建新的 SKILL.md 模板 |
 
 ### 6.3 CLI 本地存储
 
 ```
 ~/.agents/skills/
-├── vercel-labs__skills__find-skills/
-│   ├── skill.json           # Skill 元数据
-│   ├── content/            # Skill 内容目录
-│   └── versions/          # 版本历史
-└── anthropics__skills__frontend-design/
+├── find-skills/
+│   ├── SKILL.md
+│   └── ...
+└── frontend-design/
     └── ...
 ```
+
+`skills-lock.json`（签入版本库）记录已安装 Skill 的来源与版本，用于
+`experimental_install` 恢复。全局锁文件 `~/.agents/.skill-lock.json` 记录
+所有已安装 Skill 的 `skillFolderHash`（GitHub tree SHA），用于 `update` 检测更新。
 
 ---
 
@@ -501,7 +499,9 @@ wittyhub install <skill-id> [选项]
 |------|----------|
 | 框架 | Vue 3 + Composition API + TypeScript |
 | 构建工具 | Vite |
-| 样式 | Tailwind CSS |
+| UI 组件库 | @opensig/opendesign + @opensig/opendesign-token |
+| 样式 | Tailwind CSS + SCSS（scoped） |
+| 状态管理 | Pinia |
 | HTTP | Axios |
 | 路由 | Vue Router 4 |
 | Markdown渲染 | marked |
@@ -512,25 +512,51 @@ wittyhub install <skill-id> [选项]
 
 ### 8.1 核心表结构
 
-#### skills 索引表
+#### skill_repos 表（仓库索引）
+
+```sql
+CREATE TABLE skill_repos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    repo_name VARCHAR(255) UNIQUE NOT NULL,
+    source VARCHAR(50) NOT NULL,           -- github, gitcode, gitee, local
+    platform VARCHAR(100),
+    branch VARCHAR(255),
+    url TEXT,                              -- 仓库克隆地址
+    local_path TEXT,                       -- 本地克隆路径
+    repository_commit_id VARCHAR(40),       -- 仓库当前 HEAD commit
+    skill_discover_status VARCHAR(50) NOT NULL DEFAULT 'init',  -- init/discovering/done/failed
+    skill_num INTEGER NOT NULL DEFAULT 0,
+    stars_count INTEGER NOT NULL DEFAULT 0,
+    forks_count INTEGER NOT NULL DEFAULT 0,
+    watchers_count INTEGER NOT NULL DEFAULT 0,
+    popularity_updated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+#### skills 表（latest 版本索引）
 
 ```sql
 CREATE TABLE skills (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    skill_id VARCHAR(255) UNIQUE NOT NULL,  -- 唯一标识，如 "vercel-labs/skills/find-skills"
+    skill_repo_id UUID NOT NULL REFERENCES skill_repos(id) ON DELETE CASCADE,
+    skill_id VARCHAR(255) UNIQUE NOT NULL,  -- 唯一标识，如 "github:owner/repo/find-skills"
     name VARCHAR(255) NOT NULL,
     description TEXT,
 
     -- 版本信息
-    version VARCHAR(50),
-    commit_id VARCHAR(40),
+    version VARCHAR(255),                   -- Tag 版本号；latest 为 NULL
+    commit_id VARCHAR(40),                  -- 仓库 HEAD commit（latest）或 Tag commit
+    tree_hash VARCHAR(40),                  -- Skill 目录的 tree hash（安全审计复用 key）
 
     -- 作者信息
     author VARCHAR(255),
 
     -- 来源信息
-    source VARCHAR(50) NOT NULL,           -- github, gitcode, gitee, local, clawhub
+    source VARCHAR(50) NOT NULL,           -- github, gitcode, gitee, local
     source_url TEXT NOT NULL,
+    repo_url TEXT,
 
     -- 分类和标签
     category VARCHAR(100),
@@ -541,12 +567,15 @@ CREATE TABLE skills (
     extra_metadata JSONB,
 
     -- Skill内容
-    content TEXT,                          -- skill.md 内容
+    content TEXT,                          -- SKILL.md 内容
 
     -- 统计信息
-    risk_score INTEGER,
+    risk_score INTEGER,                    -- 0-100 风险评分
     download_count INTEGER DEFAULT 0,
-    rating DECIMAL(3,2),
+    rating VARCHAR(10),
+
+    -- 向量检索
+    embedding VECTOR(768),                 -- pgvector 向量列
 
     -- 时间戳
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -554,11 +583,43 @@ CREATE TABLE skills (
     last_indexed_at TIMESTAMPTZ
 );
 
+CREATE INDEX idx_skills_skill_repo_id ON skills(skill_repo_id);
 CREATE INDEX idx_skills_category ON skills(category);
 CREATE INDEX idx_skills_platform ON skills(platform);
 CREATE INDEX idx_skills_source ON skills(source);
 CREATE INDEX idx_skills_tags ON skills USING GIN(tags);
 CREATE INDEX idx_skills_created_at ON skills(created_at DESC);
+```
+
+#### skill_versions 表（Tag 版本快照）
+
+```sql
+CREATE TABLE skill_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    skill_repo_id UUID NOT NULL REFERENCES skill_repos(id) ON DELETE CASCADE,
+    skill_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    version VARCHAR(255) NOT NULL,          -- Tag 版本号
+    commit_id VARCHAR(40),                 -- Tag commit
+    tree_hash VARCHAR(40),                  -- Skill 目录在该 Tag ref 下的 tree hash
+    author VARCHAR(255),
+    source VARCHAR(50) NOT NULL,
+    source_url TEXT NOT NULL,
+    repo_url TEXT,
+    category VARCHAR(100),
+    tags TEXT[],
+    platform VARCHAR(100),
+    extra_metadata JSONB,
+    content TEXT,
+    risk_score INTEGER,
+    rating VARCHAR(10),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_skill_versions_repo_id ON skill_versions(skill_repo_id);
+CREATE INDEX idx_skill_versions_skill_id ON skill_versions(skill_id, version);
 ```
 
 #### agents 表
@@ -590,7 +651,7 @@ CREATE TABLE security_audits (
     resource_id UUID NOT NULL,
     version VARCHAR(50),
     commit_id VARCHAR(40),
-    audit_type VARCHAR(50) NOT NULL,        -- 'socket.dev', 'static'
+    audit_type VARCHAR(50) NOT NULL,        -- 'skillspector'
     risk_level VARCHAR(20) NOT NULL,        -- critical, high, medium, low, unknown
     risk_signals JSONB DEFAULT '[]',
     details JSONB DEFAULT '{}',
@@ -631,13 +692,17 @@ CREATE TABLE download_history (
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/skills/` | 列表技能（分页、过滤） |
+| GET | `/skills/` | 列表技能（分页、过滤、排序） |
 | POST | `/skills/` | 创建技能（触发安全审计） |
 | GET | `/skills/{skill_id}` | 获取技能详情 |
+| PUT | `/skills/{skill_id}` | 更新技能 |
 | DELETE | `/skills/{skill_id}` | 删除技能 |
-| GET | `/skills/{skill_id}/download` | 获取下载链接 |
+| GET | `/skills/{skill_id}/download` | 下载 Skill ZIP（`?version=` 指定 Tag 版本） |
 | GET | `/skills/{skill_id}/audit` | 获取安全审计结果 |
-| GET | `/skills/{repo}/{skill_name}/versions` | 获取版本历史 |
+| GET | `/skills/{skill_id}/audit/report` | 获取安全审计 Markdown 报告 |
+| POST | `/skills/{skill_id}/audit` | 触发安全审计（by-URL 扫描） |
+| GET | `/skills/versions/{skill_id}` | 获取版本历史列表 |
+| GET | `/skills/telemetry` | 前端遥测数据上报端点 |
 
 #### Agents API
 
@@ -782,8 +847,11 @@ crawler:
   max_tags_per_repo: 5
 
 security:
-  socket_api_key: ""
   enable_audit: true
+  skillspector_jenkins_url: "http://localhost:8083"
+  skillspector_jenkins_user: "admin"
+  skillspector_jenkins_token: ""   # 敏感字段，建议通过环境变量注入
+  skillspector_timeout: 600
 
 app:
   host: 0.0.0.0
@@ -798,7 +866,7 @@ app:
 
 ### 11.1 短期扩展
 
-- [ ] 爬虫自动发现系统
+- [x] 爬虫自动发现系统（skillcrawler discover 已实现）
 - [ ] 标签页浏览功能
 - [ ] 开发者页
 
@@ -827,7 +895,7 @@ app:
 - [Vue.js](https://vuejs.org/)
 - [Tailwind CSS](https://tailwindcss.com/)
 - [Typer](https://typer.tiangolo.com/)
-- [Socket.dev](https://socket.dev/)
+- [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector)
 
 ### B. 术语表
 
@@ -840,7 +908,7 @@ app:
 | pgvector | PostgreSQL 向量搜索扩展 |
 | Embedding | 文本向量表示，用于语义相似度计算 |
 | RRF | Reciprocal Rank Fusion，混合搜索排序融合算法 |
-| Socket.dev | npm包安全检测服务 |
+| SkillSpector | NVIDIA 开源的 Agent Skills 供应链安全扫描器，通过 Jenkins Job 执行 |
 
 ---
 

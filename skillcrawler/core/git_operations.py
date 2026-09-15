@@ -340,31 +340,6 @@ class GitOperations:
             return False
         return True
 
-    # ── Version snapshots ──────────────────────────────────────────
-
-    @staticmethod
-    def build_repository_version_snapshots(
-        repository_git_metadata: dict[str, Any],
-        as_optional_str,
-        as_optional_str_list,
-    ) -> list[dict[str, str]]:
-        latest_tags = as_optional_str_list(repository_git_metadata.get('latest_tags')) or []
-        latest_tag_commits = repository_git_metadata.get('latest_tag_commits') or {}
-        snapshots: list[dict[str, str]] = []
-
-        for tag in latest_tags:
-            commit_id = as_optional_str(latest_tag_commits.get(tag))
-            if commit_id is None:
-                continue
-            snapshots.append({
-                'ref': tag,
-                'version': tag,
-                'commit_id': commit_id,
-                'version_source': 'tag',
-            })
-
-        return snapshots
-
     # ── Git command execution ──────────────────────────────────────
 
     def _run_git_command_with_auth_retry(

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.security.detector import (
     MAX_REPORT_FETCH_ATTEMPTS,
@@ -256,3 +256,169 @@ def test_fetch_external_report_md_error_returns_none():
     detector = _detector_with_client(client)
     with patch.object(client, "fetch_report_md", side_effect=RuntimeError("boom")):
         assert _await(detector.fetch_external_report_md(42)) is None
+
+
+def test_maybe_compress_details_keeps_small_reports_untouched():
+    """Issue #10: details ≤1MB are persisted verbatim (zero changes)."""
+    from src.security.detector import MAX_DETAILS_BYTES, _maybe_compress_details
+
+    snippet = "c" * 10_000
+    details = {
+        "skillspector_report": {
+            "issues": [
+                {
+                    "id": "issue-1",
+                    "code_snippet": snippet,
+                    "location": {"file": "app.py", "start_line": 3},
+                }
+            ]
+        }
+    }
+    # ensure the fixture is actually below the threshold
+    assert len(details["skillspector_report"]["issues"][0]["code_snippet"]) < MAX_DETAILS_BYTES
+
+    result = _maybe_compress_details(details)
+
+    assert result is details
+    issue = details["skillspector_report"]["issues"][0]
+    assert issue["code_snippet"] == snippet
+    assert "truncated" not in issue
+    assert issue["location"] == {"file": "app.py", "start_line": 3}
+
+
+def test_maybe_compress_details_truncates_large_snippets_only():
+    """Issue #10: only code_snippet of oversized reports is truncated."""
+    from src.security.detector import SNIPPET_MAX_CHARS, _maybe_compress_details
+
+    snippet = "c" * 200_000
+    details = {
+        "other_key": "x" * 2_000_000,  # 把 details 撑到 >1MB
+        "skillspector_report": {
+            "risk_assessment": {"severity": "HIGH", "score": 65},
+            "issues": [
+                {
+                    "id": "issue-1",
+                    "code_snippet": snippet,
+                    "finding": "prompt injection",
+                    "remediation": "sanitize input",
+                    "explanation": "e" * 300,
+                    "location": {"file": "app.py", "start_line": 42},
+                },
+                {
+                    "id": "issue-2",
+                    "code_snippet": "short",
+                    "location": {"file": "b.py", "start_line": 1},
+                },
+            ],
+        },
+    }
+
+    _maybe_compress_details(details)
+
+    report = details["skillspector_report"]
+    long_issue = report["issues"][0]
+    short_issue = report["issues"][1]
+    # 超长 snippet 截断：前 500 字符 + 尾部标记
+    assert long_issue["code_snippet"].startswith(snippet[:SNIPPET_MAX_CHARS])
+    assert f"original {len(snippet)} chars" in long_issue["code_snippet"]
+    assert len(long_issue["code_snippet"]) <= SNIPPET_MAX_CHARS + 60
+    assert long_issue["truncated"] is True
+    # 其余字段原样保留
+    assert long_issue["finding"] == "prompt injection"
+    assert long_issue["remediation"] == "sanitize input"
+    assert long_issue["location"] == {"file": "app.py", "start_line": 42}
+    # 未超长的 issue 不动
+    assert short_issue["code_snippet"] == "short"
+    assert "truncated" not in short_issue
+
+
+def test_maybe_compress_details_tolerates_malformed_report():
+    """Issue #10: non-dict report / non-list issues / None snippet are skipped."""
+    from src.security.detector import _maybe_compress_details
+
+    for details in (
+        {"skillspector_report": "not-a-dict", "pad": "x" * 2_000_000},
+        {"skillspector_report": {"issues": "not-a-list"}, "pad": "x" * 2_000_000},
+        {"skillspector_report": {"issues": [{"code_snippet": None}]}, "pad": "x" * 2_000_000},
+        {"skillspector_report": {"issues": [{"code_snippet": 12345}]}, "pad": "x" * 2_000_000},
+        {"no_report_key": "x" * 2_000_000},
+    ):
+        _maybe_compress_details(details)  # 不抛异常即可
+        report = details.get("skillspector_report")
+        if isinstance(report, dict) and isinstance(report.get("issues"), list):
+            for issue in report["issues"]:
+                assert "truncated" not in issue
+
+
+class _AsyncSessionCtx:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def test_collector_failure_isolation_continues_batch():
+    """Issue #8: a single failing audit must not break the rest of the batch.
+
+    After ``session.rollback()`` all ORM instances are expired; the collector
+    must keep working from snapshot values instead of touching expired
+    attributes (MissingGreenlet).
+    """
+    import asyncio
+
+    from sqlalchemy.dialects import postgresql
+
+    from src.security.detector import SkillspectorClient, SkillspectorCollector
+
+    class FakeAudit:
+        def __init__(self, audit_id, resource_id, details):
+            self.id = audit_id
+            self.resource_type = "skill"
+            self.resource_id = resource_id
+            self.details = details
+            self.risk_signals = []
+
+    def fake_get_build_status(build_number):
+        if build_number == 1:
+            raise RuntimeError("jenkins boom")
+        return "SUCCESS"
+
+    def fake_fetch_report_with_status(build_number):
+        return ({"risk_assessment": {"severity": "LOW", "score": 10}}, 200)
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.get = AsyncMock(return_value=None)
+
+    collector = SkillspectorCollector(
+        client=client,
+        session_factory=lambda: _AsyncSessionCtx(session),
+        poll_interval=0,
+    )
+
+    audit_1 = FakeAudit(1, "skill-1", {"skillspector_async": True, "skillspector_build_number": 1})
+    audit_2 = FakeAudit(2, "skill-2", {"skillspector_async": True, "skillspector_build_number": 2})
+
+    with (
+        patch.object(client, "get_build_status", side_effect=fake_get_build_status),
+        patch.object(client, "fetch_report_with_status", side_effect=fake_fetch_report_with_status),
+        patch.object(collector, "_fetch_pending", new=AsyncMock(return_value=[audit_1, audit_2])),
+    ):
+        processed = asyncio.run(collector.collect_once())
+
+    # Failure isolated: item 1 rolled back, item 2 still collected.
+    assert processed == 1
+    session.rollback.assert_awaited_once()
+
+    # 小报告（≤1MB）完整原样入库，skillspector_report 仍保留
+    update_stmt = session.execute.await_args_list[0].args[0]
+    written = update_stmt.compile(dialect=postgresql.dialect()).params
+    stored_report = written["details"]["skillspector_report"]
+    assert stored_report["risk_assessment"]["severity"] == "LOW"

@@ -12,7 +12,7 @@ import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
 import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
-import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
+import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton, OPopover, OIconInfoTip } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const route = useRoute()
@@ -47,6 +47,19 @@ function openExternalUrl() {
   window.open(externalUrl.value, '_blank', 'noopener')
   externalDialogVisible.value = false
   oaReport('click_external_source', { module: 'skill_detail', skill_id: skill.value?.skill_id, host: (() => { try { return new URL(externalUrl.value).host } catch { return '' } })() })
+}
+
+/** 进入该 Skill 的风险评估报告页 */
+function goRiskReport() {
+  if (!skill.value) return
+  oaReport('click_risk_report', { module: 'skill_detail', skill_id: skill.value.skill_id })
+  router.push(`/skills/${encodeURIComponent(skill.value.skill_id)}/report`)
+}
+
+/** 「风险评估说明」浮层的查看详情：打开安全评估说明文档（docs/skillhub-security-audit.md） */
+function goSecurityDoc() {
+  oaReport('click_risk_guide', { module: 'skill_detail', skill_id: skill.value?.skill_id })
+  router.push('/docs/skillhub-security-audit')
 }
 
 // ===== Shiki 代码高亮 =====
@@ -149,12 +162,15 @@ const filteredVersions = computed(() => {
   return versions.value.filter(v => v.version === selectedVersion.value)
 })
 
-function getSecurityLevel(score: number | null): { label: string; class: string } {
-  if (score === null) return { label: '未检测', class: 'tag-gray' }
-  if (score <= 20) return { label: '安全', class: 'tag-green' }
-  if (score <= 50) return { label: '低风险', class: 'tag-blue' }
-  if (score <= 80) return { label: '中风险', class: 'tag-orange' }
-  return { label: '高风险', class: 'tag-red' }
+// riskClass/arcColor/arcPath 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
+// 圆弧比例（从 12 点方向起顺时针，stroke-linecap: butt 直角端头与设计稿一致）：
+//   安全 1/4(90°) → 3点(右)；低风险 1/2(180°) → 6点(下)；中风险 3/4(270°) → 9点(左)；高风险 全环
+function getSecurityLevel(score: number | null): { label: string; class: string; riskClass: string; arcColor: string; arcPath: string; arcFull: boolean; desc: string } {
+  if (score === null) return { label: '未检测', class: 'tag-gray', riskClass: 'risk-gray', arcColor: '', arcPath: '', arcFull: false, desc: '暂无风险评估数据' }
+  if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', arcPath: 'M 70 7 A 63 63 0 0 1 133 70', arcFull: false, desc: '无显著风险，可以放心使用' }
+  if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', arcPath: 'M 70 7 A 63 63 0 0 1 70 133', arcFull: false, desc: '风险较低，可以正常使用' }
+  if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', arcPath: 'M 70 7 A 63 63 0 1 1 7 70', arcFull: false, desc: '存在一定风险，建议谨慎使用' }
+  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', arcPath: '', arcFull: true, desc: '存在较高风险，建议谨慎使用' }
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
@@ -478,6 +494,80 @@ onMounted(async () => {
                   <span class="info-label">版本</span>
                   <span class="info-value">{{ skill.version || '-' }}</span>
                 </div>
+              </div>
+            </div>
+
+            <!-- ========== 风险评估卡片（设计稿-使用描述画板） ========== -->
+            <div class="risk-card">
+              <div class="risk-card-header">
+                <h3 class="risk-card-title">风险评估</h3>
+                <OPopover
+                  position="top"
+                  trigger="hover"
+                  wrap-class="risk-popover"
+                  anchor-class="risk-popover-anchor"
+                  :adjust-width="false"
+                  :adjust-min-width="false"
+                >
+                  <div class="risk-popover-body">
+                    <p class="risk-popover-title">风险评估说明</p>
+                    <p class="risk-popover-desc">综合得分基于 17 个安全维度，加权统计后给出总体安全等级。</p>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">0-20 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-green">安全</span>
+                    </div>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">21-50 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-blue">低风险</span>
+                    </div>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">51-80 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-orange">中风险</span>
+                    </div>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">81-100 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-red">高风险</span>
+                    </div>
+                    <a class="risk-popover-link" href="javascript:void(0)" @click="goSecurityDoc">查看详情</a>
+                  </div>
+                  <template #target>
+                    <span class="risk-info-trigger"><OIconInfoTip /></span>
+                  </template>
+                </OPopover>
+              </div>
+
+              <div class="risk-gauge-wrap">
+                <div class="risk-gauge">
+                  <svg class="risk-gauge-svg" viewBox="0 0 140 140">
+                    <circle class="risk-gauge-track" cx="70" cy="70" r="63" />
+                    <!-- 高风险：完整圆环，circle 默认从 3 点起，旋转 -90° 使其从 12 点起 -->
+                    <circle
+                      v-if="securityLevel.arcFull"
+                      class="risk-gauge-arc risk-gauge-arc-full"
+                      cx="70"
+                      cy="70"
+                      r="63"
+                      transform="rotate(-90 70 70)"
+                      :style="{ stroke: securityLevel.arcColor }"
+                    />
+                    <!-- 其他等级：按比例弧（path 从 12 点起顺时针，直角端头） -->
+                    <path
+                      v-else-if="securityLevel.arcPath"
+                      class="risk-gauge-arc"
+                      :d="securityLevel.arcPath"
+                      :style="{ stroke: securityLevel.arcColor }"
+                    />
+                  </svg>
+                  <div class="risk-gauge-center">
+                    <span class="risk-score">{{ skill.risk_score ?? '-' }}</span>
+                    <span class="risk-score-label">风险得分</span>
+                  </div>
+                </div>
+                <span :class="['risk-tag', securityLevel.riskClass]">{{ securityLevel.label }}</span>
+                <p class="risk-desc">{{ securityLevel.desc }}</p>
+                <OButton class="risk-report-btn" color="primary" variant="text" size="large" round="pill" @click="goRiskReport">
+                  查看风险评估报告
+                </OButton>
               </div>
             </div>
           </div>
@@ -881,6 +971,178 @@ onMounted(async () => {
       fill: currentColor;
     }
   }
+}
+
+/* ===== 风险评估卡片（设计稿-使用描述画板） ===== */
+.risk-card {
+  background: var(--o-color-fill2);
+  border-radius: 4px;
+  padding: 32px;
+}
+
+.risk-card-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.risk-card-title {
+  margin: 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 22px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+/* 标题旁 ⓘ 说明图标（设计稿 提示/形状结合） */
+.risk-info-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--o-color-primary1);
+  cursor: pointer;
+
+  svg {
+    width: 24px;
+    height: 24px;
+    display: block;
+  }
+}
+
+.risk-gauge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 24px;
+}
+
+.risk-gauge-wrap .risk-tag {
+  margin-top: 12px;
+}
+
+/* 风险得分仪表盘：140px 圆环，环厚 14px，12 点起顺时针 90° 弧（与设计稿一致） */
+.risk-gauge {
+  position: relative;
+  width: 140px;
+  height: 140px;
+}
+
+.risk-gauge-svg {
+  width: 140px;
+  height: 140px;
+  display: block;
+}
+
+.risk-gauge-track {
+  fill: none;
+  stroke: rgb(var(--o-brand-1));
+  stroke-width: 14;
+}
+
+.risk-gauge-arc {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: butt;
+}
+
+.risk-gauge-arc-full {
+  fill: none;
+  stroke-width: 14;
+}
+
+.risk-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.risk-score {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: 0px;
+  color: var(--o-color-info1);
+}
+
+.risk-score-label {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0px;
+  color: var(--o-color-info3);
+}
+
+/* 风险等级标签：24px 高、12px 文字（设计稿 标签 Tag/状态标签） */
+.risk-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0px;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.risk-green {
+  background: var(--o-color-success1);
+  color: #ffffff;
+}
+
+.risk-blue {
+  background: #497af8;
+  color: #ffffff;
+}
+
+.risk-orange {
+  background: var(--o-color-warning1);
+  color: #ffffff;
+}
+
+.risk-red {
+  background: var(--o-color-danger1);
+  color: #ffffff;
+}
+
+.risk-gray {
+  border: 1px solid var(--o-color-control4);
+  background: transparent;
+  color: var(--o-color-info1);
+}
+
+.risk-desc {
+  margin: 12px 0 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: center;
+  color: var(--o-color-info3);
+}
+
+.risk-card .risk-report-btn {
+  margin-top: 12px;
+  font-family: HarmonyHeiTi;
+
+  /* 设计稿链接按钮为品牌色文字（组件 text 变体默认 info1，需提高优先级覆盖） */
+  --btn-color: var(--o-color-primary1) !important;
 }
 
 /* ===== Tab 导航 (OTab button variant) ===== */
@@ -1469,5 +1731,117 @@ onMounted(async () => {
 
 [data-o-theme='e.dark'] .version-dropdown .o-dropdown-item {
   color: var(--o-color-info1);
+}
+
+/* ===== 风险评估说明浮层（设计稿 气泡提示 Popover） ===== */
+/* OPopover teleport 到 body，样式需全局；宽度 375 含内边距 */
+.risk-popover {
+  width: 375px;
+  box-sizing: border-box;
+  --popup-radius: 8px;
+  --popup-bd: 1px solid rgba(0, 0, 0, 0.1);
+  --popup-shadow: 0 2px 24px rgba(0, 0, 0, 0.15);
+  --popup-padding: 16px 16px 8px;
+}
+
+[data-o-theme='e.dark'] .risk-popover {
+  --popup-bd: 1px solid rgba(255, 255, 255, 0.15);
+  --popup-shadow: 0 2px 24px rgba(255, 255, 255, 0.12);
+}
+
+/* 指向三角：18x11 圆润弧形，与设计稿 指示三角 一致 */
+.risk-popover-anchor {
+  width: 18px !important;
+  height: 11px !important;
+  /* JS 以 bottom:0 定位锚点，向下位移一个高度使三角露出卡片外 */
+  transform: translate(-50%, calc(100% - 1px)) rotate(0deg) !important;
+  background-color: var(--popup-bg-color) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  clip-path: path('M 0 0 L 18 0 C 18 5.5 13.5 8.5 9 11 C 4.5 8.5 0 5.5 0 0 Z');
+}
+
+.risk-popover-title {
+  margin: 0 0 4px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+.risk-popover-desc {
+  margin: 0 0 10px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info2);
+}
+
+.risk-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 24px;
+  margin-bottom: 10px;
+}
+
+.risk-popover-row:last-of-type {
+  margin-bottom: 8px;
+}
+
+.risk-popover-label {
+  display: inline-flex;
+  align-items: center;
+  width: 100px;
+  flex-shrink: 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info2);
+  /* 设计稿为单行文本（高22px），防止回退字体过宽导致换行 */
+  white-space: nowrap;
+
+  /* 分数前缀圆点（设计稿列表项目符号）：3px 实心圆，左缩进 9px 时圆点占 +9~+12、文字墨迹起点 +22，与设计稿逐像素对齐 */
+  &::before {
+    content: '';
+    display: inline-block;
+    flex-shrink: 0;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    margin: 0 9px;
+  }
+}
+
+.risk-tag-fixed {
+  width: 60px;
+  padding: 0;
+}
+
+.risk-popover-link {
+  align-self: flex-start;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-link1);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.risk-popover-link:hover {
+  text-decoration: underline;
 }
 </style>

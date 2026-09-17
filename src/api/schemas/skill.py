@@ -99,6 +99,114 @@ class SecurityAuditResponse(BaseModel):
     audited_at: datetime
 
 
+class AuditReportStats(BaseModel):
+    """风险条数统计（按展示分组）。"""
+
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+    total: int = 0
+
+
+class AuditReportDimensionRef(BaseModel):
+    """四大类下属的风险维度引用（层级关系：分类 -> 17 个维度）。"""
+
+    key: str
+    name: str
+
+
+class AuditReportCategory(BaseModel):
+    """风险分类聚合（四类之一）。"""
+
+    key: str
+    name: str
+    description: str
+    dimension_count: int
+    dimensions: list[AuditReportDimensionRef] = Field(default_factory=list)
+    stats: AuditReportStats
+
+
+class AuditReportRuleRow(BaseModel):
+    """维度下的检测项聚合（“风险检测详情”的行：检测项 -> 命中项）。"""
+
+    rule_id: str
+    rule_name: str | None = None
+    stats: AuditReportStats
+    max_severity_group: str
+    remediation: str | None = None
+
+
+class AuditReportDimension(BaseModel):
+    """按风险维度聚合的命中项（“风险检测详情”的聚合行）。"""
+
+    key: str
+    name: str
+    category_key: str
+    description: str
+    rule_ids: list[str] = Field(default_factory=list)
+    rules: list[AuditReportRuleRow] = Field(default_factory=list)
+    stats: AuditReportStats
+    max_severity_group: str
+    remediation: str | None = None
+
+
+class AuditReportLocation(BaseModel):
+    file: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+
+
+class AuditReportFinding(BaseModel):
+    """一条风险明细（“风险检测详情”展开后的 issue 行，文案为中文）。"""
+
+    id: str
+    rule_id: str
+    rule_name: str | None = None
+    title: str
+    dimension: str
+    dimension_key: str
+    category_key: str
+    severity: str
+    severity_group: str
+    status: str
+    remediation: str | None = None
+    location: AuditReportLocation | None = None
+    code_snippet: str | None = None
+    truncated: bool = False
+
+
+class AuditReportResponse(BaseModel):
+    """Skill 风险评估报告（详情页“查看风险评估报告”数据源）。
+
+    ``has_report`` 为 False 时 ``reason`` 说明原因（no_audit / report_unavailable），
+    其余字段为初始值。
+    """
+
+    skill_id: str
+    skill_name: str
+    source_url: str | None = None
+    repo_url: str | None = None
+    version: str | None = None
+    has_report: bool = False
+    reason: str | None = None
+    generated_at: datetime | None = None
+    engine: str | None = None
+    engine_version: str | None = None
+    score: int | None = None
+    level: str | None = None
+    level_label: str | None = None
+    level_description: str | None = None
+    recommendation: str | None = None
+    summary: str | None = None
+    # 规则目录规模（“检测项”总数，静态值，与命中项数无关）
+    rule_count: int = 0
+    stats: AuditReportStats | None = None
+    categories: list[AuditReportCategory] = Field(default_factory=list)
+    dimensions: list[AuditReportDimension] = Field(default_factory=list)
+    findings: list[AuditReportFinding] = Field(default_factory=list)
+    findings_truncated: bool = False
+
+
 class AuditByUrlRequest(BaseModel):
     """One-off security audit for a skill repository URL or a SKILL.md URL.
 

@@ -17,6 +17,7 @@ from src.api.schemas.skill import (
     AuditByUrlResultResponse,
     ContributorListResponse,
     ContributorResponse,
+    AuditReportResponse,
     ErrorResponse,
     ContributorSkillsResponse,
     SecurityAuditResponse,
@@ -25,6 +26,7 @@ from src.api.schemas.skill import (
     SkillResponse,
     SkillVersionsResponse,
 )
+from src.api.services.audit_report import build_audit_report
 from src.api.services.categories import category_label
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
@@ -276,6 +278,34 @@ async def audit_skill(
         )
 
     return {"error": "No audit found"}
+
+
+@router.get(
+    "/{skill_id:path}/audit-report",
+    response_model=AuditReportResponse,
+)
+async def get_skill_audit_report(
+    skill_id: SkillIdPath,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the aggregated risk assessment report for a skill.
+
+    Read-only aggregation on top of ``GET /{skill_id}/audit``: re-derives the four
+    risk categories, severity stats and per-finding rows from the SkillSpector
+    report stored in ``security_audits.details``.  When no audit row or no parsed
+    report exists, ``has_report`` is false and ``reason`` explains why; unknown
+    skills still return 404.
+    """
+    repo = SkillRepository(db)
+    skill = await repo.get_by_skill_id(skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    security_service = SecurityService(db)
+    latest_audit = await security_service.audit_repo.get_latest_by_resource("skill", skill.id)
+
+    return AuditReportResponse.model_validate(build_audit_report(skill, latest_audit))
 
 
 @router.post(

@@ -4,6 +4,7 @@ import type {
   SkillListResponse,
   SearchResponse,
   SecurityAudit,
+  AuditReport,
   DownloadResponse,
   SkillVersionsResponse,
   Stats,
@@ -86,6 +87,12 @@ export const api = {
 
   async getSkillAudit(skillId: string): Promise<SecurityAudit | { error: string }> {
     const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/audit`)
+    return data
+  },
+
+  /** 风险评估报告：四大类 / 17 维度 / 检测项逐层聚合的完整报告（评分、等级、统计、命中项明细） */
+  async getSkillAuditReport(skillId: string): Promise<AuditReport> {
+    const { data } = await client.get(`/skills/${encodeURIComponent(skillId)}/audit-report`)
     return data
   },
 

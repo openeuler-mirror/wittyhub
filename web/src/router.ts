@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from '@/pages/Home.vue'
 import SkillDetail from '@/pages/SkillDetail.vue'
+import SkillRiskReport from '@/pages/SkillRiskReport.vue'
+import DocsPage from '@/pages/DocsPage.vue'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const router = createRouter({
@@ -12,6 +14,11 @@ const router = createRouter({
       component: Home
     },
     {
+      path: '/docs/:doc',
+      name: 'docs',
+      component: DocsPage
+    },
+    {
       path: '/skills/search',
       name: 'search',
       component: Home
@@ -20,6 +27,12 @@ const router = createRouter({
       path: '/skills/categories/:category',
       name: 'category',
       component: Home
+    },
+    // 必须声明在详情路由（贪婪的 :skillId(.*)）之前，避免被其吞掉
+    {
+      path: '/skills/:skillId(.*)/report',
+      name: 'skill-risk-report',
+      component: SkillRiskReport
     },
     {
       path: '/skills/:skillId(.*)',

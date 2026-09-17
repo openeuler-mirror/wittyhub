@@ -44,6 +44,7 @@ class SkillRepoModel(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     skills: Mapped[list["Skill"]] = relationship(
         back_populates="skill_repo",
         cascade="all, delete-orphan",
@@ -58,6 +59,7 @@ class SkillRepoModel(Base):
         Index("idx_skill_repos_platform", "platform"),
         Index("idx_skill_repos_status", "skill_discover_status"),
         Index("idx_skill_repos_created_at", desc("created_at")),
+        Index("idx_skill_repos_author", "author"),
     )
 
 
@@ -262,4 +264,32 @@ class DownloadHistory(Base):
     __table_args__ = (
         Index("idx_downloads_resource", "resource_type", "resource_id"),
         Index("idx_downloads_date", desc("downloaded_at")),
+    )
+
+
+class Contributor(Base):
+    __tablename__ = "contributors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    author: Mapped[str] = mapped_column(String(255), nullable=False)
+    platform: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    git_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
+    website: Mapped[str | None] = mapped_column(Text, nullable=True)
+    repo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skill_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source", "author", name="uq_contributors_source_author"),
+        Index("idx_contributors_source", "source"),
+        Index("idx_contributors_platform", "platform"),
+        Index("idx_contributors_skill_count", desc("skill_count")),
+        Index("idx_contributors_created_at", desc("created_at")),
     )

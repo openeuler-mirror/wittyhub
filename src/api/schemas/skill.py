@@ -164,4 +164,49 @@ class SkillVersionsResponse(BaseModel):
     versions: list[SkillResponse]
 
 
+class ContributorSkillsResponse(BaseModel):
+    """Contributor（source + author）下的全部 skills 聚合视图。"""
+
+    source: str
+    author: str
+    platform: str | None = None
+    name: str | None = None
+    description: str | None = None
+    git_profile: str | None = None
+    website: str | None = None
+    skill_count: int
+    total_downloads: int
+    skills: list[SkillResponse]
+    total: int
+    skip: int
+    limit: int
+
+
+class ContributorResponse(BaseModel):
+    """贡献者列表中的单项概要。"""
+
+    id: str
+    source: str
+    author: str
+    platform: str | None = None
+    name: str | None = None
+    description: str | None = None
+    avatar_url: str | None = None
+    git_profile: str | None = None
+    website: str | None = None
+    repo_url: str | None = None
+    skill_count: int
+    total_downloads: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContributorListResponse(BaseModel):
+    contributors: list[ContributorResponse]
+    total: int
+    skip: int
+    limit: int
+    platform_counts: dict[str, int] = Field(default_factory=dict)
+
+
 SkillVersionResponse = SkillVersionsResponse

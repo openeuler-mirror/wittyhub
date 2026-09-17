@@ -15,7 +15,10 @@ from src.api.schemas.skill import (
     AuditByUrlRequest,
     AuditByUrlResponse,
     AuditByUrlResultResponse,
+    ContributorListResponse,
+    ContributorResponse,
     ErrorResponse,
+    ContributorSkillsResponse,
     SecurityAuditResponse,
     SkillCreate,
     SkillListResponse,
@@ -29,6 +32,7 @@ from src.core.auth import require_admin_token
 from src.core.database import get_db
 from src.core.rate_limit import limiter
 from src.models.repository import (
+    ContributorRepository,
     DownloadHistoryRepository,
     SkillRepoRepository,
     SkillRepository,
@@ -469,6 +473,98 @@ async def audit_by_url_report(
         content=md,
         media_type="text/markdown",
         headers={"Content-Disposition": disposition},
+    )
+
+
+@router.get("/contributors/{source}/{author}", response_model=ContributorSkillsResponse)
+async def get_contributor_skills(
+    source: Annotated[str, Path(max_length=50, description="平台来源：github / gitcode")],
+    author: Annotated[str, Path(max_length=255, description="contributor 名称（skills.author 精确匹配）")],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "download_count",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 contributor（source + author）名下全部可见 skills 的聚合视图。
+
+    platform/description/repo_url 取自 contributors 表（扫描时写入），
+    skill 列表 + total_downloads 从 skills 表实时查询。
+    """
+    contributor_repo = ContributorRepository(db)
+    contributor = await contributor_repo.get(source, author)
+    if not contributor:
+        raise HTTPException(status_code=404, detail="Contributor not found")
+
+    skill_repo = SkillRepository(db)
+    skills, total, total_downloads, _ = await skill_repo.get_contributor_skills(
+        source, author, skip=skip, limit=limit, sort_by=sort_by
+    )
+    if not total:
+        raise HTTPException(status_code=404, detail="Contributor has no visible skills")
+
+    return ContributorSkillsResponse(
+        source=source,
+        author=author,
+        platform=contributor.platform,
+        name=contributor.name,
+        description=contributor.description,
+        git_profile=contributor.git_profile,
+        website=contributor.website,
+        skill_count=total,
+        total_downloads=total_downloads,
+        skills=[skill_to_response(s) for s in skills],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get("/contributors", response_model=ContributorListResponse)
+async def list_contributors(
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    platform: Annotated[str | None, Query(max_length=100)] = None,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+    sort_by: Annotated[str, Query(pattern="^(skill_count|created_at)$")] = "skill_count",
+    db: AsyncSession = Depends(get_db),
+):
+    """列出所有贡献者，支持按 platform/keyword 筛选、按 skill 数量或注册时间排序。
+
+    ``platform_counts`` 返回当前 keyword 下各 platform 的命中数量（忽略 platform
+    筛选），前端标签页展示数量时使用。
+    """
+    repo = ContributorRepository(db)
+    rows, total, platform_counts = await repo.list(
+        skip=skip,
+        limit=limit,
+        platform=platform,
+        keyword=keyword,
+        sort_by=sort_by,
+    )
+    return ContributorListResponse(
+        contributors=[
+            ContributorResponse(
+                id=str(c.id),
+                source=c.source,
+                author=c.author,
+                platform=c.platform,
+                name=c.name,
+                description=c.description,
+                avatar_url=c.avatar_url,
+                git_profile=c.git_profile,
+                website=c.website,
+                repo_url=c.repo_url,
+                skill_count=c.skill_count,
+                total_downloads=downloads,
+                created_at=c.created_at,
+                updated_at=c.updated_at,
+            )
+            for c, downloads in rows
+        ],
+        total=total,
+        skip=skip,
+        limit=limit,
+        platform_counts=platform_counts,
     )
 
 

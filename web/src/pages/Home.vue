@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAppStore } from '@/stores/app'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
-import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading, OLink } from '@opensig/opendesign'
+import { OInput, OTab, OTabPane, OPagination, ODropdown, ODropdownItem, OLoading, OButton } from '@opensig/opendesign'
 import FilterSidebar from '@/components/FilterSidebar.vue'
 import SkillCard from '@/components/SkillCard.vue'
 import SkillListItem from '@/components/SkillListItem.vue'
@@ -12,10 +12,6 @@ import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import viewGridSvg from '@/assets/icons/view-grid.svg?raw'
 import viewListSvg from '@/assets/icons/view-list.svg?raw'
-import cardBgLight from '@/assets/bg/card-bg-light.png'
-import cardBgDark from '@/assets/bg/card-bg-dark.png'
-import submitSkillSvg from '@/assets/icons/submit-skill.svg?raw'
-import submitLinkSvg from '@/assets/icons/submit-link.svg?raw'
 import emptyStateSvg from '@/assets/icons/empty-state.svg?raw'
 
 const skillStore = useSkillStore()
@@ -149,6 +145,11 @@ function handleClear() {
   router.push('/')
   skillStore.setFilter('keyword', '')
   skillStore.fetchSkills()
+}
+
+function goToContributors() {
+  oaReport('click_contribute_guide', { module: 'home' })
+  router.push('/contributors')
 }
 
 function setSortBy(sort: 'hot' | 'latest' | 'downloads') {
@@ -360,47 +361,17 @@ function onPaginationChange(
         </div>
       </div>
 
-      <!-- 提交新Skill区 -->
-      <div class="mt-16 text-center">
-        <h2 class="submit-title">提交新Skill</h2>
-        <p class="text-[var(--o-color-info3)] text-base leading-6">参与社区贡献，与开发者共建SkillHub</p>
-      </div>
-
-      <div class="mt-8 overflow-hidden relative submit-wrapper" style="border-radius: var(--o-radius-s);">
-        <img :src="appStore.isDark ? cardBgDark : cardBgLight" alt="" class="absolute inset-0 w-full h-full object-cover pointer-events-none" />
-        <div class="relative p-8 submit-card">
-          <h3 class="text-lg font-semibold text-[var(--o-color-info1)] mb-4">在仓库中提交PR</h3>
-          <p class="submit-desc">
-            Fork <OLink href="https://gitcode.com/openeuler/wittyhub" target="_blank" rel="noopener noreferrer" color="normal" size="auto">openeuler/wittyhub</OLink> 仓库并Clone到本地，提交单个Skill 或 Skill 仓库链接，待PR审核通过后入仓，同步至首屏展示。
-          </p>
-
-          <div class="grid grid-cols-2 gap-8 submit-methods-grid">
-            <div>
-              <h3 class="method-title">方式1</h3>
-              <p class="method-sub-label">
-                <span v-html="submitSkillSvg"></span>
-                提交单个Skill
-              </p>
-              <p class="method-desc">
-                在skills目录下创建user/skillname目录，包含Skill.md 文件和其他依赖文件。
-              </p>
-            </div>
-
-            <div>
-              <h3 class="method-title">方式2</h3>
-              <p class="method-sub-label">
-                <span v-html="submitLinkSvg"></span>
-                提交Skill仓库链接，自动拉取Skill
-              </p>
-              <p class="method-desc">在skills/skill-repo.yaml里填写你的repo。</p>
-              <div class="code-sample">
-                <div>personal_repo:</div>
-                <div>&nbsp;&nbsp;- url: https://gitcode.com/user/reponame</div>
-                <div>&nbsp;&nbsp;&nbsp;&nbsp;branch: main  --选填</div>
-              </div>
-            </div>
-          </div>
-        </div>
+      <!-- 贡献你的Skill 横幅 -->
+      <div class="mt-8 submit-banner">
+        <h3 class="submit-banner-title">贡献你的Skill</h3>
+        <p class="submit-banner-desc">SkillHub 欢迎大家贡献可复用的Skills，一起丰富openEuler AI技能生态</p>
+        <OButton
+          color="primary"
+          variant="solid"
+          round="pill"
+          class="submit-banner-btn"
+          @click="goToContributors"
+        >查看 Skill 贡献指南</OButton>
       </div>
     </section>
   </div>
@@ -503,139 +474,52 @@ function onPaginationChange(
   color: #C9CDD4;
 }
 
-/* 提交新Skill 标题 */
-.submit-title {
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-medium);
-  font-size: 40px;
-  line-height: 56px;
-  letter-spacing: -0.32px;
+/* 贡献你的Skill 横幅 */
+.submit-banner {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8.18px;
+  padding: 44px 24px 32px;
   text-align: center;
-  color: var(--o-color-info1);
-  margin-bottom: 12px;
+  background:
+    radial-gradient(120% 100% at 85% 0%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(100deg, #dce6fb 0%, #e8effe 45%, #dfe9fd 100%);
 }
 
-[data-o-theme="e.dark"] .submit-title,
-.dark .submit-title {
+.submit-banner-title {
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: 32px;
-  line-height: normal;
-  letter-spacing: -0.32px;
-  text-align: center;
-}
-
-[data-o-theme="e.dark"] .submit-title + p,
-.dark .submit-title + p {
-  color: var(--o-color-info1);
-}
-
-/* 提交新Skill 描述文本 */
-.submit-desc {
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-font_size-text1);
-  line-height: var(--o-line_height-text1);
+  font-weight: var(--o-font_weight-semibold);
+  font-size: var(--o-font_size-h2);
+  line-height: var(--o-line_height-h2);
   letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info3);
+  color: var(--o-color-info1);
+  margin-bottom: 16px;
+}
+
+.submit-banner-desc {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-tip1);
+  line-height: var(--o-line_height-tip1);
+  letter-spacing: 0px;
+  color: var(--o-color-info1);
   margin-bottom: 24px;
 }
 
-/* 提交方式标题 */
-.method-title {
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-semibold);
-  font-size: var(--o-font_size-h3);
-  line-height: var(--o-line_height-h3);
-  letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info1);
-  margin-bottom: 8px;
-}
-
-/* 提交方式子标签 */
-.method-sub-label {
+/* 横幅按钮：深蓝实心胶囊 */
+.submit-banner-btn {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-font_size-text1);
-  line-height: var(--o-line_height-text1);
+  font-size: 14px;
+  line-height: 22px;
   letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info1);
-  margin-bottom: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 
-.method-sub-label svg {
-  background: #FFFFFF;
-  border-radius: 4px;
-}
-
-/* 提交方式描述 */
-.method-desc {
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-font_size-text1);
-  line-height: var(--o-line_height-text1);
-  letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info3);
-  margin-bottom: 12px;
-}
-
-/* 代码示例块 */
-.code-sample {
-  background: var(--o-color-control2-light);
-  border-radius: 4px;
-  padding: 12px;
-  font-family: HarmonyHeiTi;
-  font-weight: 400;
-  font-size: 12px;
-  line-height: 18px;
-  letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info3);
-}
-
-[data-o-theme="e.dark"] .code-sample,
-.dark .code-sample {
-  background: var(--o-color-control2-light);
-}
-
-/* 提交卡片 */
-.submit-wrapper {
-  background: #FFFFFF;
-}
-
-[data-o-theme="e.dark"] .submit-wrapper,
-.dark .submit-wrapper {
-  background: #242427;
-}
-
-.submit-card {
-  position: relative;
-  z-index: 1;
-  border-radius: var(--o-radius-s);
-}
-
-/* 方式1和方式2之间的竖分割线 */
-.submit-methods-grid {
-  position: relative;
-}
-
-.submit-methods-grid::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: var(--o-color-control4);
-  transform: translateX(-50%);
-  pointer-events: none;
+[data-o-theme="e.dark"] .submit-banner,
+.dark .submit-banner {
+  background:
+    radial-gradient(120% 100% at 85% 0%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(100deg, #222c47 0%, #283351 45%, #232d49 100%);
 }
 
 /* OTab button variant: 排序切换 (热门/最新) */

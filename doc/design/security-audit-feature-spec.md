@@ -484,6 +484,137 @@ async def get_external_report_md(build_number: int) -> str | None:
 }
 ```
 
+### 6.7 风险评估报告聚合（详情页报告页数据源）
+
+```
+GET /api/v1/skills/{skill_id}/audit-report
+```
+
+无需鉴权（与 `GET /audit` 一致），只读、不触发新扫描。Skill 不存在返回 `404`；无审计记录或
+报告不可解析时不报错，返回 `has_report=false` 并给出 `reason`，便于前端区分「未审计」与「报告不可用」。
+
+聚合逻辑（读取时派生，不落库）：基于 `security_audits.details` 中的 SkillSpector
+`report.json`，把 `issues[]` 按检测项（规则 ID）归入 17 个风险维度、再归入 4 个高层风险类，
+按严重度分组统计，输出维度聚合行与中文本地化明细。
+
+分类体系与中文本地化由 `src/api/services/skillspector_rules.py` 提供（文案与归属逐条对齐
+`RISK_MODEL_SUMMARY.md`）：
+
+| 层级 | 数量 | 说明 |
+|------|:---:|------|
+| 高层风险类 | 4 | 提示操控类 / 数据泄露类 / 权限与代码执行类 / 供应链风险类 |
+| 风险维度 | 17 | 5（提示操控）+ 2（数据泄露）+ 9（权限与代码执行）+ 1（供应链），与设计稿一致 |
+| 检测项 | 89 | 规则 ID → 维度 + 中文名称 + 中文修复建议；含文档「扩展规则」（AS / SSRF / DS / BH） |
+
+维度归类优先级：报告自带 `issues[].category` → 检测项目录（规则 ID 精确映射）→
+规则 ID 前缀兜底（`AST`/`TT`/`YR`/`SSRF` 等）→ 兜底「危险代码语法」。
+风险描述与修复建议只输出中文：命中检测项目录时用目录文案，未命中时退回维度级中文说明，
+不再透出 SkillSpector 英文原文。
+
+**返回** `AuditReportResponse`：
+
+```json
+{
+    "skill_id": "github:openeuler/find-skills/find-skills",
+    "skill_name": "find-skills",
+    "source_url": "https://gitcode.com/.../SKILL.md",
+    "repo_url": "https://gitcode.com/openeuler/find-skills",
+    "version": "1.0.0",
+    "has_report": true,
+    "reason": null,
+    "generated_at": "2026-08-22T14:32:00Z",
+    "engine": "NVIDIA SkillSpector",
+    "engine_version": "2.4.1",
+    "score": 12,
+    "level": "safe",
+    "level_label": "安全",
+    "level_description": "无显著风险，可以放心使用",
+    "recommendation": "SAFE",
+    "summary": "该 Skill 综合得分 12/100，评估等级为安全，共检测到 2 项高风险、1 项中风险、1 项低风险。建议保持当前的权限与依赖管理实践。",
+    "rule_count": 89,
+    "stats": { "high": 10, "medium": 12, "low": 15, "total": 37 },
+    "categories": [
+        {
+            "key": "prompt",
+            "name": "提示操控类",
+            "description": "操控大模型意图：指令覆盖、越狱、记忆投毒、泄露系统提示词",
+            "dimension_count": 5,
+            "dimensions": [
+                { "key": "prompt_injection", "name": "提示注入" },
+                { "key": "system_prompt_leakage", "name": "系统提示泄露" },
+                { "key": "memory_poisoning", "name": "记忆投毒" },
+                { "key": "anti_refusal", "name": "反拒答/越狱" },
+                { "key": "trigger_abuse", "name": "触发滥用" }
+            ],
+            "stats": { "high": 3, "medium": 5, "low": 5, "total": 13 }
+        }
+    ],
+    "dimensions": [
+        {
+            "key": "dangerous_code",
+            "name": "危险代码语法",
+            "category_key": "privilege_code",
+            "description": "代码中出现危险执行调用（exec/eval/subprocess/os.system、动态 import/getattr、反序列化链），可直接执行任意代码或绕过静态检测",
+            "rule_ids": ["AST2", "AST4"],
+            "rules": [
+                {
+                    "rule_id": "AST4",
+                    "rule_name": "subprocess 执行",
+                    "stats": { "high": 0, "medium": 2, "low": 0, "total": 2 },
+                    "max_severity_group": "medium",
+                    "remediation": "用 subprocess.run(shell=False) 与显式参数列表；校验所有输入，避免把用户可控数据传给命令"
+                }
+            ],
+            "stats": { "high": 1, "medium": 2, "low": 0, "total": 3 },
+            "max_severity_group": "high",
+            "remediation": "用 subprocess.run(shell=False) 与显式参数列表；校验所有输入，避免把用户可控数据传给命令；…"
+        }
+    ],
+    "findings": [
+        {
+            "id": "AST2",
+            "rule_id": "AST2",
+            "rule_name": "eval() 动态求值",
+            "title": "eval() 动态求值：代码中出现危险执行调用（…），可直接执行任意代码或绕过静态检测",
+            "dimension": "危险代码语法",
+            "dimension_key": "dangerous_code",
+            "category_key": "privilege_code",
+            "severity": "CRITICAL",
+            "severity_group": "high",
+            "status": "open",
+            "remediation": "用 ast.literal_eval() 解析数据，或使用显式解析逻辑；绝不求值不可信字符串",
+            "location": { "file": "src/processor/run.py", "start_line": 12, "end_line": 15 },
+            "code_snippet": "eval(user_input)",
+            "truncated": false
+        }
+    ],
+    "findings_truncated": false
+}
+```
+
+**字段与规则说明**
+
+| 字段 | 说明 |
+|------|------|
+| `score` | 优先级 `details.skillspector_score` → `report.risk_assessment.score` → `skills.risk_score`，截断到 0-100 |
+| `level` / `level_label` | 分数分档：0-20 `safe` 安全 / 21-50 `low` 低风险 / 51-80 `medium` 中风险 / 81-100 `high` 高风险；无分数为 `unknown` 未检测 |
+| `stats` | 按展示分组统计（`severity_group`：`CRITICAL`/`HIGH` → `high`，`MEDIUM` → `medium`，`LOW` → `low`） |
+| `rule_count` | 规则目录规模（“检测项”总数，当前 89，来自 `RULE_CATALOG`）；静态值，与命中项数无关，无审计记录时同样返回 |
+| `categories` | 固定 4 类，`dimension_count` 为该类包含的风险维度数（5 / 2 / 9 / 1，合计 17）；`dimensions` 给出层级关系（维度 key + 中文名），不受命中情况影响 |
+| `dimensions` | 按风险维度聚合的命中项（仅含命中的维度，顺序固定为 17 维度顺序）：`rule_ids` 为该维度命中的检测项，`max_severity_group` 为最高等级，`remediation` 为去重后的中文建议（`；` 连接） |
+| `dimensions[].rules` | 维度下按检测项聚合的行（“风险检测详情”的行）：`rule_id` / `rule_name`（中文检测项名）/ `stats` / `max_severity_group` / `remediation`（该检测项的中文建议） |
+| `findings[].dimension` | 17 个维度的中文名 |
+| `findings[].rule_id` / `rule_name` | 检测项（规则 ID）与其中文名称，未收录的规则 `rule_name=null` |
+| `findings[].title` | 中文问题描述：`{检测项中文名}：{维度中文说明}`；未收录规则使用 `{维度中文名}：{维度中文说明}` |
+| `findings[].remediation` | 中文修复建议（取自检测项目录）；未收录规则为 `null`，不透出英文原文 |
+| `findings[].status` | 审计为一次性快照，暂不追踪修复状态，命中项统一为 `open`（前端展示「需修复」） |
+| `findings` | 排序为 严重度 → 维度顺序 → 文件 → 起始行；单次最多返回 500 条（`MAX_FINDINGS`，超出时 `findings_truncated=true`），统计仍按全量计算 |
+| `reason` | `no_audit`（无审计记录）/ `report_unavailable`（有记录但无可解析报告，如 Jenkins 失败） |
+
+> 注：设计稿元信息中的「检测项：128」是 SkillSpector 规则目录总数；接口以本地规则目录规模
+> `rule_count`（当前 89）输出，前端元信息行与分类卡右上角均展示「检测项」文案（与设计稿一致），
+> 命中项数仍在分类卡计数（高/中/低）与详情区体现。
+
 ---
 
 ## 七、评分计算
@@ -674,3 +805,71 @@ SC4 模块实时查询 [OSV.dev](https://osv.dev) 检查依赖包已知 CVE：
 | 8 | **失败自愈** | 未拿到评分（risk_score=NULL）的记录，即使仓库 commit 未变，也会在后续 discover 轮次自动重试审计；失败的审计结果不进缓存，避免失败被继承；缓存复用产生的多行 pending 按各自 audit.id 独立回填（见 3.1/3.2） |
 | 9 | **容器只读解耦** | 爬虫宿主机负责 blob 物化（partial clone 懒拉取），skillspector 容器只读挂载缓存、无网络依赖，两侧职责隔离 |
 | 10 | **未评分不曝光** | `risk_score` 为 NULL（安全检测未完成）的技能在搜索/列表查询中全局排除，用户不会看到未审计内容 |
+
+---
+
+## 十二、风险评估报告页面（前端实现）
+
+### 12.1 路由与入口
+
+| 项 | 值 |
+|------|------|
+| 路由 | `/skills/:skillId(.*)/report`（name: `skill-risk-report`），必须声明在详情路由 `/skills/:skillId(.*)` **之前**，避免被贪婪参数吞掉 |
+| 页面组件 | `web/src/pages/SkillRiskReport.vue`（「风险检测详情」抽为子组件 `web/src/components/RiskDetectionTable.vue`，由父页传入 `dimensions` / `findings` / `findingsTruncated`，筛选与展开态在子组件内维护） |
+| 入口 | 详情页风险评估卡片的「查看风险评估报告」按钮（`SkillDetail.vue` 的 `goRiskReport()`，跳转前上报 `click_risk_report`）；「风险评估说明」浮层的「查看详情」指向站内文档页（见 12.5） |
+| 数据源 | `GET /api/v1/skills/{skill_id}/audit-report`（见 6.7）；skill_id 按 `encodeURIComponent` 拼接 URL |
+| 设计稿 | Pixso「二期 / Skill -详情页风险评估报告」（含空详情变体） |
+
+### 12.2 页面结构（对齐设计稿）
+
+1. **顶部区**（450px 底纹，复用详情页 hero 贴图）：面包屑（末级「风险评估报告」品牌色半粗）+ 标题（48px/64px SemiBold）+ 元信息行（16px info3，内容为「报告生成时间 / 评估引擎版本 / 检测项」）。
+2. **整体评估摘要**：卡片标题 22px/30px Medium + 1px 分隔线（`--o-color-control4`）+ 摘要正文 16px/24px。
+3. **综合风险得分（564px）+ 风险分类（自适应）同一行**（间距 32px）：
+   - 得分卡：160px 仪表盘（环宽 16px、轨道 `rgb(var(--o-brand-1))`，按等级绘制 1/4 / 1/2 / 3/4 / 全环，起点 12 点）+ 得分 28px SemiBold + 等级大字 40px + 一句话描述 12px + 「评分标准 / 等级划分」两行 12px 说明（含 4 个等级圆点图例）。
+   - 分类卡：右上角四组计数（16px/24px；**数字**半粗着色：高 `danger1` / 中 `warning1` / 低 `#497AF8` / 检测项 `info1`，**标签**常规字重 `info3`，数字与标签间距 4px、组间距 16px，与设计稿逐像素对齐）；2×2 子卡（416×120，1px `--o-color-control1` 边框、圆角 4）：类名 16px SemiBold + 「N个维度」12px（hover 显示该类包含的维度名）+ 说明 12px（单行省略）+ 8px 三段进度条 + 三个圆点图例。
+     - 进度条比例规则：红（高）/ 橙（中）/ 蓝（低）三段宽度 = `命中项数 ÷ 命中项总数 × 100%`，保留两位小数，四张分类卡共用同一规则；无命中项时整条为品牌底色 `rgb(var(--o-brand-1))`，等级间靠色相区分。
+4. **风险检测详情**：卡片标题 + 分类/等级两行筛选 chips（32px 高、圆角 4；未选 `--o-color-control2-light` 底，选中白底 + 1px 品牌色描边 + 品牌色文字）+ 表格：
+   - 表头 38px，底部 1px 品牌色下划线；列宽 风险项(332) / 修复建议(678) / 风险维度(182) / 等级(92) / 状态(156)，与设计稿列位逐像素对齐。
+   - 数据行为**检测项聚合行**（`dimensions[].rules` 展平，每个命中的检测项一行）：检测项中文名 + 「N 项」徽标（20px 圆角浅底）；修复建议为该检测项的中文建议（单行省略）；**风险维度列固定为 17 个风险维度的中文名**（维度 → 检测项的层级关系）；等级为该检测项最高等级（60×24 圆角标签：高/中/低分别 `danger1` / `warning1` / `#497AF8`）；状态展示「需修复」。
+   - 展开行为**该检测项下每个 issue 一行**（下拉式明细，行高 38px、1px `--o-color-control4` 分隔线贯通表格整宽，内容起点 = 行文本起点 + 13px）：16px 代码图标 + 完整定位路径 `文件:起始行-结束行`（14px，`--o-color-info3`，单行省略），**不展示代码片段与问题描述**。展开行高亮底为 `--o-color-control3-light`（设计稿 `rgb(206,219,245)`）。
+5. **空态**：320×280 插画（`assets/images/empty-audit-report.png`，设计稿切图）+ 「当前筛选条件下无风险项」（16px info3），区域高 461px 居中；无审计/报告不可用时复用插画并替换文案。
+6. **加载 / 错误态**：与站内其它页面一致（`OLoading` / 错误文案 `--o-color-danger1`）。
+
+### 12.3 交互逻辑
+
+- 分类 / 等级筛选为单选 chip，客户端过滤**检测项行**：分类按检测项所属维度的大类（`dimensions[].category_key`），等级按该检测项内是否含该等级的命中项（`rules[].stats[level] > 0`），无匹配时展示空态；
+- 点击行内箭头展开/收起该检测项下的 issue 明细（同一时刻只展开一行），issue 列表由 `findings` 按 `dimension_key + rule_id` 过滤得到（后端已按 严重度 → 维度 → 文件 → 行号 排序），无 `location.file` 时定位显示「未知位置」；
+- 展开行只展示定位路径（`文件:起始行-结束行`），不渲染问题描述与代码片段（原始文案见接口 `findings[].title`、代码见 `findings[].code_snippet`，页面不使用）；
+- `findings_truncated=true` 时表格下方提示「仅展示部分内容（统计仍为全量）」；
+- 进入页面上报 `risk_report_view`（含 `skill_id` / `has_report`）。
+
+### 12.4 与设计稿的差异说明
+
+| 差异 | 原因 |
+|------|------|
+| 「检测项」数量为本地规则目录规模（89），非设计稿示意值 128 | 设计稿的 128 为示意；实际以检测项目录 `RULE_CATALOG` 条数为准，由接口 `rule_count` 输出 |
+| 摘要文案由后端按数据生成 | 设计稿为示意文案；实际由得分 / 等级 / 各严重度条数拼装（`_build_summary`） |
+| 面包屑首级为「SkillHub」 | 与站内详情页既有面包屑保持一致（设计稿为 Skills） |
+| 「筛选条件」占位 chips 未实现 | 设计稿中为无筛选语义的占位符 |
+| 分类进度条按高/中/低命中项数量严格正比分配 | 设计稿只给出示意宽度，按需求改为精确比例（两位小数），四张卡统一规则 |
+| 详情表的行按「检测项」聚合并给出命中项数徽标 | 设计稿为逐条 issue 的示意数据；页面按维度 → 检测项聚合后一行一个检测项，展开才逐个 issue 给出定位，避免重复行 |
+| 展开行仅展示定位路径，不渲染代码片段 | 需求要求每个 issue 只给出定位；设计稿中的代码（`code_snippet`）与描述不渲染，字段仍随接口返回 |
+| 等级区间文案统一为「81-100 分：高风险」 | 设计稿写「80-100」（与「51-80 分：中风险」重叠且与实际分档 `score>80` 冲突），按分档逻辑与安全评估文档统一为 81-100（涉及详情页说明浮层与报告页等级图例） |
+
+### 12.5 站内文档页（安全评估说明）
+
+详情页「风险评估说明」浮层的「查看详情」不再跳报告页，而是打开站内文档页，展示
+`docs/skillhub-security-audit.md` 的正文（`SkillDetail.vue` 的 `goSecurityDoc()`，上报 `click_risk_guide`）。
+
+| 项 | 值 |
+|------|------|
+| 路由 | `/docs/:doc`（name: `docs`） |
+| 页面组件 | `web/src/pages/DocsPage.vue` |
+| 文档来源 | 仓库 `docs/*.md`，发布时同步一份到 `web/public/docs/`（web 镜像只打包 `web/` 目录），页面按 `fetch('/docs/{doc}.md')` 取原文渲染 |
+| 已同步文档 | `skillhub-security-audit.md`（安全评估说明）、`skillhub-introduction.md`、`skillhub-publish-and-manage.md` |
+| 渲染规则 | `marked` 解析**整篇文档**（含 H1，标题与正文一体展示，不做拆分）；`title` 另从 H1 提取，用于面包屑末级与左侧目录；文档内相对 `./xxx.md` 链接改写为站内路由 `/docs/xxx`；`:doc` 参数仅允许字母/数字/连字符 |
+| 布局 | 左目录 + 右正文（间距 32px）：左侧 280px 便签式侧栏（`--o-color-fill2`、sticky 吸附 `top: 96px` = 72px 吸顶导航 + 24px 间距、标题「目录」）列出三篇文档标题（取各自 H1，当前项高亮 `--o-color-control2-light` + `--o-color-primary1`），并在当前文档下展开其**章节大纲**（h2 锚点，点击平滑滚动，`scroll-margin-top: 96px` 避开吸顶导航，不触发路由 hash 跳转）；右侧为承载整篇文档的正文卡片 |
+| 版式 | 复用详情页/报告页的顶部底纹与面包屑（SkillHub / 文档 / 当前文档名，面包屑通栏）；正文卡片 `--o-color-fill2` + 48px 内边距，卡片内自上而下依次是文档 H1（40px/56px SemiBold `info1`）、引用块与正文；h2 24px/32px、h3 20px/28px，正文 16px/26px `info2`，表格/引用/行内代码使用 `--o-color-control*` 与 `--o-font_family-code` |
+| 失败态 | 文档不存在或拉取失败时展示「文档不存在或加载失败」+ 返回首页链接 |
+
+> 维护提示：`docs/*.md` 为文档源，`web/public/docs/` 为发布副本，两者内容需保持一致。

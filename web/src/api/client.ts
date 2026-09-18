@@ -7,6 +7,8 @@ import type {
   AuditReport,
   DownloadResponse,
   SkillVersionsResponse,
+  ContributorSkillsResponse,
+  ContributorListResponse,
   Stats,
   Category
 } from './types'
@@ -70,6 +72,32 @@ export const api = {
     return data
   },
 
+  async getContributorSkills(params: {
+    source: string
+    author: string
+    skip?: number
+    limit?: number
+    sort_by?: 'updated_at' | 'download_count'
+  }): Promise<ContributorSkillsResponse> {
+    const { source, author, ...query } = params
+    const { data } = await client.get(
+      `/skills/contributors/${encodeURIComponent(source)}/${encodeURIComponent(author)}`,
+      { params: query },
+    )
+    return data
+  },
+
+  async getContributors(params: {
+    skip?: number
+    limit?: number
+    platform?: string
+    keyword?: string
+    sort_by?: 'skill_count' | 'created_at'
+  } = {}): Promise<ContributorListResponse> {
+    const { data } = await client.get('/skills/contributors', { params })
+    return data
+  },
+
   async searchSkills(params: {
     q?: string
     skip?: number
@@ -96,8 +124,9 @@ export const api = {
     return data
   },
 
-  async getSkillDownload(skillId: string): Promise<DownloadResponse> {
-    const resp = await client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
+  async getSkillDownload(skillId: string, version?: string): Promise<DownloadResponse> {
+    const query = version ? `?version=${encodeURIComponent(version)}` : ''
+    const resp = await client.get(`/skills/${encodeURIComponent(skillId)}/download${query}`, {
       responseType: 'blob'
     })
     const blob: Blob = resp.data

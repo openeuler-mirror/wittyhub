@@ -3,6 +3,8 @@ import Home from '@/pages/Home.vue'
 import SkillDetail from '@/pages/SkillDetail.vue'
 import SkillRiskReport from '@/pages/SkillRiskReport.vue'
 import DocsPage from '@/pages/DocsPage.vue'
+import ContributorDetail from '@/pages/ContributorDetail.vue'
+import Contributors from '@/pages/Contributors.vue'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const router = createRouter({
@@ -38,6 +40,16 @@ const router = createRouter({
       path: '/skills/:skillId(.*)',
       name: 'skill-detail',
       component: SkillDetail
+    },
+    {
+      path: '/contributors/:source/:author(.*)',
+      name: 'contributor-detail',
+      component: ContributorDetail
+    },
+    {
+      path: '/contributors',
+      name: 'contributors',
+      component: Contributors
     }
   ],
   scrollBehavior() {

@@ -181,15 +181,57 @@ export interface SkillVersion {
   commit_id: string | null
   author: string | null
   message: string | null
-  released_at: string | null
+  created_at: string
   download_count: number
   install_command?: string
   content: string | null
 }
 
+export interface ContributorSkillsResponse {
+  source: string
+  author: string
+  platform: string | null
+  name: string | null
+  description: string | null
+  git_profile: string | null
+  website: string | null
+  skill_count: number
+  total_downloads: number
+  skills: Skill[]
+  total: number
+  skip: number
+  limit: number
+}
+
+export interface Contributor {
+  id: string
+  source: string
+  author: string
+  platform: string | null
+  name: string | null
+  description: string | null
+  avatar_url: string | null
+  git_profile: string | null
+  website: string | null
+  repo_url: string | null
+  skill_count: number
+  total_downloads: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ContributorListResponse {
+  contributors: Contributor[]
+  total: number
+  skip: number
+  limit: number
+  platform_counts: Record<string, number>
+}
+
 export interface Stats {
   total_skills: number
   total_categories: number
+  total_downloads: number
   categories: Category[]
   platforms: { name: string; count: number }[]
   security_levels: { name: string; count: number }[]

@@ -1,0 +1,579 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { api } from '@/api/client'
+import type { Skill, ContributorSkillsResponse } from '@/api/types'
+import SkillCard from '@/components/SkillCard.vue'
+import { OBreadcrumb, OBreadcrumbItem, OInput, OPagination, OLoading } from '@opensig/opendesign'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
+import { useAppStore } from '@/stores/app'
+import heroBgLight from '@/assets/bg/hero-top-texture.png'
+import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
+import emptyStateSvg from '@/assets/icons/empty-state.svg?raw'
+
+const route = useRoute()
+const appStore = useAppStore()
+
+const platformNames: Record<string, string> = {
+  community: '社区SIG',
+  enterprise: '企业组织',
+  personal: '个人'
+}
+const sourceNames: Record<string, string> = {
+  github: 'GitHub',
+  gitcode: 'GitCode'
+}
+
+const contributor = ref<ContributorSkillsResponse | null>(null)
+const skills = ref<Skill[]>([])
+const loading = ref(true)
+const error = ref('')
+
+const page = ref(1)
+const pageSize = ref(15)
+const pageSizeOptions = [15, 30, 60]
+const searchInput = ref('')
+
+// 简介：优先 contributors 表的 description（catalog 注入），个人贡献者无简介时兜底默认文案
+const contributorDesc = computed(() => {
+  if (!contributor.value) return ''
+  if (contributor.value.description?.trim()) return contributor.value.description
+  if (contributor.value.platform === 'personal') return '社区贡献者'
+  return ''
+})
+
+// 仓库地址：catalog 注入的 git 托管主页（enterprise 的 git_profile / personal 的 profile）
+const contributorRepoLink = computed(() => contributor.value?.git_profile?.trim() || '')
+
+// 官网：catalog 注入的官网地址（community 的 SIG 页面 / 企业官网 / 个人网站）
+const contributorWebsite = computed(() => contributor.value?.website?.trim() || '')
+
+// 搜索框：前端过滤当前页（name / description / tags）
+const filteredSkills = computed(() => {
+  const q = searchInput.value.trim().toLowerCase()
+  if (!q) return skills.value
+  return skills.value.filter(
+    s =>
+      s.name.toLowerCase().includes(q) ||
+      (s.description || '').toLowerCase().includes(q) ||
+      (s.tags || []).some(t => t.toLowerCase().includes(q))
+  )
+})
+
+// 下载量格式化：超过一万显示 xxx.xw，与首页一致
+function formatDownloads(n?: number): string {
+  if (n == null) return '0'
+  if (n < 10000) return n.toLocaleString()
+  return `${(n / 10000).toFixed(1)}w`
+}
+
+async function fetchContributorSkills() {
+  const source = route.params.source as string
+  const author = decodeURIComponent(route.params.author as string)
+  if (!source || !author) {
+    error.value = '参数缺失'
+    loading.value = false
+    return
+  }
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await api.getContributorSkills({
+      source,
+      author,
+      skip: (page.value - 1) * pageSize.value,
+      limit: pageSize.value
+    })
+    contributor.value = res
+    skills.value = res.skills || []
+    oaReport('contributor_view', {
+      module: 'contributor_detail',
+      source,
+      author: res.author,
+      skill_count: res.skill_count
+    })
+  } catch (e: any) {
+    console.error('加载贡献者详情失败:', e)
+    error.value = e?.response?.data?.detail || e.message || '加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+function onPaginationChange() {
+  fetchContributorSkills()
+}
+
+onMounted(fetchContributorSkills)
+
+// 同组件实例复用（source/author 变化）时重新加载
+watch(
+  () => [route.params.source, route.params.author],
+  () => {
+    if (route.name === 'contributor-detail') {
+      page.value = 1
+      searchInput.value = ''
+      fetchContributorSkills()
+    }
+  }
+)
+</script>
+
+<template>
+  <div class="contributor-page">
+    <!-- ========== Hero 区域 ========== -->
+    <section class="hero-section">
+      <div class="absolute inset-0 pointer-events-none">
+        <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
+      </div>
+      <div class="container-wide relative">
+        <!-- 面包屑 -->
+        <div class="breadcrumb-wrap">
+          <OBreadcrumb
+            style="
+              --breadcrumb-text-size: 14px;
+              --breadcrumb-text-height: 22px;
+              --breadcrumb-separator-size: 24px;
+              --breadcrumb-gap: 4px;
+            "
+          >
+            <OBreadcrumbItem to="/">贡献</OBreadcrumbItem>
+            <OBreadcrumbItem v-if="contributor">{{ contributor.author }}</OBreadcrumbItem>
+            <OBreadcrumbItem v-else>贡献者详情</OBreadcrumbItem>
+          </OBreadcrumb>
+        </div>
+
+        <!-- 加载态 -->
+        <div v-if="loading" class="contributor-card loading-card">
+          <OLoading v-model:visible="loading" size="medium" />
+        </div>
+
+        <!-- 错误态 -->
+        <div v-else-if="error" class="error-section">
+          <p class="error-text">{{ error }}</p>
+        </div>
+
+        <!-- 贡献者信息卡 -->
+        <div v-else-if="contributor" class="contributor-card">
+          <div class="contributor-main">
+            <div class="contributor-title-row">
+              <h1 class="contributor-name">{{ contributor.author }}</h1>
+              <span v-if="contributor.platform" class="tag tag-platform">{{ platformNames[contributor.platform] || contributor.platform }}</span>
+              <span class="tag tag-source">{{ sourceNames[contributor.source] || contributor.source }}</span>
+            </div>
+            <p v-if="contributorDesc" class="contributor-desc">{{ contributorDesc }}</p>
+            <div v-if="contributorRepoLink || contributorWebsite" class="contributor-links">
+              <div class="contributor-link-row">
+                <template v-if="contributorRepoLink">
+                  <span class="contributor-link-label">git主页：</span>
+                  <a
+                    :href="contributorRepoLink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="contributor-repo-link"
+                    @click="oaReport('click_contributor_repo', { module: 'contributor_detail', author: contributor.author })"
+                  >{{ contributorRepoLink }}</a>
+                </template>
+                <template v-if="contributorRepoLink && contributorWebsite">
+                  <span class="contributor-link-sep">|</span>
+                </template>
+                <template v-if="contributorWebsite">
+                  <span class="contributor-link-label">官网：</span>
+                  <a
+                    :href="contributorWebsite"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="contributor-repo-link"
+                    @click="oaReport('click_contributor_homepage', { module: 'contributor_detail', author: contributor.author })"
+                  >{{ contributorWebsite }}</a>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="contributor-stats">
+            <div class="stat-item">
+              <div class="stat-value">{{ contributor.skill_count }}</div>
+              <div class="stat-label">Skills</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">{{ formatDownloads(contributor.total_downloads) }}</div>
+              <div class="stat-label">下载量</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 技能列表区域 ========== -->
+    <section v-if="contributor" class="container-wide list-section">
+      <div class="list-header-row">
+        <h2 class="section-title">贡献的技能</h2>
+        <OInput
+          v-model="searchInput"
+          placeholder="搜索Skill"
+          size="large"
+          round="8px"
+          clearable
+          style="width: 320px"
+        >
+          <template #prefix>
+            <svg class="search-icon" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M17.549 16.523l0.087 0.074 2.76 2.754c0.274 0.273 0.274 0.716 0.001 0.99-0.246 0.246-0.629 0.271-0.903 0.075l-0.087-0.074-2.76-2.754c-0.274-0.273-0.274-0.716-0.001-0.99 0.246-0.246 0.629-0.271 0.903-0.075zM10.821 3.454c4.099 0 7.423 3.323 7.423 7.423s-3.323 7.423-7.423 7.423c-4.099 0-7.423-3.323-7.423-7.423s3.323-7.423 7.423-7.423zM10.821 4.854c-3.326 0-6.023 2.696-6.023 6.023s2.696 6.023 6.023 6.023c3.326 0 6.023-2.696 6.023-6.023s-2.696-6.023-6.023-6.023z" fill="currentColor"></path>
+            </svg>
+          </template>
+        </OInput>
+      </div>
+
+      <!-- 加载态 -->
+      <div v-if="loading" class="loading-container">
+        <OLoading v-model:visible="loading" size="medium" />
+      </div>
+
+      <!-- 空态 -->
+      <div v-else-if="filteredSkills.length === 0" class="empty-state">
+        <div class="empty-state-svg" v-html="emptyStateSvg"></div>
+        <p class="empty-state-text">没有匹配的结果</p>
+      </div>
+
+      <!-- 卡片网格 -->
+      <div v-else class="skills-grid">
+        <SkillCard
+          v-for="skill in filteredSkills"
+          :key="skill.id"
+          :skill="skill"
+        />
+      </div>
+
+      <!-- 分页 -->
+      <div v-if="contributor.total > 0 && !loading" class="pagination-row">
+        <OPagination
+          v-model:page="page"
+          v-model:page-size="pageSize"
+          :total="contributor.total"
+          :page-sizes="pageSizeOptions"
+          :layout="['total', 'pagesize', 'pager', 'jumper']"
+          @change="onPaginationChange"
+        />
+      </div>
+    </section>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.container-wide {
+  max-width: 1488px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ===== Hero 背景区 ===== */
+.hero-section {
+  position: relative;
+  overflow: hidden;
+  padding-bottom: 32px;
+}
+
+/* ===== 面包屑 ===== */
+.breadcrumb-wrap {
+  margin-top: 40px;
+  margin-bottom: 40px;
+
+  --breadcrumb-color: #00000099;
+
+  :deep(.o-breadcrumb-item-label) {
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    letter-spacing: 0px;
+    text-align: left;
+    color: var(--breadcrumb-color);
+    transition: color 0.2s;
+    cursor: pointer;
+
+    @include hover {
+      color: var(--o-color-primary1);
+    }
+  }
+
+  :deep(.o-icon-chevron-right) {
+    color: var(--breadcrumb-color);
+  }
+}
+
+.dark .breadcrumb-wrap,
+[data-o-theme='e.dark'] .breadcrumb-wrap {
+  --breadcrumb-color: rgba(255, 255, 255, 0.6);
+}
+
+/* ===== 加载 & 错误 ===== */
+.loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 176px;
+}
+
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+.error-section {
+  text-align: center;
+  padding: 80px 0;
+
+  .error-text {
+    color: var(--o-color-danger1);
+    font-size: var(--o-r-font_size-text1);
+  }
+}
+
+/* ===== 贡献者信息卡 ===== */
+.contributor-card {
+  background: var(--o-color-fill2);
+  border-radius: 8px;
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.contributor-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.contributor-name {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: var(--o-r-font_size-h2);
+  line-height: var(--o-r-line_height-h2);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+  margin-bottom: 0;
+}
+
+.tag {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+  border-radius: 4px;
+  height: 24px;
+  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.tag-platform {
+  background: var(--o-color-control2-light);
+}
+
+.dark .tag-platform,
+[data-o-theme='e.dark'] .tag-platform {
+  background: #242427;
+}
+
+.tag-source {
+  background: var(--o-color-white);
+  border: 1px solid var(--o-color-control4);
+}
+
+.dark .tag-source,
+[data-o-theme='e.dark'] .tag-source {
+  background: #242427;
+}
+
+.contributor-desc {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: var(--o-r-line_height-text1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info3);
+  margin-bottom: 8px;
+}
+
+.contributor-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.contributor-link-row {
+  display: flex;
+  align-items: baseline;
+}
+
+.contributor-link-label {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: var(--o-r-line_height-text1);
+  color: var(--o-color-info3);
+  flex-shrink: 0;
+}
+
+.contributor-link-sep {
+  color: var(--o-color-info3);
+  margin: 0 12px;
+  flex-shrink: 0;
+}
+
+.contributor-repo-link {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: var(--o-r-line_height-text1);
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-link1);
+  text-decoration: none;
+  word-break: break-all;
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
+}
+
+/* ===== 右侧统计 ===== */
+.contributor-stats {
+  display: flex;
+  align-items: center;
+  gap: 56px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-value {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 36px;
+  line-height: 48px;
+  letter-spacing: 0px;
+  text-align: center;
+  color: var(--o-color-info1);
+}
+
+.stat-label {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: center;
+  color: var(--o-color-info3);
+}
+
+/* ===== 列表区域 ===== */
+.list-section {
+  padding-top: 24px;
+  padding-bottom: 64px;
+}
+
+.list-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 40px;
+  line-height: 56px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+  margin-bottom: 0;
+}
+
+/* ===== 卡片网格（3 列，间距 32 对齐设计稿） ===== */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+}
+
+/* ===== 空态 ===== */
+.empty-state {
+  text-align: center;
+  padding: 64px 0;
+
+  .empty-state-svg {
+    width: 256px;
+    margin: 0 auto 24px;
+
+    :deep(svg) {
+      width: 100%;
+      height: auto;
+    }
+  }
+
+  .empty-state-text {
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    font-size: 16px;
+    line-height: var(--o-r-line_height-text1);
+    letter-spacing: 0px;
+    color: var(--o-color-info3);
+  }
+}
+
+/* ===== 分页 ===== */
+.pagination-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 32px;
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 1200px) {
+  .skills-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 840px) {
+  .contributor-card {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .contributor-stats {
+    justify-content: flex-start;
+    gap: 40px;
+  }
+
+  .list-header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-title {
+    font-size: var(--o-r-font_size-h1);
+    line-height: var(--o-r-line_height-h1);
+  }
+
+  .skills-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

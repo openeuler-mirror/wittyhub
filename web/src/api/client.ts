@@ -7,6 +7,8 @@ import type {
   AuditReport,
   DownloadResponse,
   SkillVersionsResponse,
+  ContributorSkillsResponse,
+  ContributorListResponse,
   Stats,
   Category
 } from './types'
@@ -67,6 +69,32 @@ export const api = {
 
   async getSkillVersions(skillId: string): Promise<SkillVersionsResponse> {
     const { data } = await client.get(`/skills/versions/${encodeURIComponent(skillId)}`)
+    return data
+  },
+
+  async getContributorSkills(params: {
+    source: string
+    author: string
+    skip?: number
+    limit?: number
+    sort_by?: 'updated_at' | 'download_count'
+  }): Promise<ContributorSkillsResponse> {
+    const { source, author, ...query } = params
+    const { data } = await client.get(
+      `/skills/contributors/${encodeURIComponent(source)}/${encodeURIComponent(author)}`,
+      { params: query },
+    )
+    return data
+  },
+
+  async getContributors(params: {
+    skip?: number
+    limit?: number
+    platform?: string
+    keyword?: string
+    sort_by?: 'skill_count' | 'created_at'
+  } = {}): Promise<ContributorListResponse> {
+    const { data } = await client.get('/skills/contributors', { params })
     return data
   },
 

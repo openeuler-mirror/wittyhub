@@ -25,7 +25,11 @@ from skillcrawler.core.popularity import (
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
 from src.core.config import get_settings
 from src.core.database import get_db_context
-from src.models.repository import SkillRepoRepository, SkillRepository
+from src.models.repository import (
+    ContributorRepository,
+    SkillRepoRepository,
+    SkillRepository,
+)
 
 settings = get_settings()
 
@@ -742,6 +746,7 @@ async def _main() -> int:
         manager = SkillManager(
             skill_repository=skill_repository,
             skill_repo_repository=skill_repo_repository,
+            contributor_repository=ContributorRepository(session),
             catalog_path=(Path(args.repository_path).expanduser() if getattr(args, "repository_path", None) else None),
         )
 

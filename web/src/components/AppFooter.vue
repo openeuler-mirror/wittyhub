@@ -6,16 +6,12 @@ import LogoAtom from '@/assets/footer/atom-logo.png'
 import LogoFooter from '@/assets/footer/footer-logo2.png'
 import LogoFooterMo from '@/assets/footer/footer-logo1.png'
 import policeIcon from '@/assets/footer/police.png'
-import footerBg from '@/assets/footer/footer-bg.png'
-import footerBgMo from '@/assets/footer/footer-bg-mo.png'
-import CodeImgGzh from '@/assets/footer/img-gzh.png'
-import CodeImgXzs from '@/assets/footer/img-xzs.png'
 import CodeQrGzh from '@/assets/footer/code-zgz.jpg'
 import CodeQrXzs from '@/assets/footer/code-xzs.png'
 
 const footerCodeList = [
-  { img: CodeImgGzh, code: CodeQrGzh, label: 'openEuler公众号' },
-  { img: CodeImgXzs, code: CodeQrXzs, label: 'openEuler小助手' },
+  { code: CodeQrGzh, label: 'openEuler公众号' },
+  { code: CodeQrXzs, label: 'openEuler小助手' },
 ]
 
 const quickNav = [
@@ -25,7 +21,7 @@ const quickNav = [
       { title: '成员单位', link: '/zh/community/member/' },
       { title: '组织架构', link: '/zh/community/organization/' },
       { title: '社区章程', link: '/zh/community/charter/' },
-      { title: '贡献看板', link: 'https://datastat.openeuler.org/zh/overview' },
+      { title: '贡献看板', link: 'https://datastat.openeuler.openatom.cn/zh/overview' },
       { title: '社区介绍', link: '/whitepaper/openEuler%20%E5%BC%80%E6%BA%90%E7%A4%BE%E5%8C%BA%E4%BB%8B%E7%BB%8D.pdf' },
     ],
   },
@@ -43,14 +39,14 @@ const quickNav = [
       { title: '获取 openEuler 操作系统', link: '/zh/download/#get-openeuler' },
       { title: '最新社区发行版', link: '/zh/download/' },
       { title: '商业发行版', link: '/zh/download/commercial-release/' },
-      { title: '软件中心', link: 'https://software.openeuler.org/zh' },
+      { title: '软件中心', link: 'https://easysoftware.openeuler.openatom.cn/zh' },
     ],
   },
   {
     title: '支持与服务',
     list: [
-      { title: '文档', link: 'https://docs.openeuler.org/zh/' },
-      { title: 'FAQ', link: 'https://www.openeuler.org/zh/faq/' },
+      { title: '文档', link: 'https://docs.openeuler.openatom.cn/zh/' },
+      { title: 'FAQ', link: 'https://www.openeuler.openatom.cn/zh/faq/' },
       { title: '联系我们', link: '/zh/contact-us/' },
     ],
   },
@@ -85,51 +81,54 @@ const friendshipLinks = [
   { link: 'https://www.openubmc.cn/', title: 'openUBMC' },
   { link: 'https://www.openfuyao.cn/', title: 'openFuyao' },
   { link: 'http://www.ebaina.com/', title: 'Ebaina' },
-  { link: 'https://my.oschina.net/openeuler', title: '开源中国' },
-  { link: 'https://blog.csdn.net/openEuler_', title: 'CSDN' },
-  { link: 'https://gitee.com/openeuler', title: 'Gitee' },
-  { link: 'https://space.bilibili.com/527064077', title: 'B站' },
-  { link: 'https://juejin.cn/user/3183782863845454', title: '掘金' },
-  { link: 'https://www.toutiao.com/c/user/token/MS4wLjABAAAAZivzVkJzMyQ44GzmX1i_ON0bgxL3E8ybHC-P9HMqZiqUgpYVnjCjynDt-SebKN7r', title: '头条' },
-  { link: 'https://www.openeuler.org/zh/', title: 'openEuler 社区' },
 ]
 
 const legalLinks = [
-  { name: '品牌', url: 'https://www.openeuler.org/zh/other/brand/' },
-  { name: '隐私声明', url: 'https://www.openeuler.org/zh/other/privacy/' },
-  { name: '法律声明', url: 'https://www.openeuler.org/zh/other/legal/' },
-  { name: '关于 cookies', url: 'https://www.openeuler.org/zh/other/cookies/' },
+  { name: '品牌', url: 'https://www.openeuler.openatom.cn/zh/other/brand/' },
+  { name: '隐私声明', url: 'https://www.openeuler.openatom.cn/zh/other/privacy/' },
+  { name: '法律声明', url: 'https://www.openeuler.openatom.cn/zh/other/legal/' },
+  { name: '关于 cookies', url: 'https://www.openeuler.openatom.cn/zh/other/cookies/' },
 ]
 </script>
 
 <template>
   <div class="footer">
-    <ContentWrapper>
-      <div class="atom">
-        <p class="atom-text">
-          openEuler 是由开放原子开源基金会孵化的全场景开源操作系统项目，面向数字基础设施四大核心场景（服务器、云计算、边缘计算、嵌入式），全面支持 ARM、x86、RISC-V、LoongArch、PowerPC、SW-64 等多样性计算架构
-        </p>
-        <a href="https://openatom.cn" target="_blank" rel="noopener noreferrer">
-          <img :src="LogoAtom" class="atom-logo" alt="开放原子开源基金会" />
-        </a>
-      </div>
-      <ODivider
-        :style="{
-          '--o-divider-bd-color': 'rgba(229, 229, 229, 0.12)',
-          '--o-divider-gap': '16px',
-        }"
-      />
-    </ContentWrapper>
-    <div
-      class="footer-content"
-      :style="{
-        '--footer-bg': `url(${footerBg})`,
-        '--footer-bg-mo': `url(${footerBgMo})`,
-      }"
-    >
+    <div class="footer-content">
       <ContentWrapper>
+        <div class="info">
+          <p class="info-text">
+            openEuler 是由开放原子开源基金会孵化的全场景开源操作系统项目，面向数字基础设施四大核心场景（服务器、云计算、边缘计算、嵌入式），全面支持 ARM、x86、RISC-V、LoongArch、PowerPC、SW-64 等多样性计算架构
+          </p>
+          <a href="https://openatom.cn" target="_blank" rel="noopener noreferrer">
+            <img :src="LogoAtom" class="info-logo" alt="开放原子开源基金会" />
+          </a>
+        </div>
 
-        <div class="inner">
+        <div class="content">
+          <div class="quick-nav">
+            <div v-for="nav in quickNav" :key="nav.title" class="nav">
+              <p class="quick-title">{{ nav.title }}</p>
+              <p v-for="item in nav.list" :key="item.title" class="nav-item">
+                <a :href="item.link" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+              </p>
+            </div>
+          </div>
+
+          <div class="friendship-link">
+            <span class="friendship-link-title">友情链接</span>
+            <div class="friendship-link-box">
+              <a
+                v-for="item in friendshipLinks"
+                :key="item.link"
+                :href="item.link"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ item.title }}</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-bottom">
           <div class="footer-logo">
             <img class="show-pc" :src="LogoFooter" alt="openEuler" />
             <img class="show-mo" :src="LogoFooterMo" alt="openEuler" />
@@ -142,42 +141,31 @@ const legalLinks = [
           <div class="footer-option">
             <div class="footer-option-item">
               <template v-for="(link, index) in legalLinks" :key="link.name">
-                <a :href="link.url" target="_blank" class="link" rel="noopener noreferrer">{{ link.name }}</a>
-                <ODivider
-                  v-if="index !== legalLinks.length - 1"
-                  :style="{
-                    '--o-divider-bd-color': 'var(--o-color-white)',
-                    '--o-divider-label-gap': '0 8px',
-                  }"
-                  direction="v"
-                />
+                <a :href="link.url" target="_blank" rel="noopener noreferrer">{{ link.name }}</a>
+                <ODivider v-if="index !== legalLinks.length - 1" direction="v" />
               </template>
             </div>
-            <p class="license"><span>遵循</span> 木兰宽松许可证第2版（MulanPSL2）</p>
-            <div class="footer-info">
-              <p class="copyright-text">版权所有 © {{ new Date().getFullYear() }} openEuler 保留一切权利</p>
-              <div class="copyright">
-                <a class="filing-link" href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">
+            <p class="license">
+              <span class="license-text">遵循</span>
+              <span class="license-info">木兰宽松许可证第2版（MulanPSL2）</span>
+            </p>
+            <div class="copyright">
+              <div class="copyright-left">
+                <p class="copyright-text">版权所有 © {{ new Date().getFullYear() }} openEuler 保留一切权利</p>
+                <a href="https://beian.miit.gov.cn/#/Integrated/index" target="_blank" rel="noopener noreferrer" class="beian-info">
                   京ICP备2020036654号-1
                 </a>
+              </div>
+              <div class="filing">
                 <img :src="policeIcon" class="filing-img" alt="" />
-                <span>京公网安备 11030102011597 号</span>
+                <p class="beian-info">京公网安备 11030102011597 号</p>
               </div>
             </div>
           </div>
           <div class="footer-right">
-            <div class="code-box">
-              <div
-                v-for="(item, index) in footerCodeList"
-                :key="index"
-                class="code-pop"
-              >
-                <img :src="item.img" class="code-img" alt="" />
-                <div class="code-layer">
-                  <img :src="item.code" alt="" />
-                  <p class="txt">{{ item.label }}</p>
-                </div>
-              </div>
+            <div v-for="(item, index) in footerCodeList" :key="index" class="code-pop">
+              <img :src="item.code" alt="" />
+              <p class="txt">{{ item.label }}</p>
             </div>
           </div>
         </div>
@@ -198,94 +186,93 @@ $color: #fff;
     padding-bottom: 0;
   }
 
-  .atom {
-    text-align: center;
-    padding-top: 24px;
-    position: relative;
+  .footer-content {
+    background: url('@/assets/footer/footer-bg.png') no-repeat center bottom;
+  }
 
-    .atom-text {
-      color: $color;
+  .info {
+    text-align: center;
+    padding: 24px 0 16px;
+
+    .info-text {
+      color: var(--o-color-white);
       @include h4;
     }
     a {
       display: inline-block;
     }
-    .atom-logo {
+    .info-logo {
       height: 32px;
       margin-top: 12px;
     }
   }
 
-  .footer-content {
-    background: var(--footer-bg) no-repeat bottom center;
-    background-size: cover;
-    @include tip1;
+  .content {
+    padding: 16px 0 12px;
+    border-top: 1px solid rgba(229, 229, 229, 0.12);
+    border-bottom: 1px solid rgba(229, 229, 229, 0.12);
 
     .quick-nav {
-      margin: 16px auto 0;
       display: flex;
-      justify-content: space-between;
-      max-width: 1140px;
+      justify-content: center;
+      flex-wrap: wrap;
 
-      .category {
-        .category-title {
-          color: var(--o-color-white);
-          @include h4;
-        }
-        .navs {
-          display: flex;
-          flex-direction: column;
-          .nav {
-            margin-top: 8px;
-            @include tip1;
-            a {
-              color: rgba(255, 255, 255, 0.6);
-              @include hover {
-                color: rgba(255, 255, 255, 1);
-              }
-            }
-          }
-          .nav:first-child {
-            margin-top: 10px;
+      .nav + .nav {
+        margin-left: 88px;
+      }
+
+      .quick-title {
+        color: var(--o-color-white);
+        @include h4;
+      }
+      .nav-item {
+        margin-top: 8px;
+        @include tip1;
+        a {
+          color: rgba(255, 255, 255, 0.7);
+          @include hover {
+            color: rgba(255, 255, 255, 1);
           }
         }
       }
     }
 
     .friendship-link {
-      margin-top: 16px;
-      padding-bottom: 12px;
+      margin-top: 32px;
       display: flex;
-      border-bottom: 1px solid rgba(229, 229, 229, 0.12);
+      justify-content: center;
       @include tip2;
 
       .friendship-link-title {
         color: var(--o-color-white);
-        margin-right: 38px;
+        flex-shrink: 0;
       }
-      .friendship-link-item {
-        white-space: nowrap;
-        color: rgba(255, 255, 255, 0.6);
-        &:not(:last-of-type) {
-          margin-right: 24px;
-        }
-        @include hover {
-          color: rgba(255, 255, 255, 1);
-        }
-      }
-    }
+      .friendship-link-box {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-left: 32px;
 
-    .inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 0 32px;
-      position: relative;
+        a {
+          margin-right: 24px;
+          white-space: nowrap;
+          color: rgba(255, 255, 255, 0.7);
+          @include hover {
+            color: rgba(255, 255, 255, 1);
+          }
+        }
+      }
     }
   }
 
+  .footer-bottom {
+    padding: 16px 0 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
   .footer-logo {
-    flex: 1;
     img {
       height: 46px;
     }
@@ -295,115 +282,193 @@ $color: #fff;
     .show-mo {
       display: none;
     }
+    .email {
+      color: var(--o-color-white);
+      margin-top: 4px;
+      @include tip1;
+    }
   }
 
   .footer-option {
     text-align: center;
     @include tip1;
 
-    .link {
-      color: $color;
-      display: inline-block;
-    }
     .footer-option-item {
-      align-items: center;
-    }
-
-    .footer-info {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: var(--o-gap-4);
-      margin-top: 8px;
+      flex-wrap: wrap;
+
+      a {
+        color: rgba(255, 255, 255, 0.8);
+        display: inline-block;
+      }
+      :deep(.o-divider) {
+        height: 12px;
+        --o-divider-label-gap: 0 8px;
+        --o-divider-bd-color: rgba(255, 255, 255, 0.6);
+      }
     }
 
-    .copyright-text {
-      color: rgba(255, 255, 255, 0.6);
-      white-space: nowrap;
+    .license {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 8px;
+      color: var(--o-color-white);
+
+      .license-text {
+        color: rgba(255, 255, 255, 0.6);
+        margin-right: 4px;
+      }
     }
 
     .copyright {
       display: flex;
       align-items: center;
-      gap: var(--o-gap-2);
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 4px;
       color: rgba(255, 255, 255, 0.6);
 
-      .filing-link {
-        color: rgba(255, 255, 255, 0.6);
-        @include hover {
-          color: rgba(255, 255, 255, 1);
+      .copyright-left {
+        display: flex;
+        a {
+          color: rgba(255, 255, 255, 0.6);
+          margin-left: 4px;
+          @include hover {
+            color: rgba(255, 255, 255, 1);
+          }
         }
       }
-      .filing-img {
-        height: 16px;
-        width: 16px;
-        align-self: center;
-      }
-    }
-  }
+      .filing {
+        display: flex;
+        align-items: center;
+        margin-left: 16px;
 
-  .license {
-    color: $color;
-    margin-top: 6px;
-    span {
-      color: rgba(255, 255, 255, 0.6);
+        .filing-img {
+          height: 18px;
+        }
+        .beian-info {
+          margin-left: 4px;
+        }
+      }
     }
   }
 
   .footer-right {
-    flex: 1;
-    .code-box {
+    display: flex;
+    flex-shrink: 0;
+
+    .code-pop {
       display: flex;
-      justify-content: right;
-      gap: 16px;
-      .code-pop {
-        cursor: pointer;
-        position: relative;
-        height: 20px;
-        display: block;
-        > img {
-          height: 100%;
-          object-fit: cover;
+      flex-direction: column;
+      align-items: center;
+
+      img {
+        width: 64px;
+      }
+      .txt {
+        margin-top: 4px;
+        color: var(--o-color-white);
+        @include tip1;
+      }
+    }
+    .code-pop + .code-pop {
+      margin-left: 16px;
+    }
+  }
+
+  @include respond-to('<=pad') {
+    .info {
+      padding: 12px 0 8px;
+
+      .info-logo {
+        margin-top: 8px;
+      }
+    }
+    .content {
+      padding: 8px 0;
+
+      .quick-nav {
+        .nav + .nav {
+          margin-left: auto;
         }
-        .code-layer {
-          position: absolute;
-          top: -105px;
-          left: -32px;
-          z-index: 99;
-          display: none;
-          background: #fff;
-          padding: 6px;
-          img {
-            width: 78px;
-            height: 78px;
-          }
-          .txt {
-            margin-top: 8px;
-            color: $color;
-            display: none;
-          }
-          &::after {
-            border: 10px solid transparent;
-            content: '';
-            border-top-color: #fff;
-            position: absolute;
-            bottom: -20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: block;
-          }
+      }
+      .friendship-link {
+        margin-top: 16px;
+      }
+    }
+    .footer-bottom {
+      padding: 12px 0 16px;
+    }
+  }
+
+  @include respond-to('<=pad_v') {
+    .info {
+      padding: 24px 0 16px;
+
+      .info-logo {
+        height: 30px;
+        margin-top: 12px;
+      }
+    }
+    .content {
+      padding: 16px 0;
+
+      .friendship-link {
+        margin-top: 0;
+
+        .friendship-link-box {
+          margin-left: 24px;
         }
-        @include hover {
-          .code-layer {
-            display: block;
-          }
-        }
+      }
+    }
+    .footer-bottom {
+      padding: 16px 0 24px;
+      flex-direction: column;
+    }
+    .copyright {
+      flex-direction: column;
+
+      .copyright-left {
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .filing {
+        margin: 4px 0 0;
+      }
+    }
+    .footer-right {
+      margin-top: 24px;
+
+      .code-pop img {
+        width: 78px;
+      }
+      .code-pop + .code-pop {
+        margin-left: 80px;
       }
     }
   }
 
-  .email {
-    color: $color;
+  @include respond-to('<=phone') {
+    .content .friendship-link {
+      flex-direction: column;
+
+      .friendship-link-title {
+        margin-bottom: 8px;
+      }
+      .friendship-link-box {
+        margin-left: 0;
+
+        a {
+          margin: 4px 24px 0 0;
+        }
+      }
+    }
+    .footer-right .code-pop + .code-pop {
+      margin-left: 60px;
+    }
   }
 }
 </style>

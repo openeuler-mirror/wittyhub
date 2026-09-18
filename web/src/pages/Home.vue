@@ -149,7 +149,7 @@ function handleClear() {
 
 function goToContributors() {
   oaReport('click_contribute_guide', { module: 'home' })
-  router.push('/contributors')
+  router.push('/docs/skillhub-publish-and-manage')
 }
 
 function setSortBy(sort: 'hot' | 'latest' | 'downloads') {

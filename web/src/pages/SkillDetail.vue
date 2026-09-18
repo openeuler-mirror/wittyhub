@@ -11,6 +11,10 @@ import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
+import timeSvg from '@/assets/icons/skill-update-time.svg?raw'
+import riskScoreSvg from '@/assets/icons/skill-risk-score.svg?raw'
+import categorySvg from '@/assets/icons/skill-category.svg?raw'
+import personSvg from '@/assets/icons/person.svg?raw'
 import { OBreadcrumb, OBreadcrumbItem, OLoading, ODialog, OButton, OPopover, OIconInfoTip, useToast } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 
@@ -165,6 +169,12 @@ function getSecurityLevel(score: number | null): { label: string; class: string;
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
+// 风险评分展示：有分值显示 x/100，未检测显示文案
+const riskScoreText = computed(() => {
+  const score = skill.value?.risk_score
+  if (score === null || score === undefined) return '未检测'
+  return `${score}/100`
+})
 
 // 统一 skill_id 到新格式 {source_type}:{owner}/{repo}/{skill_dir}。
 // 历史数据可能仍为旧格式 {source_type}/{owner}/{repo}/<path...>，
@@ -373,12 +383,30 @@ onMounted(async () => {
             </div>
             <p class="skill-desc" v-if="skill.description">{{ skill.description }}</p>
 
+            <!-- 元信息区：分类 / 平台类型 / 更新时间 / 风险评分 -->
+            <div class="skill-meta">
+              <div v-if="skill.category" class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="categorySvg"></span>
+                <span class="skill-meta-text">{{ skill.category_label || skill.category }}</span>
+              </div>
+              <div v-if="skill.platform" class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="personSvg"></span>
+                <span class="skill-meta-text">{{ platformNames[skill.platform] || skill.platform }}</span>
+              </div>
+              <div class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="timeSvg"></span>
+                <span class="skill-meta-text">更新时间：{{ formatDate(skill.updated_at) }}</span>
+              </div>
+              <div class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="riskScoreSvg"></span>
+                <span class="skill-meta-text">风险评分：{{ riskScoreText }}</span>
+              </div>
+            </div>
+
             <!-- 标签区 -->
-            <div class="skill-tags">
-              <span v-if="skill.category" class="tag tag-category">{{ skill.category_label || skill.category }}</span>
-              <span v-if="skill.platform" class="tag tag-gray">{{ platformNames[skill.platform] || skill.platform }}</span>
+            <div v-if="(skill.tags || []).length" class="skill-tags">
               <span
-                v-for="tag in (skill.tags || []).slice(0, 5)"
+                v-for="tag in (skill.tags || [])"
                 :key="tag"
                 class="tag tag-gray"
               >{{ tag }}</span>
@@ -500,7 +528,12 @@ onMounted(async () => {
               <div class="info-list">
                 <div class="info-row">
                   <span class="info-label">贡献者</span>
-                  <span class="info-value">{{ skill.author || '-' }}</span>
+                  <router-link
+                    v-if="skill.author && skill.source"
+                    :to="`/contributors/${encodeURIComponent(skill.source)}/${encodeURIComponent(skill.author)}`"
+                    class="info-link"
+                  >{{ skill.author }}</router-link>
+                  <span v-else class="info-value">-</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">仓库地址</span>
@@ -515,10 +548,6 @@ onMounted(async () => {
                 <div class="info-row">
                   <span class="info-label">下载量</span>
                   <span class="info-value">{{ skill.download_count.toLocaleString() }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">更新时间</span>
-                  <span class="info-value">{{ formatDate(skill.updated_at) }}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">版本</span>
@@ -747,7 +776,42 @@ onMounted(async () => {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    margin-top: 12px;
     margin-bottom: 0;
+  }
+
+  .skill-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 24px;
+  }
+
+  .skill-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .skill-meta-icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--o-color-info3);
+
+    :deep(svg) {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .skill-meta-text {
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    font-size: 14px;
+    line-height: 22px;
+    letter-spacing: 0px;
+    text-align: left;
+    color: var(--o-color-info3);
   }
 }
 

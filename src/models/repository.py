@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
-from sqlalchemy import case, delete, desc, func, or_, select, update
+from sqlalchemy import and_, case, delete, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +11,7 @@ from src.api.services.categories import CANONICAL_CATEGORIES, category_label
 from src.models.orm import (
     Agent,
     AgentVersion,
+    Contributor,
     DownloadHistory,
     SecurityAudit,
     Skill,
@@ -79,6 +80,7 @@ class SkillRepoRepository:
         forks_count: int | None = None,
         watchers_count: int | None = None,
         popularity_updated_at: datetime | None = None,
+        author: str | None = None,
         commit: bool = True,
     ) -> SkillRepoModel:
         values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
@@ -106,6 +108,8 @@ class SkillRepoRepository:
             values["watchers_count"] = watchers_count
         if popularity_updated_at is not None:
             values["popularity_updated_at"] = popularity_updated_at
+        if author is not None:
+            values["author"] = author
 
         await self.session.execute(
             update(SkillRepoModel)
@@ -671,10 +675,11 @@ class SkillRepository:
         total = await self.session.scalar(count_query)
 
         if sort_by == "download_count" and sort_period in ("week", "month"):
+            now = datetime.now(timezone.utc)
             if sort_period == "week":
-                cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+                cutoff = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
             else:
-                cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+                cutoff = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
             dl_subquery = (
                 select(
@@ -718,6 +723,49 @@ class SkillRepository:
             skills = list(result.scalars().all())
 
         return skills, total or 0
+
+    async def get_contributor_skills(
+        self,
+        source: str,
+        author: str,
+        skip: int = 0,
+        limit: int = 20,
+        sort_by: str = "download_count",
+    ) -> tuple[List[Skill], int, int, str | None]:
+        """查询 contributor（source + author）下的全部可见 skills 及聚合统计。
+
+        Returns:
+            (skills, total, total_downloads, platform)：
+            total 为 0 表示该 contributor 名下没有可见 skill（路由层转 404）。
+        """
+        base_filter = and_(
+            Skill.source == source,
+            Skill.author == author,
+            Skill.risk_score.is_not(None),
+        )
+
+        stats_result = await self.session.execute(
+            select(
+                func.count(Skill.id),
+                func.coalesce(func.sum(Skill.download_count), 0),
+                func.min(Skill.platform),
+            ).where(base_filter)
+        )
+        total, total_downloads, platform = stats_result.one()
+
+        if not total:
+            return [], 0, 0, None
+
+        query = select(Skill).where(base_filter)
+        if sort_by == "download_count":
+            order_by = [desc(Skill.download_count), desc(Skill.updated_at), desc(Skill.created_at)]
+        else:
+            order_by = [desc(Skill.updated_at), desc(Skill.created_at)]
+        query = query.order_by(*order_by).offset(skip).limit(limit)
+
+        result = await self.session.execute(query)
+        skills = list(result.scalars().all())
+        return skills, total, int(total_downloads), platform
 
     async def update(self, skill_id: str, update_data: dict[str, Any]) -> Skill | None:
         existing = await self.get_by_skill_id(skill_id)
@@ -773,17 +821,18 @@ class SkillRepository:
 
         return (version_result.rowcount or 0) > 0 or (summary_result.rowcount or 0) > 0
 
-    async def increment_download(self, skill_id: str) -> bool:
+    async def increment_download(self, skill_id: str) -> uuid.UUID | None:
+        """累加下载计数，返回该 Skill 的主键 UUID（未命中返回 None），供调用方落 DownloadHistory。"""
         existing = await self.get_by_skill_id(skill_id)
         if existing is None:
-            return False
+            return None
         await self.session.execute(
             update(Skill)
             .where(Skill.id == existing.id)
             .values(download_count=Skill.download_count + 1)
         )
         await self.session.flush()
-        return True
+        return existing.id
 
     async def update_last_indexed(self, skill_id: str) -> None:
         existing = await self.get_by_skill_id(skill_id)
@@ -905,13 +954,191 @@ class SkillRepository:
         )
         security_levels = [{"name": row.level, "count": row.count} for row in security_result.fetchall()]
 
+        # 下载总量
+        downloads_result = await self.session.execute(
+            select(func.coalesce(func.sum(latest_skills.c.download_count), 0))
+            .select_from(latest_skills)
+        )
+        total_downloads = downloads_result.scalar() or 0
+
         return {
             "total_skills": total_skills,
             "total_categories": total_categories,
+            "total_downloads": total_downloads,
             "categories": categories,
             "platforms": platforms,
             "security_levels": security_levels,
         }
+
+
+class ContributorRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def upsert(
+        self,
+        *,
+        source: str,
+        author: str,
+        platform: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        git_profile: str | None = None,
+        website: str | None = None,
+        repo_url: str | None = None,
+        skill_count: int | None = None,
+        commit: bool = True,
+    ) -> Contributor:
+        """Insert or update a contributor row.
+
+        On conflict (source, author): platform/repo_url/skill_count are always
+        refreshed; profile fields (name/description/git_profile/website) are
+        refreshed only when the caller provides a non-empty value (catalog is
+        the source of truth when it provides one; null keeps the existing
+        value, so manual enrichment of fields the catalog does not carry is
+        preserved).
+        """
+        existing = await self.session.execute(
+            select(Contributor).where(
+                Contributor.source == source,
+                Contributor.author == author,
+            )
+        )
+        row = existing.scalar_one_or_none()
+
+        if row is None:
+            row = Contributor(
+                source=source,
+                author=author,
+                platform=platform,
+                name=name or author,
+                description=description,
+                git_profile=git_profile,
+                website=website,
+                repo_url=repo_url,
+                skill_count=skill_count or 0,
+            )
+            self.session.add(row)
+        else:
+            if platform is not None:
+                row.platform = platform
+            if name:
+                row.name = name
+            if description:
+                row.description = description
+            if git_profile:
+                row.git_profile = git_profile
+            if website:
+                row.website = website
+            if repo_url is not None:
+                row.repo_url = repo_url
+            if skill_count is not None:
+                row.skill_count = skill_count
+            row.updated_at = datetime.now(timezone.utc)
+
+        if commit:
+            await self.session.commit()
+        return row
+
+    async def get(self, source: str, author: str) -> Contributor | None:
+        result = await self.session.execute(
+            select(Contributor).where(
+                Contributor.source == source,
+                Contributor.author == author,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def count_skills(self, source: str, author: str) -> int:
+        """统计贡献者名下可见 skill 数（含同 author 的其他仓库）。
+
+        可见性规则与 ``SkillRepository.get_contributor_skills`` 一致
+        （risk_score 已审计非空）。同一事务内可看到本次扫描未 commit 的写入，
+        因此扫描流程 store_skills_and_versions 之后调用即可拿到最新值。
+        """
+        result = await self.session.execute(
+            select(func.count(Skill.id)).where(
+                Skill.source == source,
+                Skill.author == author,
+                Skill.risk_score.is_not(None),
+            )
+        )
+        return int(result.scalar() or 0)
+
+    async def list(
+        self,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+        platform: str | None = None,
+        keyword: str | None = None,
+        sort_by: str = "skill_count",
+    ) -> tuple[list[tuple[Contributor, int]], int, dict[str, int]]:
+        """Return ((contributor, total_downloads) rows, total, platform_counts).
+
+        ``total_downloads`` aggregates ``skills.download_count`` per
+        (source, author) via a correlated subquery (same visibility rule as
+        ``SkillRepository.get_contributor_skills``: risk_score not null).
+
+        ``platform_counts`` counts contributors per platform under the same
+        keyword filter (ignoring ``platform`` tab selection so the tabs always
+        reflect the full search scope).
+        """
+        base_filter: list[Any] = []
+        count_filter: list[Any] = []
+        if platform:
+            base_filter.append(Contributor.platform == platform)
+        if keyword:
+            kw = f"%{keyword.strip()}%"
+            like = or_(
+                Contributor.name.ilike(kw),
+                Contributor.author.ilike(kw),
+                Contributor.description.ilike(kw),
+            )
+            base_filter.append(like)
+            count_filter.append(like)
+
+        count_q = select(func.count(Contributor.id))
+        if count_filter:
+            count_q = count_q.where(*count_filter)
+        total = (await self.session.execute(count_q)).scalar() or 0
+
+        # Per-platform counts under current keyword filter
+        pc_q = (
+            select(Contributor.platform, func.count(Contributor.id))
+            .where(*count_filter)
+            .group_by(Contributor.platform)
+        )
+        pc_rows = (await self.session.execute(pc_q)).all()
+        platform_counts: dict[str, int] = {}
+        for p, c in pc_rows:
+            if p:
+                platform_counts[p] = int(c)
+
+        # Correlated subquery: total downloads across the contributor's skills
+        downloads_sq = (
+            select(func.coalesce(func.sum(Skill.download_count), 0))
+            .where(
+                Skill.source == Contributor.source,
+                Skill.author == Contributor.author,
+                Skill.risk_score.is_not(None),
+            )
+            .correlate(Contributor)
+            .scalar_subquery()
+        )
+
+        q = select(Contributor, downloads_sq.label("total_downloads"))
+        if base_filter:
+            q = q.where(*base_filter)
+        if sort_by == "created_at":
+            q = q.order_by(desc(Contributor.created_at))
+        else:
+            q = q.order_by(desc(Contributor.skill_count), desc(Contributor.created_at))
+        q = q.offset(skip).limit(limit)
+
+        result = await self.session.execute(q)
+        rows = [(row[0], int(row[1] or 0)) for row in result.all()]
+        return rows, total, platform_counts
 
 
 class AgentRepository:

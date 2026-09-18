@@ -39,7 +39,8 @@ class TestSkillRepositoryUnit:
         repo = SkillRepository(session)
         repo.get_by_skill_id = AsyncMock(return_value=skill)
 
-        assert await repo.increment_download("github/acme/example") is True
+        # 返回命中 Skill 的主键 UUID，供调用方落 DownloadHistory 记录
+        assert await repo.increment_download("github/acme/example") == skill.id
 
         statement = session.execute.await_args.args[0]
         sql = str(statement.compile(dialect=postgresql.dialect()))

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.utils.skill_id import build_skill_id, extract_owner_repo, slugify_identifier
 
+from src.models.orm import DownloadHistory
 from src.models.repository import SkillRepository
 
 
@@ -50,13 +51,25 @@ class TelemetryService:
         self.session = session
         self.skill_repo = SkillRepository(session)
 
-    async def process(self, params: dict[str, str]) -> list[str]:
+    async def process(
+        self,
+        params: dict[str, str],
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> list[str]:
         if params.get("event") != "install":
             return []
 
-        return await self._process_install(params)
+        return await self._process_install(params, ip_address=ip_address, user_agent=user_agent)
 
-    async def _process_install(self, params: dict[str, str]) -> list[str]:
+    async def _process_install(
+        self,
+        params: dict[str, str],
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> list[str]:
         repo_url = params.get("source")
         source_type = params.get("sourceType")
         skills = [skill.strip() for skill in params.get("skills", "").split(",") if skill.strip()]
@@ -80,9 +93,19 @@ class TelemetryService:
             skill_id = build_skill_id_from_telemetry(source_type, repo_url, skill_name, skill_files)
             if not skill_id:
                 continue
-            updated = await self.skill_repo.increment_download(skill_id)
-            if updated:
-                matched_skill_ids.append(skill_id)
+            skill_uuid = await self.skill_repo.increment_download(skill_id)
+            if skill_uuid is None:
+                continue
+            # 与 API 下载路径对齐：落 DownloadHistory 记录，供本周/本月下载量排序统计
+            self.session.add(
+                DownloadHistory(
+                    resource_type="skill",
+                    resource_id=skill_uuid,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+            )
+            matched_skill_ids.append(skill_id)
 
         if matched_skill_ids:
             await self.session.commit()

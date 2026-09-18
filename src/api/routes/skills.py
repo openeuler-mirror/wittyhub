@@ -15,8 +15,11 @@ from src.api.schemas.skill import (
     AuditByUrlRequest,
     AuditByUrlResponse,
     AuditByUrlResultResponse,
+    ContributorListResponse,
+    ContributorResponse,
     AuditReportResponse,
     ErrorResponse,
+    ContributorSkillsResponse,
     SecurityAuditResponse,
     SkillCreate,
     SkillListResponse,
@@ -31,6 +34,7 @@ from src.core.auth import require_admin_token
 from src.core.database import get_db
 from src.core.rate_limit import limiter
 from src.models.repository import (
+    ContributorRepository,
     DownloadHistoryRepository,
     SkillRepoRepository,
     SkillRepository,
@@ -143,19 +147,28 @@ async def receive_telemetry(
     db: AsyncSession = Depends(get_db),
 ):
     """Receive telemetry data from wittyhub CLI and update counters for installs.
-    request params: 
-    {   
-        'v': '1.5.13', 
-        'event': 'install', 
-        'source': 'vercel-labs/agent-skills', 
-        'skills': 'deploy-to-vercel', 
-        'agents': 'amp,antigravity,antigravity-cli,cline,codex,cursor,deepagents,gemini-cli,github-copilot,kimi-code-cli,opencode,warp,zed,openclaw', 
+
+    Matched skills also get a download_history record (with IP/User-Agent),
+    which feeds the weekly/monthly download ranking.
+
+    request params:
+    {
+        'v': '1.5.13',
+        'event': 'install',
+        'source': 'vercel-labs/agent-skills',
+        'sourceType': 'github',
+        'skills': 'deploy-to-vercel',
+        'agents': 'amp,antigravity,antigravity-cli,cline,codex,cursor,deepagents,gemini-cli,github-copilot,kimi-code-cli,opencode,warp,zed,openclaw',
         'skillFiles': '{"deploy-to-vercel":"skills/deploy-to-vercel/SKILL.md"}'
     }
     """
     params = dict(request.query_params)
     telemetry_service = TelemetryService(db)
-    matched_skill_ids = await telemetry_service.process(params)
+    matched_skill_ids = await telemetry_service.process(
+        params,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return {"ok": True, "matched_skill_ids": matched_skill_ids}
 
 
@@ -493,6 +506,98 @@ async def audit_by_url_report(
     )
 
 
+@router.get("/contributors/{source}/{author}", response_model=ContributorSkillsResponse)
+async def get_contributor_skills(
+    source: Annotated[str, Path(max_length=50, description="平台来源：github / gitcode")],
+    author: Annotated[str, Path(max_length=255, description="contributor 名称（skills.author 精确匹配）")],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "download_count",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 contributor（source + author）名下全部可见 skills 的聚合视图。
+
+    platform/description/repo_url 取自 contributors 表（扫描时写入），
+    skill 列表 + total_downloads 从 skills 表实时查询。
+    """
+    contributor_repo = ContributorRepository(db)
+    contributor = await contributor_repo.get(source, author)
+    if not contributor:
+        raise HTTPException(status_code=404, detail="Contributor not found")
+
+    skill_repo = SkillRepository(db)
+    skills, total, total_downloads, _ = await skill_repo.get_contributor_skills(
+        source, author, skip=skip, limit=limit, sort_by=sort_by
+    )
+    if not total:
+        raise HTTPException(status_code=404, detail="Contributor has no visible skills")
+
+    return ContributorSkillsResponse(
+        source=source,
+        author=author,
+        platform=contributor.platform,
+        name=contributor.name,
+        description=contributor.description,
+        git_profile=contributor.git_profile,
+        website=contributor.website,
+        skill_count=total,
+        total_downloads=total_downloads,
+        skills=[skill_to_response(s) for s in skills],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get("/contributors", response_model=ContributorListResponse)
+async def list_contributors(
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    platform: Annotated[str | None, Query(max_length=100)] = None,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+    sort_by: Annotated[str, Query(pattern="^(skill_count|created_at)$")] = "skill_count",
+    db: AsyncSession = Depends(get_db),
+):
+    """列出所有贡献者，支持按 platform/keyword 筛选、按 skill 数量或注册时间排序。
+
+    ``platform_counts`` 返回当前 keyword 下各 platform 的命中数量（忽略 platform
+    筛选），前端标签页展示数量时使用。
+    """
+    repo = ContributorRepository(db)
+    rows, total, platform_counts = await repo.list(
+        skip=skip,
+        limit=limit,
+        platform=platform,
+        keyword=keyword,
+        sort_by=sort_by,
+    )
+    return ContributorListResponse(
+        contributors=[
+            ContributorResponse(
+                id=str(c.id),
+                source=c.source,
+                author=c.author,
+                platform=c.platform,
+                name=c.name,
+                description=c.description,
+                avatar_url=c.avatar_url,
+                git_profile=c.git_profile,
+                website=c.website,
+                repo_url=c.repo_url,
+                skill_count=c.skill_count,
+                total_downloads=downloads,
+                created_at=c.created_at,
+                updated_at=c.updated_at,
+            )
+            for c, downloads in rows
+        ],
+        total=total,
+        skip=skip,
+        limit=limit,
+        platform_counts=platform_counts,
+    )
+
+
 @router.get("/versions/{skill_id:path}", response_model=SkillVersionsResponse)
 async def get_skill_versions(
     skill_id: SkillIdPath,
@@ -505,12 +610,16 @@ async def get_skill_versions(
     if not latest_skill and not tagged_versions:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    versions = [latest_skill]
-    if tagged_versions is not None:
-        versions.extend(tagged_versions)
+    # 只返回 skill_versions 表的历史版本（Tag 版本），不包含 skills 表的 latest 行
+    versions = list(tagged_versions) if tagged_versions else []
+    source_url = (
+        latest_skill.source_url
+        if latest_skill
+        else (versions[0].source_url if versions else "")
+    )
 
     return SkillVersionsResponse(
-        source_url=latest_skill.source_url,
+        source_url=source_url,
         skill_id=skill_id,
         versions=[skill_to_response(s) for s in versions],
     )

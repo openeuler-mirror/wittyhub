@@ -181,7 +181,7 @@ export interface SkillVersion {
   commit_id: string | null
   author: string | null
   message: string | null
-  released_at: string | null
+  created_at: string
   download_count: number
   install_command?: string
   content: string | null
@@ -190,6 +190,7 @@ export interface SkillVersion {
 export interface Stats {
   total_skills: number
   total_categories: number
+  total_downloads: number
   categories: Category[]
   platforms: { name: string; count: number }[]
   security_levels: { name: string; count: number }[]

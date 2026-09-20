@@ -5,11 +5,15 @@ import { api } from '@/api/client'
 import type { Contributor } from '@/api/types'
 import { OPagination, OLoading } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
+import { useAppStore } from '@/stores/app'
+import heroBgLight from '@/assets/bg/hero-top-texture.png'
+import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import flowPrepareSvg from '@/assets/icons/flow-prepare.svg?raw'
 import flowClaSvg from '@/assets/icons/flow-cla.svg?raw'
 import flowSubmitSvg from '@/assets/icons/flow-submit.svg?raw'
 import flowPublishSvg from '@/assets/icons/flow-publish.svg?raw'
 const router = useRouter()
+const appStore = useAppStore()
 
 const platformNames: Record<string, string> = {
   enterprise: '企业组织',
@@ -167,10 +171,8 @@ onMounted(fetchContributors)
   <div class="contributors-page">
     <!-- ========== Hero 区域 ========== -->
     <section class="hero-section">
-      <div class="hero-bg">
-        <div class="hero-glow hero-glow-left"></div>
-        <div class="hero-glow hero-glow-right"></div>
-        <div class="hero-code-pattern"></div>
+      <div class="absolute inset-0 pointer-events-none">
+        <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
       </div>
       <div class="container-wide relative">
         <h1 class="hero-title">贡献 openEuler Skill</h1>
@@ -366,55 +368,6 @@ onMounted(fetchContributors)
   position: relative;
   overflow: hidden;
   padding: 48px 0 32px;
-}
-.hero-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-}
-.hero-glow {
-  position: absolute;
-  width: 480px;
-  height: 320px;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.35;
-}
-.hero-glow-left {
-  top: -80px;
-  left: -120px;
-  background: linear-gradient(135deg, #c7d9f7, #e0d0f7);
-  @include dark {
-    opacity: 0.08;
-    background: #1a2540;
-  }
-}
-.hero-glow-right {
-  top: -120px;
-  right: -80px;
-  background: linear-gradient(135deg, #c7d9f7, #c7e5f7);
-  @include dark {
-    opacity: 0.08;
-    background: #1a2a40;
-  }
-}
-.hero-code-pattern {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 320px;
-  height: 200px;
-  background: radial-gradient(ellipse at 80% 20%, rgba(56, 99, 214, 0.06) 0%, transparent 70%);
-  &::after {
-    content: '';
-    position: absolute;
-    top: 20px;
-    right: 40px;
-    width: 160px;
-    height: 120px;
-    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='120' viewBox='0 0 160 120'%3E%3Cpath d='M120 10 L140 30 L120 50' stroke='%233863d6' stroke-width='2' fill='none' opacity='0.1' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M120 70 L140 90 L120 110' stroke='%233863d6' stroke-width='2' fill='none' opacity='0.1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat;
-  }
 }
 .hero-title {
   @include font-semibold;

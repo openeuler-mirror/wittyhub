@@ -9,7 +9,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
-import { OBreadcrumb, OBreadcrumbItem, OLoading } from '@opensig/opendesign'
+import { OBreadcrumb, OBreadcrumbItem, OIconFile, OLoading } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
@@ -144,7 +144,8 @@ watch(() => route.params.doc, loadDoc)
                 :class="{ 'is-active': doc.name === docName }"
                 :to="`/docs/${doc.name}`"
               >
-                {{ doc.title }}
+                <OIconFile class="sidebar-link-icon" />
+                <span class="sidebar-link-text">{{ doc.title }}</span>
               </router-link>
               <!-- 当前文档的章节大纲 -->
               <div v-if="doc.name === docName && outline.length" class="sidebar-outline">
@@ -278,28 +279,77 @@ watch(() => route.params.doc, loadDoc)
   gap: 4px;
 }
 
+/* 一级：文档章节 —— 卡片式导航项（文档图标 + 左侧指示条 + 悬停底色） */
 .sidebar-link {
-  display: block;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   box-sizing: border-box;
-  padding: 8px 12px;
+  padding: 10px 12px 10px 14px;
   border-radius: 4px;
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight_regular);
+  font-weight: var(--o-font_weight-medium);
   font-size: 16px;
   line-height: 24px;
   letter-spacing: 0px;
-  color: var(--o-color-info2);
+  color: var(--o-color-info1);
   text-decoration: none;
   transition: color 0.2s, background-color 0.2s;
 
+  /* 左侧指示条：标记当前章节（默认透明占位，选中时不产生位移） */
+  &::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 16px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background-color 0.2s;
+  }
+
+  .sidebar-link-icon {
+    flex-shrink: 0;
+    font-size: 16px;
+    color: var(--o-color-info3);
+    transition: color 0.2s;
+  }
+
+  .sidebar-link-text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   @include hover {
+    background: var(--o-color-fill3);
     color: var(--o-color-primary1);
+
+    &::before {
+      background: var(--o-color-control5);
+    }
+
+    .sidebar-link-icon {
+      color: var(--o-color-primary1);
+    }
   }
 
   &.is-active {
     background: var(--o-color-control2-light);
     color: var(--o-color-primary1);
-    font-weight: var(--o-font_weight_semibold);
+    font-weight: var(--o-font_weight-semibold);
+
+    &::before {
+      background: var(--o-color-primary1);
+    }
+
+    .sidebar-link-icon {
+      color: var(--o-color-primary1);
+    }
   }
 }
 
@@ -309,24 +359,45 @@ watch(() => route.params.doc, loadDoc)
   flex-direction: column;
   gap: 2px;
   margin: 4px 0 8px;
-  padding-left: 12px;
+  padding-left: 14px;
   border-left: 1px solid var(--o-color-control4);
 }
 
+/* 二级：页内大纲 —— 纯文本子项（圆点 + 更小字号/行高 + 更浅文字），与一级章节项区分 */
 .outline-link {
+  position: relative;
   display: block;
-  padding: 4px 8px;
+  padding: 5px 8px 5px 12px;
   font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight_regular);
-  font-size: 14px;
-  line-height: 22px;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 13px;
+  line-height: 20px;
   letter-spacing: 0px;
   color: var(--o-color-info3);
   text-decoration: none;
   transition: color 0.2s;
 
+  /* 前导圆点：二级子项标记，不与一级的文档图标/指示条混淆 */
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--o-color-control4);
+    transition: background-color 0.2s;
+  }
+
+  /* 悬停仅加深文字色：不加底色、不切品牌色，与一级的交互反馈明显不同 */
   @include hover {
-    color: var(--o-color-primary1);
+    color: var(--o-color-info1);
+
+    &::before {
+      background: var(--o-color-primary1);
+    }
   }
 }
 

@@ -40,6 +40,10 @@ def _truncate_snippets(details: dict) -> bool:
     for issue in report.get("issues") or []:
         if not isinstance(issue, dict):
             continue
+        # 幂等防护：已截断过的 issue（写入时压缩或此前回填）直接跳过，
+        # 避免截断后片段（500 字 + 后缀 > 500）被反复重截、mangling 后缀
+        if issue.get("truncated"):
+            continue
         snippet = issue.get("code_snippet")
         if isinstance(snippet, str) and len(snippet) > SNIPPET_MAX_CHARS:
             issue["code_snippet"] = snippet[:SNIPPET_MAX_CHARS] + (
@@ -63,7 +67,7 @@ def main() -> None:
     try:
         rows = session.execute(
             text(
-                "SELECT id, details FROM security_audits "
+                "SELECT id, audited_at, details FROM security_audits "
                 "WHERE details ? 'skillspector_report'"
             )
         ).all()
@@ -71,7 +75,8 @@ def main() -> None:
 
         updated = 0
         skipped = 0
-        for audit_id, details in rows:
+        raced = 0
+        for audit_id, audited_at, details in rows:
             if not isinstance(details, dict):
                 continue
             before = _estimate_bytes(details)
@@ -83,20 +88,37 @@ def main() -> None:
                 continue
             after = _estimate_bytes(details)
             if args.dry_run:
+                updated += 1  # dry-run 也计入候选行数，保证汇总数字与逐行输出一致
                 print(
                     f"[dry-run] audit {audit_id}: {before} -> {after} bytes "
                     f"(save {before - after})"
                 )
                 continue
-            session.execute(
-                text("UPDATE security_audits SET details = :details WHERE id = :id"),
-                {"details": details, "id": audit_id},
+            result = session.execute(
+                text(
+                    "UPDATE security_audits SET details = CAST(:details AS jsonb) "
+                    "WHERE id = :id AND audited_at IS NOT DISTINCT FROM :audited_at"
+                ),
+                {
+                    # psycopg2 不能直接适配 dict，需先序列化为 JSON 字符串再交给 PG 转换
+                    "details": json.dumps(details, ensure_ascii=False),
+                    "id": audit_id,
+                    # 乐观锁：SELECT 后该行若被并发扫描重新审计（audited_at 变化），
+                    # 则放弃更新，避免用旧数据的截断版覆盖新鲜审计结果
+                    "audited_at": audited_at,
+                },
             )
-            updated += 1
+            if result.rowcount:
+                updated += 1
+            else:
+                raced += 1
 
         if not args.dry_run:
             session.commit()
-            print(f"Updated {updated} row(s); {skipped} row(s) below threshold")
+            print(
+                f"Updated {updated} row(s); {raced} row(s) raced with concurrent "
+                f"re-audit (skipped); {skipped} row(s) below threshold"
+            )
         else:
             print(
                 f"Dry-run finished: {updated} candidate row(s) would change; "

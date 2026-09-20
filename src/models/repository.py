@@ -672,9 +672,9 @@ class SkillRepository:
             skill_id_prefix=skill_id_prefix,
             security_level=security_level,
         )
-        total = await self.session.scalar(count_query)
+        rank_by_period = sort_by == "download_count" and sort_period in ("week", "month")
 
-        if sort_by == "download_count" and sort_period in ("week", "month"):
+        if rank_by_period:
             now = datetime.now(timezone.utc)
             if sort_period == "week":
                 cutoff = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -691,13 +691,27 @@ class SkillRepository:
                 .group_by(DownloadHistory.resource_id)
                 .subquery()
             )
+            # 热门-本周/本月：仅展示该周期内有下载的 Skill（inner join 天然排除 0），
+            # 列表查询与计数查询保持同一口径
+            filtered_query = filtered_query.join(
+                dl_subquery, Skill.id == dl_subquery.c.resource_id
+            )
+            count_query = count_query.join(
+                dl_subquery, Skill.id == dl_subquery.c.resource_id
+            )
+        elif sort_by == "download_count":
+            # 热门-全部时间：仅展示累计下载量大于 0 的 Skill
+            filtered_query = filtered_query.where(Skill.download_count > 0)
+            count_query = count_query.where(Skill.download_count > 0)
 
+        total = await self.session.scalar(count_query)
+
+        if rank_by_period:
             query = (
                 filtered_query
                 .add_columns(dl_subquery.c.period_downloads)
-                .outerjoin(dl_subquery, Skill.id == dl_subquery.c.resource_id)
                 .order_by(
-                    desc(func.coalesce(dl_subquery.c.period_downloads, 0)),
+                    desc(dl_subquery.c.period_downloads),
                     desc(Skill.updated_at),
                     desc(Skill.created_at),
                 )
@@ -712,7 +726,7 @@ class SkillRepository:
             query = filtered_query.order_by(*order_by).offset(skip).limit(limit)
 
         result = await self.session.execute(query)
-        if sort_by == "download_count" and sort_period in ("week", "month"):
+        if rank_by_period:
             # 周期排序：查询结果同时包含 Skill 实体与周期下载量，挂载到实体上返回
             skills = []
             for row in result.all():

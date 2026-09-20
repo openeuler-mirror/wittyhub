@@ -36,6 +36,21 @@ const currentSortLabel = computed(() => {
 const isSearchPage = computed(() => route.path === '/skills/search')
 const searchQuery = computed(() => route.query.q as string || '')
 
+// 是否有侧边栏筛选条件生效（分类/贡献者/安全等级）
+const hasActiveFilters = computed(
+  () =>
+    skillStore.filter.category.length > 0 ||
+    skillStore.filter.provider.length > 0 ||
+    skillStore.filter.securityLevel.length > 0
+)
+
+// 热门浏览态显示结果计数的条件：切到本周/本月，或加了筛选；
+// 默认态（热门 + 全部时间 + 无筛选）不显示
+const showHotResultCount = computed(
+  () =>
+    skillStore.filter.sortPeriod !== 'all' || hasActiveFilters.value
+)
+
 onMounted(async () => {
   if (searchQuery.value) {
     searchInput.value = searchQuery.value
@@ -291,9 +306,15 @@ function onPaginationChange(
               </ODropdown>
               </div>
 
-              <!-- 搜索结果提示：数据加载完成后再显示 -->
+              <!-- 结果计数提示：数据加载完成后再显示 -->
+              <!-- 搜索态：展示与关键词匹配的结果数 -->
               <div v-if="isSearchPage && searchQuery && !skillStore.loading" class="text-sm text-[var(--o-color-text3)]">
                 为您找到 <span class="text-[var(--o-color-info1)] font-semibold">{{ skillStore.total }}</span> 个与 "{{ searchQuery }}" 匹配的搜索结果
+              </div>
+              <!-- 热门浏览态：仅统计下载量大于 0 的 Skill；
+                   默认态（热门+全部时间+无筛选）不显示，切周期或加筛选后才显示 -->
+              <div v-else-if="!isSearchPage && skillStore.filter.sortBy === 'hot' && showHotResultCount && !skillStore.loading" class="text-sm text-[var(--o-color-text3)]">
+                为您找到 <span class="text-[var(--o-color-info1)] font-semibold">{{ skillStore.total }}</span> 个相关Skill
               </div>
             </div>
 

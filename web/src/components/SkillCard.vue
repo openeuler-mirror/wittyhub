@@ -33,11 +33,12 @@ const skillStore = useSkillStore()
 
 // 近7天/近30天排序时显示周期下载量，否则显示累计下载量
 // 搜索场景后端不返回周期下载量（搜索忽略 sort_period），始终显示累计下载量
+// 贡献者详情页等非首页场景后端也不会返回 period_downloads，此时回退到累计下载量
 const displayDownloadCount = computed(() => {
   const period = skillStore.filter.sortPeriod
   const isSearching = !!skillStore.filter.keyword
-  if (!isSearching && (period === 'week' || period === 'month')) {
-    return props.skill.period_downloads ?? 0
+  if (!isSearching && (period === 'week' || period === 'month') && props.skill.period_downloads != null) {
+    return props.skill.period_downloads
   }
   return props.skill.download_count
 })

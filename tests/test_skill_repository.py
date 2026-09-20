@@ -929,8 +929,80 @@ repositories:
             repository_commit_id="c" * 40,
             skill_discover_status="done",
             skill_num=0,
+            author=None,
         )
         assert result is updated_repo
+
+    async def test_discover_store_upserts_contributor_with_catalog_profile(self, tmp_path):
+        """enterprise/personal 仓库 author 未显式传入时用扫描结果兜底，
+        且 upsert contributors 时注入 catalog 的 name/description/git_profile。"""
+        from skillcrawler.core.skill_manager import SkillManager
+
+        skill_repository = MagicMock()
+        skill_repository.store_skills_and_versions = AsyncMock()
+        repo_repository = MagicMock()
+        updated_repo = SimpleNamespace(id=uuid.uuid4())
+        repo_repository.update_skill_repository = AsyncMock(return_value=updated_repo)
+        contributor_repository = MagicMock()
+        contributor_repository.upsert = AsyncMock()
+        # skill_count 从 skills 表聚合（含同 author 其他仓库），而非单仓库扫描数
+        contributor_repository.count_skills = AsyncMock(return_value=7)
+        manager = SkillManager(
+            skill_repository,
+            repo_repository,
+            contributor_repository=contributor_repository,
+            catalog_path=Path("/nonexistent-catalog"),
+        )
+        repo = SimpleNamespace(
+            id=updated_repo.id,
+            platform="enterprise",
+            repo_name="github.com_wordpress_agent-skills",
+            source="github",
+            url="https://github.com/wordpress/agent-skills",
+        )
+        scanned_skill = SimpleNamespace(skill_id="github/wordpress/agent-skills/x", author="wordpress")
+
+        with (
+            patch.object(
+                SkillManager,
+                "_discover_skills",
+                AsyncMock(return_value=([scanned_skill], [], "c" * 40)),
+            ),
+            patch.object(
+                SkillManager,
+                "_store_to_security_audits",
+                AsyncMock(),
+            ),
+        ):
+            await manager._discover_and_store_skills(
+                repo,
+                clone_dir=tmp_path,
+                repo_name="github.com_wordpress_agent-skills",
+            )
+
+        # author 从扫描结果兜底为 URL 推导的 wordpress
+        contributor_repository.count_skills.assert_awaited_once_with("github", "wordpress")
+        contributor_repository.upsert.assert_awaited_once_with(
+            source="github",
+            author="wordpress",
+            platform="enterprise",
+            repo_url="https://github.com/wordpress/agent-skills",
+            skill_count=7,
+            name=None,
+            description=None,
+            git_profile=None,
+            website=None,
+            commit=False,
+        )
+        # catalog 不可用时 profile 查不到 → name/description/git_profile/website 为 None；
+        # 但 skill_repos.author 回写仍生效
+        repo_repository.update_skill_repository.assert_awaited_once_with(
+            repo.id,
+            repository_commit_id="c" * 40,
+            skill_discover_status="done",
+            skill_num=1,
+            author="wordpress",
+        )
 
     async def test_security_audit_store_uses_runtime_trigger_flag(self):
         from skillcrawler.core.skill_manager import SkillManager

@@ -21,10 +21,10 @@ from typing import Any
 
 from skillcrawler.core.skill_manager import SkillManager
 from skillcrawler.main import build_configured_discover_requests
-from skillcrawler.config import sync_openEuler_skills_repo
+from skillcrawler.config import load_contributor_profiles, sync_openEuler_skills_repo
 from src.core.config import DiscoverSchedulerConfig
 from src.core.database import AsyncSessionLocal
-from src.models.repository import SkillRepoRepository, SkillRepository
+from src.models.repository import ContributorRepository, SkillRepoRepository, SkillRepository
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,7 @@ class DiscoverScheduler:
             manager = SkillManager(
                 skill_repository=SkillRepository(session),
                 skill_repo_repository=SkillRepoRepository(session),
+                contributor_repository=ContributorRepository(session),
                 catalog_path=repository_path,
             )
             for index, request in enumerate(requests, start=1):
@@ -218,6 +219,14 @@ class DiscoverScheduler:
                     elapsed,
                 )
 
+            # 扫描结束后同步 catalog 各 platform 的贡献者信息（name/description/
+            # git_profile）：覆盖 commit 未变被跳过的仓库，以及已登记但尚未
+            # 扫描出 skill 的组织；skill_count 始终以扫描结果为准
+            profile_count = await self._sync_contributor_profiles(session, repository_path)
+            logger.info(
+                "Contributor profiles synced from catalog: %d entries", profile_count
+            )
+
         run_elapsed = time.monotonic() - run_started
         avg_elapsed = run_elapsed / total if total else 0.0
         slowest = sorted(repo_durations, key=lambda item: item[1], reverse=True)[:3]
@@ -251,6 +260,53 @@ class DiscoverScheduler:
             }
         )
         return counters
+
+    @staticmethod
+    async def _sync_contributor_profiles(
+        session: Any, repository_path: Path
+    ) -> int:
+        """把 openEuler-skills catalog 各 platform 的贡献者信息注入 contributors 表。
+
+        读取 community/<sig>/、enterprise/<org>/、personal/<author>/ 下的
+        skill.yaml（模板规范见 templates/*-skill-spec.yaml），将 name/
+        description/git_profile/website 等 profile 字段 upsert 进
+        contributors。
+        失败只记录 warning，不影响扫描主流程；skill_count 不在同步范围
+        （以扫描结果为准，新插入行默认 0）。
+        """
+        try:
+            profiles = load_contributor_profiles(repository_path)
+        except Exception:
+            logger.warning(
+                "Failed to load contributor profiles from %s", repository_path, exc_info=True
+            )
+            return 0
+
+        repo = ContributorRepository(session)
+        synced = 0
+        try:
+            for profile in profiles:
+                if not profile["source"]:
+                    # 未登记任何仓库，无法确定 (source, author) 键，跳过
+                    continue
+                await repo.upsert(
+                    source=profile["source"],
+                    author=profile["author"],
+                    platform=profile["platform"],
+                    name=profile["name"],
+                    description=profile["description"],
+                    git_profile=profile["git_profile"],
+                    website=profile["website"],
+                    repo_url=profile["repo_url"],
+                    commit=False,
+                )
+                synced += 1
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.warning("Failed to sync contributor profiles", exc_info=True)
+            return 0
+        return synced
 
     def _resolve_result_dir(self) -> Path:
         """结果保存目录：优先 result_dir 配置，否则 storage.local_path/logs。"""

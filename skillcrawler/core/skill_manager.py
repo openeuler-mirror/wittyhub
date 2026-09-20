@@ -7,10 +7,12 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+from sqlalchemy import update
 
+from skillcrawler.config import load_contributor_profiles
 from skillcrawler.core.category_classifier import (
     CategoryClassificationError,
     DeepSeekCategoryClassifier,
@@ -29,6 +31,7 @@ from src.utils.skill_id import extract_owner_repo
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import (
+    ContributorRepository,
     SecurityAuditRepository,
     SkillRepoRepository,
     SkillRepository,
@@ -60,11 +63,17 @@ class SkillDiscoverStatus:
 class SkillManager:
     skill_repository: SkillRepository
     skill_repo_repository: SkillRepoRepository
+    contributor_repository: ContributorRepository | None = None
     workspace_base: Path | None = None
     catalog_path: Path | None = None
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
     _openeuler_sig_by_repo_name: dict[str, str] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _contributor_profile_by_key: dict[tuple[str, str], dict[str, Any]] | None = field(
         default=None,
         init=False,
         repr=False,
@@ -183,6 +192,18 @@ class SkillManager:
                 # 由于 skills / skill_versions 表对 skill_repos 有 ondelete="CASCADE" 外键（ orm.py ），
                 # 删 repository 时其下所有 skill 记录会 级联删除
                 await self.skill_repo_repository.delete_skill_repository(repository.id)
+                if repository.author and self.contributor_repository is not None:
+                    # 仓库删除后重新聚合该贡献者的 skill_count（同 author 的
+                    # 其他仓库不受影响）；repo_url 传 None 保留已有值
+                    await self.contributor_repository.upsert(
+                        source=repository.source,
+                        author=repository.author,
+                        platform=repository.platform,
+                        repo_url=None,
+                        skill_count=await self.contributor_repository.count_skills(
+                            repository.source, repository.author
+                        ),
+                    )
                 return repository
             return None
 
@@ -190,14 +211,19 @@ class SkillManager:
             normalized,
             repo_name,
         )
-        if not created_new and self._is_commit_unchanged(repository, clone_dir):
-            candidates, triggered = await self._retry_unscored_security_audits(repository)
-            if candidates:
-                setattr(repository, "_security_retry_candidates", candidates)
-                setattr(repository, "_security_retriggered", triggered)
+        if not created_new:
+            # 此前以直接采集方式（platform=''）收录的仓库，若后续在锚点目录中
+            # 登记（platform='community'），即使 git 提交未变化，也必须迁移其
+            # 列表来源字段（platform/source）。
+            repository = await self._sync_catalog_source(repository, normalized)
+            if self._is_commit_unchanged(repository, clone_dir):
+                candidates, triggered = await self._retry_unscored_security_audits(repository)
+                if candidates:
+                    setattr(repository, "_security_retry_candidates", candidates)
+                    setattr(repository, "_security_retriggered", triggered)
+                    return repository
+                setattr(repository, "_unchanged", True)
                 return repository
-            setattr(repository, "_unchanged", True)
-            return repository
 
         # Cache values needed by the error path before any commit/rollback can
         # expire the ORM instance, otherwise accessing them after rollback triggers
@@ -253,6 +279,13 @@ class SkillManager:
             author=author,
             skill_paths=skill_paths,
         )
+        # enterprise/personal 仓库 author 未显式传入（community 走 sig_name）时，
+        # 用扫描结果里 URL 推导的 author 兜底，保证 skill_repos.author 与
+        # contributors 表对全部 platform 都有值
+        if not author and latest_skills:
+            author = next(
+                (skill.author for skill in latest_skills if skill.author), None
+            )
         _logger.info(
             'Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d, '
             'security_cache_hits=%d, security_audits_submitted=%d, security_audits_pending=%d',
@@ -272,12 +305,63 @@ class SkillManager:
             latest_skills,
             tagged_skills,
         )
+        # Write author back to skill_repos + upsert contributors table
+        # (profile 字段取自 openEuler-skills catalog 各 platform 的 skill.yaml)
+        if author and self.contributor_repository is not None:
+            profile = self._contributor_profile(repo.platform, author)
+            # skill_count 从 skills 表实时聚合该 author 名下全部可见 skill
+            # （含同 author 的其他仓库），避免多仓库 upsert 互相覆盖单仓库扫描值
+            contributor_skill_count = await self.contributor_repository.count_skills(
+                repo.source, author
+            )
+            await self.contributor_repository.upsert(
+                source=repo.source,
+                author=author,
+                platform=repo.platform,
+                repo_url=repo.url,
+                skill_count=contributor_skill_count,
+                name=profile.get('name'),
+                description=profile.get('description'),
+                git_profile=profile.get('git_profile'),
+                website=profile.get('website'),
+                commit=False,
+            )
         return await self.skill_repo_repository.update_skill_repository(
             repo.id,
             repository_commit_id=repository_commit_id,
             skill_discover_status=SkillDiscoverStatus.DONE,
             skill_num=unique_skill_count,
+            author=author,
         )
+
+    def _contributor_profile(self, platform: str | None, author: str) -> dict[str, Any]:
+        """Lookup catalog profile fields (name/description/git_profile) for a contributor.
+
+        Lazily loads all profiles from the openEuler-skills catalog
+        (community/enterprise/personal skill.yaml) and indexes them by
+        (platform, author). Returns an empty dict when the catalog is
+        unavailable or the contributor is not registered.
+        """
+        if self.catalog_path is None:
+            return {}
+        if self._contributor_profile_by_key is None:
+            try:
+                profiles = load_contributor_profiles(self.catalog_path)
+                self._contributor_profile_by_key = {
+                    (p['platform'], p['author']): p for p in profiles
+                }
+                _logger.info(
+                    'Loaded contributor profiles from catalog: %d entries',
+                    len(self._contributor_profile_by_key),
+                )
+            except Exception as exc:
+                _logger.warning(
+                    'Failed to load contributor profiles from catalog %s: %s',
+                    self.catalog_path,
+                    exc,
+                )
+                self._contributor_profile_by_key = {}
+        return self._contributor_profile_by_key.get((platform or '', author), {})
 
     async def _discover_skills(
         self,
@@ -525,6 +609,74 @@ class SkillManager:
 
         repository = await self.create_skill_repository(normalized_request, repo_name)
         return repository, True
+
+    async def _sync_catalog_source(
+        self,
+        repo: SkillRepoModel,
+        normalized_request: SkillRepositoryRequest,
+    ) -> SkillRepoModel:
+        """将 skill_repos / skills 的列表来源字段刷新为目录视图。
+
+        此前通过直接采集方式（``discover --url``，platform 为空）收录的仓库，
+        若后续在锚点目录中登记（如 ``platform='community'``），则下一次采集时
+        必须迁移其 ``platform``/``source`` 字段，即使 git 提交未变化也是如此。
+        否则技能列表会一直显示旧来源，直到仓库内容发生变化。
+        """
+        target_source: str | None = None
+        try:
+            target_source, _ = derive_skill_source(normalized_request.url)
+        except ValueError:
+            _logger.warning(
+                'Discover: cannot derive source for %s from %s; source migration skipped',
+                repo.repo_name,
+                normalized_request.url,
+            )
+        target_platform = normalized_request.platform
+
+        current_source = getattr(repo, 'source', None)
+        current_platform = getattr(repo, 'platform', None)
+
+        source_changed = bool(target_source) and target_source != current_source
+        platform_changed = bool(target_platform) and target_platform != current_platform
+        if not source_changed and not platform_changed:
+            return repo
+
+        _logger.info(
+            'Discover: migrating list source for %s: source %r -> %r, platform %r -> %r',
+            repo.repo_name,
+            current_source,
+            target_source if source_changed else current_source,
+            current_platform,
+            target_platform if platform_changed else current_platform,
+        )
+
+        repo_values: dict[str, Any] = {}
+        skill_values: dict[str, Any] = {}
+        if source_changed:
+            repo_values['source'] = target_source
+            skill_values['source'] = target_source
+        if platform_changed:
+            repo_values['platform'] = target_platform
+            skill_values['platform'] = target_platform
+
+        await self.skill_repo_repository.update_skill_repository(
+            repo.id,
+            commit=False,
+            **repo_values,
+        )
+        if skill_values:
+            await self.skill_repository.session.execute(
+                update(Skill)
+                .where(Skill.skill_repo_id == repo.id)
+                .values(**skill_values)
+            )
+            await self.skill_repository.session.execute(
+                update(SkillVersion)
+                .where(SkillVersion.skill_repo_id == repo.id)
+                .values(**skill_values)
+            )
+        await self.skill_repository.session.commit()
+        return await self.get_repository_by_id(repo.id)
 
     def _is_commit_unchanged(
         self,

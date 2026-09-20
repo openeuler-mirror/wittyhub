@@ -11,13 +11,17 @@ import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
-import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
-import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton, OPopover, OIconInfoTip } from '@opensig/opendesign'
+import timeSvg from '@/assets/icons/skill-update-time.svg?raw'
+import riskScoreSvg from '@/assets/icons/skill-risk-score.svg?raw'
+import categorySvg from '@/assets/icons/skill-category.svg?raw'
+import personSvg from '@/assets/icons/person.svg?raw'
+import { OBreadcrumb, OBreadcrumbItem, OLoading, ODialog, OButton, OPopover, OIconInfoTip, useToast } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const { show: showToast } = useToast()
 
 const platformNames: Record<string, string> = {
   community: '社区SIG',
@@ -78,7 +82,6 @@ function showCopyToast() {
   toastVisible.value = true
   setTimeout(() => { toastVisible.value = false }, 2000)
 }
-const selectedVersion = ref<string>('')
 
 function stripFrontmatter(content: string): string {
   const match = content.match(/^---\n[\s\S]*?\n---\n?/)
@@ -88,11 +91,8 @@ function stripFrontmatter(content: string): string {
   return content
 }
 
-// 根据当前选中版本展示对应的 content（未选中时回退到 Skill 默认 content）
-const displayContent = computed(() => {
-  const selected = versions.value.find(v => v.version === selectedVersion.value)
-  return selected?.content ?? skill.value?.content ?? null
-})
+// 使用描述展示 skills 表当前版本（latest）的内容；历史版本仅在版本信息表格中列出
+const displayContent = computed(() => skill.value?.content ?? null)
 
 const renderedContent = computed(() => {
   if (!displayContent.value) return ''
@@ -157,11 +157,6 @@ async function copyMarkdownCode(e: MouseEvent) {
   }
 }
 
-const filteredVersions = computed(() => {
-  if (!selectedVersion.value) return versions.value
-  return versions.value.filter(v => v.version === selectedVersion.value)
-})
-
 // riskClass/arcColor/arcPath 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
 // 圆弧比例（从 12 点方向起顺时针，stroke-linecap: butt 直角端头与设计稿一致）：
 //   安全 1/4(90°) → 3点(右)；低风险 1/2(180°) → 6点(下)；中风险 3/4(270°) → 9点(左)；高风险 全环
@@ -174,6 +169,12 @@ function getSecurityLevel(score: number | null): { label: string; class: string;
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
+// 风险评分展示：有分值显示 x/100，未检测显示文案
+const riskScoreText = computed(() => {
+  const score = skill.value?.risk_score
+  if (score === null || score === undefined) return '未检测'
+  return `${score}/100`
+})
 
 // 统一 skill_id 到新格式 {source_type}:{owner}/{repo}/{skill_dir}。
 // 历史数据可能仍为旧格式 {source_type}/{owner}/{repo}/<path...>，
@@ -239,25 +240,64 @@ function formatDate(dateStr: string | null): string {
   return `${year}-${month}-${day}`
 }
 
+// 从 Blob 错误响应中解析后端返回的 detail 文案（responseType: 'blob' 时 e.response.data 是 Blob 而非 JSON）
+async function extractBlobErrorDetail(e: unknown): Promise<string> {
+  const blob = (e as { response?: { data?: unknown } })?.response?.data
+  if (blob instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await blob.text())
+      if (parsed?.detail) return String(parsed.detail)
+    } catch { /* 非 JSON 响应，走兜底 */ }
+  }
+  return (e as { message?: string })?.message || '下载失败，请稍后重试'
+}
+
+// 触发浏览器下载 Blob；延迟释放 objectURL，避免 Safari 等浏览器中断下载
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => window.URL.revokeObjectURL(url), 1000)
+}
+
 async function downloadSkill() {
   if (!skill.value || downloading.value) return
   downloading.value = true
   try {
     const { blob, filename } = await api.getSkillDownload(skill.value.skill_id)
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    window.URL.revokeObjectURL(url)
+    triggerBlobDownload(blob, filename)
     oaReport('download_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, success: true })
   } catch (e) {
+    const detail = await extractBlobErrorDetail(e)
     console.error('下载失败:', e)
+    showToast({ content: detail, long: true })
     oaReport('download_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, success: false })
   } finally {
     downloading.value = false
+  }
+}
+
+// 版本信息表格：按指定版本下载 ZIP
+const downloadingVersion = ref<string | null>(null)
+
+async function downloadVersionSkill(version: string) {
+  if (!skill.value || downloadingVersion.value) return
+  downloadingVersion.value = version
+  try {
+    const { blob, filename } = await api.getSkillDownload(skill.value.skill_id, version)
+    triggerBlobDownload(blob, filename)
+    oaReport('download_version_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, version, success: true })
+  } catch (e) {
+    const detail = await extractBlobErrorDetail(e)
+    console.error('版本下载失败:', e)
+    showToast({ content: `${version} 下载失败：${detail}`, long: true })
+    oaReport('download_version_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, version, success: false })
+  } finally {
+    downloadingVersion.value = null
   }
 }
 
@@ -283,9 +323,6 @@ onMounted(async () => {
       skill_id: skill.value.skill_id,
       skill_name: skill.value.name
     })
-    if (versions.value.length > 0) {
-      selectedVersion.value = versions.value[0].version
-    }
   } catch (e: any) {
     console.error('加载 Skill 详情失败:', e)
     error.value = e?.response?.data?.detail || e.message || '加载失败'
@@ -346,12 +383,30 @@ onMounted(async () => {
             </div>
             <p class="skill-desc" v-if="skill.description">{{ skill.description }}</p>
 
+            <!-- 元信息区：分类 / 平台类型 / 更新时间 / 风险评分 -->
+            <div class="skill-meta">
+              <div v-if="skill.category" class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="categorySvg"></span>
+                <span class="skill-meta-text">{{ skill.category_label || skill.category }}</span>
+              </div>
+              <div v-if="skill.platform" class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="personSvg"></span>
+                <span class="skill-meta-text">{{ platformNames[skill.platform] || skill.platform }}</span>
+              </div>
+              <div class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="timeSvg"></span>
+                <span class="skill-meta-text">更新时间：{{ formatDate(skill.updated_at) }}</span>
+              </div>
+              <div class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="riskScoreSvg"></span>
+                <span class="skill-meta-text">风险评分：{{ riskScoreText }}</span>
+              </div>
+            </div>
+
             <!-- 标签区 -->
-            <div class="skill-tags">
-              <span v-if="skill.category" class="tag tag-category">{{ skill.category_label || skill.category }}</span>
-              <span v-if="skill.platform" class="tag tag-gray">{{ platformNames[skill.platform] || skill.platform }}</span>
+            <div v-if="(skill.tags || []).length" class="skill-tags">
               <span
-                v-for="tag in (skill.tags || []).slice(0, 5)"
+                v-for="tag in (skill.tags || [])"
                 :key="tag"
                 class="tag tag-gray"
               >{{ tag }}</span>
@@ -365,59 +420,62 @@ onMounted(async () => {
     <div v-if="skill" class="container-wide">
       <div class="detail-body">
         <div class="detail-body-main">
-          <!-- Tab 导航区（全部隐藏：OTab和版本下拉都不再需要，'使用描述'标题已移到文档卡片顶部）
-          <div class="tab-header">
-            <OTab
-              v-model="activeTab"
-              variant="button"
-              round="4px"
-              size="large"
-              header-class="detail-tab"
-            >
-              <OTabPane value="usage" label="使用描述" />
-            </OTab>
-
-            <div class="version-toolbar">
-              <div class="version-card">
-                <span class="version-card-label">版本</span>
-                <ODropdown
-                  trigger="click"
-                  option-width-mode="min-width"
-                  option-wrap-class="version-dropdown"
-                >
-                  <button class="version-btn">
-                    {{ selectedVersion || '选择版本' }}
-                    <span class="version-btn-icon" v-html="chevronDownSvg"></span>
-                  </button>
-                  <template #dropdown>
-                    <ODropdownItem
-                      v-for="v in versions"
-                      :key="v.version"
-                      :label="v.version"
-                      :value="v.version"
-                      @click="selectedVersion = v.version"
-                    />
-                  </template>
-                </ODropdown>
-              </div>
-            </div>
-          </div>
-          -->
-
-          <!-- ========== 使用文档 ========== -->
+          <!-- ========== 使用文档 / 版本信息 ========== -->
           <div class="tab-content">
-            <!-- 文档标题：样式与原 OTab active 状态一致（HarmonyHeiTi + semibold + primary1） -->
-            <div class="doc-title">使用描述</div>
+            <!-- Tab 页签：激活态 HarmonyHeiTi + SemiBold + primary1，非激活 regular + info1 -->
+            <div class="doc-tabs">
+              <button
+                :class="['doc-tab-btn', { 'doc-tab-btn--active': activeTab === 'usage' }]"
+                @click="activeTab = 'usage'"
+              >使用描述</button>
+              <button
+                :class="['doc-tab-btn', { 'doc-tab-btn--active': activeTab === 'versions' }]"
+                @click="activeTab = 'versions'"
+              >版本信息</button>
+            </div>
             <div class="doc-title-divider"></div>
 
-            <div v-if="displayContent" class="usage-content">
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div class="markdown-body" v-html="renderedContent" @click="copyMarkdownCode"></div>
-            </div>
-            <div v-else class="empty-tab">
-              <p>暂无使用描述</p>
-              <p class="empty-hint">内容将在本地安装后显示</p>
-            </div>
+            <!-- 使用描述 -->
+            <template v-if="activeTab === 'usage'">
+              <div v-if="displayContent" class="usage-content">
+                <!-- eslint-disable-next-line vue/no-v-html -->
+                <div class="markdown-body" v-html="renderedContent" @click="copyMarkdownCode"></div>
+              </div>
+              <div v-else class="empty-tab">
+                <p>暂无使用描述</p>
+                <p class="empty-hint">内容将在本地安装后显示</p>
+              </div>
+            </template>
+
+            <!-- 版本信息 -->
+            <template v-else>
+              <div v-if="versions.length" class="version-table">
+                <div class="version-table-header">
+                  <span class="version-col-version">历史版本</span>
+                  <span class="version-col-date">发布时间</span>
+                  <span class="version-col-action">操作</span>
+                </div>
+                <div class="version-table-rows">
+                  <div v-for="v in versions" :key="v.version" class="version-table-row">
+                    <span class="version-col-version">{{ v.version }}</span>
+                    <span class="version-col-date">{{ formatDate(v.created_at) }}</span>
+                    <span class="version-col-action">
+                      <button
+                        class="version-download-btn"
+                        :disabled="downloadingVersion === v.version"
+                        :aria-label="`下载 ${v.version}`"
+                        @click="downloadVersionSkill(v.version)"
+                      >
+                        <span class="btn-icon-sm" v-html="downloadSvg"></span>
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-tab">
+                <p>暂无版本信息</p>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -470,7 +528,12 @@ onMounted(async () => {
               <div class="info-list">
                 <div class="info-row">
                   <span class="info-label">贡献者</span>
-                  <span class="info-value">{{ skill.author || '-' }}</span>
+                  <router-link
+                    v-if="skill.author && skill.source"
+                    :to="`/contributors/${encodeURIComponent(skill.source)}/${encodeURIComponent(skill.author)}`"
+                    class="info-link"
+                  >{{ skill.author }}</router-link>
+                  <span v-else class="info-value">-</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">仓库地址</span>
@@ -485,10 +548,6 @@ onMounted(async () => {
                 <div class="info-row">
                   <span class="info-label">下载量</span>
                   <span class="info-value">{{ skill.download_count.toLocaleString() }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">更新时间</span>
-                  <span class="info-value">{{ formatDate(skill.updated_at) }}</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">版本</span>
@@ -717,7 +776,42 @@ onMounted(async () => {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    margin-top: 12px;
     margin-bottom: 0;
+  }
+
+  .skill-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 24px;
+  }
+
+  .skill-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .skill-meta-icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--o-color-info3);
+
+    :deep(svg) {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .skill-meta-text {
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    font-size: 14px;
+    line-height: 22px;
+    letter-spacing: 0px;
+    text-align: left;
+    color: var(--o-color-info3);
   }
 }
 
@@ -1196,17 +1290,39 @@ onMounted(async () => {
   min-height: 200px;
 }
 
-/* 文档标题：字体与正文 h1 保持一致 */
-.doc-title {
-  margin-top: 0;
-  margin-bottom: 32px;
+/* ===== Tab 页签 ===== */
+.doc-tabs {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  margin-bottom: 12px;
+}
+
+.doc-tab-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
   font-family: var(--o-font_family);
-  font-weight: var(--o-font_weight-semibold);
-  font-size: var(--o-font_size-h1);
-  line-height: var(--o-line_height-h1);
+  font-weight: var(--o-font_weight-regular);
+  font-size: 20px;
+  line-height: 28px;
   letter-spacing: 0px;
-  text-align: left;
   color: var(--o-color-info1);
+  transition: color 0.2s;
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
+
+  &--active {
+    font-weight: var(--o-font_weight-semibold);
+    color: var(--o-color-primary1);
+
+    @include hover {
+      color: var(--o-color-primary1);
+    }
+  }
 }
 
 .doc-title-divider {
@@ -1215,141 +1331,94 @@ onMounted(async () => {
   margin-bottom: 32px;
 }
 
-/* ===== 版本列表卡片 ===== */
-.version-list-card {
+/* ===== 版本信息表格（设计稿：表头 38px 底部 primary1 边框，数据行 56px 分割线，下载图标 24×24） ===== */
+.version-table {
   display: flex;
   flex-direction: column;
 }
 
-.version-list-title {
-  font-size: var(--o-r-font_size-h2);
-  font-weight: var(--o-font_weight-semibold);
-  color: var(--o-color-info1);
-  margin: 0 0 32px;
+.version-col-version {
+  width: 220px;
+  flex-shrink: 0;
 }
 
-.version-list-divider {
-  height: 1px;
-  background: var(--o-color-control4);
-  margin: 0 0 32px;
+.version-col-date {
+  flex: 1;
+  min-width: 0;
 }
 
-.version-list-header {
+.version-col-action {
+  width: 72px;
+  flex-shrink: 0;
+}
+
+.version-table-header {
   display: flex;
   align-items: center;
-  gap: 40px;
   height: 38px;
-  padding: 0 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--o-color-primary1);
 
-  .header-label {
-    font-size: var(--o-font_size-tip1);
-    color: var(--o-color-info1);
-    opacity: 0.8;
-    font-family: HarmonyHeiTi;
+  > span {
+    font-family: var(--o-font_family);
     font-weight: var(--o-font_weight-semibold);
+    font-size: var(--o-font_size-tip1);
     line-height: var(--o-line_height-tip1);
-
-    &:first-child {
-      width: 100px;
-      flex-shrink: 0;
-    }
-
-    &:last-child {
-      flex: 1;
-    }
+    color: var(--o-color-info1);
   }
 }
 
-.version-cli-group {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  height: 40px;
-  background: var(--o-color-fill3);
-  border: none;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.version-install-cmd {
-  flex: 1;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 13px;
-  font-family: var(--o-font_family-code);
-  color: var(--o-color-info1);
-  background: var(--o-color-fill3);
-  word-break: keep-all;
-  white-space: nowrap;
-  overflow-x: auto;
-
-  &::-webkit-scrollbar {
-    height: 6px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--o-color-control4);
-    border-radius: 3px;
-  }
-}
-
-.version-copy-btn {
-  width: 24px;
-  height: 24px;
-  margin: 12px 12px 12px 0;
-  color: var(--o-color-info3);
-  cursor: pointer;
-  transition: color 0.2s;
-  flex-shrink: 0;
-
-  @include hover {
-    color: var(--o-color-primary1);
-  }
-}
-
-.version-badge {
-  display: inline-block;
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-tip1);
-  line-height: var(--o-r-line_height-tip1);
-  letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info1);
-  padding: 2px 0;
-  white-space: nowrap;
-  flex-shrink: 0;
-  width: 100px;
-}
-
-.version-header-divider {
-  height: 1px;
-  background: var(--o-color-primary1);
-  border-radius: 1px;
-  margin: 0;
-}
-
-.version-rows {
+.version-table-rows {
   display: flex;
   flex-direction: column;
 }
 
-.version-row {
+.version-table-row {
   display: flex;
   align-items: center;
-  gap: 40px;
   height: 56px;
-  padding: 0 4px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--o-color-control4);
 
   &:last-child {
     border-bottom: none;
+  }
+
+  > span {
+    font-family: var(--o-font_family);
+    font-weight: var(--o-font_weight-regular);
+    font-size: var(--o-font_size-tip1);
+    line-height: var(--o-line_height-tip1);
+    color: var(--o-color-info1);
+  }
+}
+
+.version-download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--o-color-info1);
+  cursor: pointer;
+  transition: color 0.2s;
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .btn-icon-sm {
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
   }
 }
 
@@ -1714,25 +1783,6 @@ onMounted(async () => {
 </style>
 
 <style lang="scss">
-/* ODropdown teleport 到 body 的全局样式 */
-.version-dropdown {
-  min-width: 92px !important;
-
-  .o-dropdown-item {
-    color: #000000;
-    font-family: HarmonyHeiTi;
-    font-weight: var(--o-font_weight-regular);
-    font-size: 16px;
-    line-height: 24px;
-    letter-spacing: 0px;
-    text-align: left;
-  }
-}
-
-[data-o-theme='e.dark'] .version-dropdown .o-dropdown-item {
-  color: var(--o-color-info1);
-}
-
 /* ===== 风险评估说明浮层（设计稿 气泡提示 Popover） ===== */
 /* OPopover teleport 到 body，样式需全局；宽度 375 含内边距 */
 .risk-popover {

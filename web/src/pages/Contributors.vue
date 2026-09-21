@@ -8,6 +8,8 @@ import { oaReport } from '@opendesign-plus/plugins/analytics'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
+import flowBgLight from '@/assets/bg/card-bg.png'
+import flowBgDark from '@/assets/bg/card-bg-dark.png'
 import flowPrepareSvg from '@/assets/icons/flow-prepare.svg?raw'
 import flowClaSvg from '@/assets/icons/flow-cla.svg?raw'
 import flowSubmitSvg from '@/assets/icons/flow-submit.svg?raw'
@@ -208,6 +210,7 @@ onMounted(fetchContributors)
     <section class="container-wide flow-section">
       <h2 class="section-title">贡献流程</h2>
       <div class="flow-card">
+        <img :src="appStore.isDark ? flowBgDark : flowBgLight" alt="" class="flow-card-bg" />
         <div class="flow-steps">
           <template v-for="(step, idx) in flowSteps" :key="step.title">
             <div class="flow-step">
@@ -407,25 +410,23 @@ onMounted(fetchContributors)
 }
 .flow-card {
   position: relative;
-  /* （矩形 5874）：圆角 4px，双层渐变——
-     底层 140deg 白→#F2F6FF(52%)→#DFE9FF（左上白右下淡蓝），
-     顶层 110deg rgba(107,136,255,.2)→白（左上叠淡蓝氛围，整体透明度 0.2） */
+  /* 设计稿卡片背景图（卡片背景.png / 卡片背景-dark.png，2976×400 @2x），
+     圆角 4px，图片绝对铺满；底色仅作加载前回退 */
   border-radius: 4px;
-  background:
-    linear-gradient(110deg, rgba(107, 136, 255, 0.2) 0%, rgba(226, 232, 255, 0.2) 55%, rgba(255, 255, 255, 0.2) 100%),
-    linear-gradient(140deg, #FFFFFF 0%, #F2F6FF 52%, #DFE9FF 100%);
+  background: var(--o-color-fill2);
   padding: 40px 32px 24px;
   overflow: hidden;
   @include dark {
-    background: linear-gradient(140deg, #1A1A1C 0%, #1F1F24 52%, #242429 100%);
+    background: #1a1a1c;
   }
 }
 .flow-card-bg {
-  /* 预留：若需额外装饰可在此扩展 */
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   pointer-events: none;
-  background: transparent;
 }
 .flow-steps {
   position: relative;

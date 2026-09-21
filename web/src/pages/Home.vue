@@ -10,6 +10,8 @@ import SkillCard from '@/components/SkillCard.vue'
 import SkillListItem from '@/components/SkillListItem.vue'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
+import bannerBgLight from '@/assets/bg/card-bg.png'
+import bannerBgDark from '@/assets/bg/card-bg-dark.png'
 import viewGridSvg from '@/assets/icons/view-grid.svg?raw'
 import viewListSvg from '@/assets/icons/view-list.svg?raw'
 import emptyStateSvg from '@/assets/icons/empty-state.svg?raw'
@@ -384,6 +386,7 @@ function onPaginationChange(
 
       <!-- 贡献你的Skill 横幅 -->
       <div class="mt-8 submit-banner">
+        <img :src="appStore.isDark ? bannerBgDark : bannerBgLight" alt="" class="submit-banner-bg" />
         <h3 class="submit-banner-title">贡献你的Skill</h3>
         <p class="submit-banner-desc">SkillHub 欢迎大家贡献可复用的Skills，一起丰富openEuler AI技能生态</p>
         <OButton
@@ -526,9 +529,22 @@ function onPaginationChange(
   border-radius: var(--o-radius-xs);
   padding: 32px 24px;
   text-align: center;
-  background:
-    radial-gradient(120% 100% at 85% 0%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 55%),
-    linear-gradient(100deg, var(--o-color-primary1-light) 0%, var(--o-color-primary4-light) 45%, var(--o-color-primary1-light) 100%);
+  background: var(--o-color-fill2);
+}
+
+.submit-banner-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* 背景图为绝对定位，需把标题/描述/按钮等子元素提到图片之上 */
+.submit-banner > *:not(.submit-banner-bg) {
+  position: relative;
+  z-index: 1;
 }
 
 .submit-banner-title {
@@ -562,9 +578,7 @@ function onPaginationChange(
 
 [data-o-theme="e.dark"] .submit-banner,
 .dark .submit-banner {
-  background:
-    radial-gradient(120% 100% at 85% 0%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 55%),
-    linear-gradient(100deg, var(--o-color-primary1-light) 0%, var(--o-color-primary4-light) 45%, var(--o-color-primary1-light) 100%);
+  background: #1a1a1c;
 }
 
 /* OTab button variant: 排序切换 (热门/最新) */

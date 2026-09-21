@@ -699,10 +699,8 @@ class SkillRepository:
             count_query = count_query.join(
                 dl_subquery, Skill.id == dl_subquery.c.resource_id
             )
-        elif sort_by == "download_count":
-            # 热门-全部时间：仅展示累计下载量大于 0 的 Skill
-            filtered_query = filtered_query.where(Skill.download_count > 0)
-            count_query = count_query.where(Skill.download_count > 0)
+        # 热门-全部时间：不再过滤 download_count > 0，全部可见 Skill 按下载量排序
+        #（0 下载自然沉底），保证默认态总数与顶部统计（total_skills）一致
 
         total = await self.session.scalar(count_query)
 

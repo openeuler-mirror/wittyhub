@@ -422,7 +422,7 @@ onMounted(async () => {
         <div class="detail-body-main">
           <!-- ========== 使用文档 / 版本信息 ========== -->
           <div class="tab-content">
-            <!-- Tab 页签：激活态 HarmonyHeiTi + SemiBold + primary1，非激活 regular + info1 -->
+            <!-- Tab 页签：激活态 SemiBold + primary1 + 底部 pill 下划线，非激活 regular + 80% 黑 -->
             <div class="doc-tabs">
               <button
                 :class="['doc-tab-btn', { 'doc-tab-btn--active': activeTab === 'usage' }]"
@@ -433,7 +433,6 @@ onMounted(async () => {
                 @click="activeTab = 'versions'"
               >版本信息</button>
             </div>
-            <div class="doc-title-divider"></div>
 
             <!-- 使用描述 -->
             <template v-if="activeTab === 'usage'">
@@ -451,7 +450,7 @@ onMounted(async () => {
             <template v-else>
               <div v-if="versions.length" class="version-table">
                 <div class="version-table-header">
-                  <span class="version-col-version">历史版本</span>
+                  <span class="version-col-version">版本</span>
                   <span class="version-col-date">发布时间</span>
                   <span class="version-col-action">操作</span>
                 </div>
@@ -1282,24 +1281,26 @@ onMounted(async () => {
   }
 }
 
-/* ===== Tab 内容区 ===== */
+/* ===== Tab 内容区（白卡 1008 宽，圆角 4px，padding 24） ===== */
 .tab-content {
   background: var(--o-color-fill2);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 24px;
   min-height: 200px;
 }
 
-/* ===== Tab 页签 ===== */
+/* ===== Tab 页签（tab 高 48，文字顶部对齐，激活 tab 底部 80×2 pill 下划线） ===== */
 .doc-tabs {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 40px;
-  margin-bottom: 12px;
+  margin-bottom: 32px;
 }
 
 .doc-tab-btn {
-  padding: 0;
+  position: relative;
+  height: 48px;
+  padding: 2px 0 0;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1308,7 +1309,7 @@ onMounted(async () => {
   font-size: 20px;
   line-height: 28px;
   letter-spacing: 0px;
-  color: var(--o-color-info1);
+  color: var(--o-color-info2);
   transition: color 0.2s;
 
   @include hover {
@@ -1322,23 +1323,30 @@ onMounted(async () => {
     @include hover {
       color: var(--o-color-primary1);
     }
+
+    /* 激活下划线：文字下方 16px，80×2 primary1，两端全圆角 */
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 80px;
+      height: 2px;
+      border-radius: 100px;
+      background: var(--o-color-primary1);
+    }
   }
 }
 
-.doc-title-divider {
-  height: 2px;
-  background: #002FA7;
-  margin-bottom: 32px;
-}
-
-/* ===== 版本信息表格（设计稿：表头 38px 底部 primary1 边框，数据行 56px 分割线，下载图标 24×24） ===== */
+/* ===== 版本信息表格（设计稿：表头 38px 底部 primary1 边框 14px SemiBold 80% 黑，
+   数据行 56px 底部分割线 10% 黑，hover 内容区圆角 4 浅色背景，下载图标 24×24） ===== */
 .version-table {
   display: flex;
   flex-direction: column;
 }
 
 .version-col-version {
-  width: 220px;
+  width: 238px;
   flex-shrink: 0;
 }
 
@@ -1347,9 +1355,14 @@ onMounted(async () => {
   min-width: 0;
 }
 
+/* 操作列：内容右对齐，距右缘 12px（设计稿图标距内容右缘 ~13px） */
 .version-col-action {
   width: 72px;
   flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 12px;
 }
 
 .version-table-header {
@@ -1364,7 +1377,7 @@ onMounted(async () => {
     font-weight: var(--o-font_weight-semibold);
     font-size: var(--o-font_size-tip1);
     line-height: var(--o-line_height-tip1);
-    color: var(--o-color-info1);
+    color: var(--o-color-info2);
   }
 }
 
@@ -1374,6 +1387,7 @@ onMounted(async () => {
 }
 
 .version-table-row {
+  position: relative;
   display: flex;
   align-items: center;
   height: 56px;
@@ -1390,6 +1404,24 @@ onMounted(async () => {
     font-size: var(--o-font_size-tip1);
     line-height: var(--o-line_height-tip1);
     color: var(--o-color-info1);
+  }
+
+  /* hover 背景：设计稿内容区（左右 24px）内上下各缩 8px，高 40，圆角 4 */
+  &::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 24px;
+    right: 24px;
+    border-radius: 4px;
+    background: transparent;
+    transition: background 0.2s;
+    pointer-events: none;
+  }
+
+  &:hover::before {
+    background: var(--o-color-control2-light);
   }
 }
 

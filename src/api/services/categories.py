@@ -16,7 +16,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "Monitoring and Operations": "监控运维",
     "Performance Optimization": "性能优化",
     "Security Hardening": "安全加固",
-    "others": "其他",
+    "others": "无分类",
 }
 
 CANONICAL_CATEGORIES = list(CATEGORY_LABELS.keys())

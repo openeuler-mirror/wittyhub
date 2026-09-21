@@ -245,6 +245,10 @@ class SkillScanner:
         discovered: list[SkillVersion] = []
         seen_versions: set[tuple[str, str]] = set()
         seen_commits: set[tuple[str, str]] = set()
+        # 内容去重：同一 skill 的多个 tag 指向相同目录内容（tree_hash 一致）时，
+        # 只保留最新 tag 的版本行，后续旧 tag 不再作为独立版本写入。
+        # version_snapshots 按创建时间降序迭代，首个遇到的即最新 tag。
+        seen_tree_hashes: set[tuple[str, str]] = set()
 
         for snapshot in version_snapshots:
             ref = snapshot['ref']
@@ -282,6 +286,18 @@ class SkillScanner:
                 skill_id = build_skill_id(
                     repo.source, extract_owner_repo(repo.url), relative_path,
                 )
+                # 内容去重前置检查：同 tree_hash 的旧 tag 直接跳过，
+                # 省去昂贵的记录组装（含安全审计解析）。
+                tree_hash_key = (skill_id, tree_hash) if tree_hash else None
+                if tree_hash_key is not None and tree_hash_key in seen_tree_hashes:
+                    _logger.debug(
+                        'Skipped duplicate skill tree_hash: skill_id=%s '
+                        'version=%s tree_hash=%s',
+                        skill_id,
+                        version or '-',
+                        tree_hash or '-',
+                    )
+                    continue
                 # Pre-dedup on commit before building the record: skips the
                 # expensive record assembly (incl. security resolution) for
                 # tags that point at an already-seen commit of the same skill.
@@ -329,6 +345,8 @@ class SkillScanner:
                 # Commit dedup happens in the pre-check above; this write feeds it.
                 if commit_id:
                     seen_commits.add((skill_id, commit_id))
+                if tree_hash_key is not None:
+                    seen_tree_hashes.add(tree_hash_key)
                 _logger.info(
                     'Discovered skill(version:%s): skill_id=%s',
                     skill.version or '-', skill.skill_id,

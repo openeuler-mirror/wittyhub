@@ -36,6 +36,21 @@ const currentSortLabel = computed(() => {
 const isSearchPage = computed(() => route.path === '/skills/search')
 const searchQuery = computed(() => route.query.q as string || '')
 
+// 是否有侧边栏筛选条件生效（分类/贡献者/安全等级）
+const hasActiveFilters = computed(
+  () =>
+    skillStore.filter.category.length > 0 ||
+    skillStore.filter.provider.length > 0 ||
+    skillStore.filter.securityLevel.length > 0
+)
+
+// 热门浏览态显示结果计数的条件：切到本周/本月，或加了筛选；
+// 默认态（热门 + 全部时间 + 无筛选）不显示
+const showHotResultCount = computed(
+  () =>
+    skillStore.filter.sortPeriod !== 'all' || hasActiveFilters.value
+)
+
 onMounted(async () => {
   if (searchQuery.value) {
     searchInput.value = searchQuery.value
@@ -207,25 +222,25 @@ function onPaginationChange(
             <span class="hero-stats-number">{{ skillStore.stats?.total_skills?.toLocaleString() || '200' }}</span>
             <span class="hero-stats-label">Skills</span>
           </span>
-          <span class="mx-2 text-[var(--o-color-text3)]">|</span>
+          <span class="hero-stats-separator"></span>
           <span class="hero-stats-item">
             <span class="hero-stats-number">{{ skillStore.stats?.total_categories || '15' }}</span>
             <span class="hero-stats-label">领域分类</span>
           </span>
-          <span class="mx-2 text-[var(--o-color-text3)]">|</span>
+          <span class="hero-stats-separator"></span>
           <span class="hero-stats-item">
             <span class="hero-stats-number">{{ formatDownloads(skillStore.stats?.total_downloads) }}</span>
             <span class="hero-stats-label">下载量</span>
           </span>
         </p>
 
-        <!-- 搜索框 -->
-        <div style="max-width:620px; width:100%; margin:0 auto">
+        <!-- 搜索框：660x40 圆角 4px -->
+        <div style="max-width:660px; width:100%; margin:0 auto">
           <OInput
             v-model="searchInput"
             placeholder="搜索 Skill"
             size="large"
-            round="8px"
+            round="4px"
             clearable
             @press-enter="handleSearch"
             @clear="handleClear"
@@ -291,9 +306,15 @@ function onPaginationChange(
               </ODropdown>
               </div>
 
-              <!-- 搜索结果提示：数据加载完成后再显示 -->
-              <div v-if="isSearchPage && searchQuery && !skillStore.loading" class="text-sm text-[var(--o-color-text3)]">
+              <!-- 结果计数提示：数据加载完成后再显示 -->
+              <!-- 搜索态：展示与关键词匹配的结果数 -->
+              <div v-if="isSearchPage && searchQuery && !skillStore.loading" class="text-sm text-[var(--o-color-info3)]">
                 为您找到 <span class="text-[var(--o-color-info1)] font-semibold">{{ skillStore.total }}</span> 个与 "{{ searchQuery }}" 匹配的搜索结果
+              </div>
+              <!-- 热门浏览态：仅统计下载量大于 0 的 Skill；
+                   默认态（热门+全部时间+无筛选）不显示，切周期或加筛选后才显示 -->
+              <div v-else-if="!isSearchPage && skillStore.filter.sortBy === 'hot' && showHotResultCount && !skillStore.loading" class="text-sm text-[var(--o-color-info3)]">
+                为您找到 <span class="text-[var(--o-color-info1)] font-semibold">{{ skillStore.total }}</span> 个相关Skill
               </div>
             </div>
 
@@ -325,7 +346,7 @@ function onPaginationChange(
           <!-- 空态 -->
           <div v-else-if="!skillStore.loading && skillStore.skills.length === 0" class="text-center py-16">
             <div class="empty-state-svg w-64 mx-auto mb-6" v-html="emptyStateSvg"></div>
-            <p class="text-[var(--o-color-text3)]">暂无相关 Skill</p>
+            <p class="text-[var(--o-color-info3)]">暂无相关 Skill</p>
           </div>
 
           <!-- Skill 列表 -->
@@ -333,9 +354,9 @@ function onPaginationChange(
             <div v-if="skillStore.filter.viewMode === 'card'" ref="cardGridRef" class="grid grid-cols-3 gap-4">
               <SkillCard v-for="(skill, index) in skillStore.skills" :key="skill.id" :skill="skill" :rank="index" />
             </div>
-            <div v-else class="border border-gray-200 rounded-lg dark:border-gray-700 overflow-hidden">
+            <div v-else class="list-view-container">
               <!-- 列表视图表头 -->
-              <div class="flex items-center gap-8 px-6 py-4 bg-white dark:bg-gray-800 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px; border-bottom: 1px solid #002FA7;">
+              <div class="flex items-center gap-8 px-6 py-4 list-header" style="font-family: HarmonyHeiTi; font-size: 14px; line-height: 22px; font-weight: 600; letter-spacing: 0px; border-bottom: 1px solid var(--o-color-primary1);">
                 <div class="flex-1 min-w-0 max-w-[560px]">名称</div>
                 <div class="w-[100px]">分类</div>
                 <div class="w-[100px]">风险等级</div>
@@ -392,31 +413,31 @@ function onPaginationChange(
   min-height: 300px;
 }
 
-/* 搜索图标 */
+/* 搜索图标： #000000 op=0.80 = --o-color-info2 */
 .search-icon {
   width: 24px;
   height: 24px;
-  color: var(--o-color-text3);
+  color: var(--o-color-info2);
 }
 
-/* Hero 标题 */
+/* Hero 标题： size=40 weight=SemiBold color=#000000 */
 .hero-title {
-  color: rgba(0,0,0,1);
+  color: var(--o-color-info1);
   font-family: HarmonyHeiTi;
-  font-weight: SemiBold;
-  font-size: 40px;
-  line-height: 56px;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: var(--o-font_size-display3);
+  line-height: var(--o-line_height-display3);
   letter-spacing: 0px;
   text-align: left;
   margin-bottom: 8px
 }
 
 .hero-subtitle {
-  color: rgba(0,0,0,0.6);
+  color: var(--o-color-info3);
   font-family: HarmonyHeiTi;
-  font-weight: regular;
-  font-size: 16px;
-  line-height: 24px;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
   letter-spacing: 0px;
   text-align: left;
   margin-bottom: 8px
@@ -456,7 +477,16 @@ function onPaginationChange(
   line-height: 24px;
   letter-spacing: 0px;
   text-align: center;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--o-color-info3);
+}
+
+/* 1x17px 竖线，颜色 #000000 op=0.25 = --o-color-control1 */
+.hero-stats-separator {
+  display: inline-block;
+  width: 1px;
+  height: 17px;
+  background-color: var(--o-color-control1);
+  flex-shrink: 0;
 }
 
 [data-o-theme="e.dark"] .hero-stats-label,
@@ -464,33 +494,48 @@ function onPaginationChange(
   color: var(--o-color-info3);
 }
 
+/* 列表视图容器 */
+.list-view-container {
+  border: 1px solid var(--o-color-control4);
+  border-radius: var(--o-radius-m);
+  overflow: hidden;
+}
+
+[data-o-theme="e.dark"] .list-view-container,
+.dark .list-view-container {
+  border-color: var(--o-color-control4);
+}
+
 /* 列表视图表头 */
 .list-header {
-  color: #000000CC;
+  background-color: var(--o-color-fill2);
+  color: var(--o-color-info2);
 }
 
 [data-o-theme="e.dark"] .list-header,
 .dark .list-header {
-  color: #C9CDD4;
+  background-color: var(--o-color-fill2);
+  color: var(--o-color-info2);
 }
 
 /* 贡献你的Skill 横幅 */
+/* 容器 1488x200 cornerRadius=4；内层蒙版 1488x265.71 渐变 cornerRadius=8.18 */
 .submit-banner {
   position: relative;
   overflow: hidden;
-  border-radius: 8.18px;
-  padding: 44px 24px 32px;
+  border-radius: var(--o-radius-xs);
+  padding: 32px 24px;
   text-align: center;
   background:
     radial-gradient(120% 100% at 85% 0%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 55%),
-    linear-gradient(100deg, #dce6fb 0%, #e8effe 45%, #dfe9fd 100%);
+    linear-gradient(100deg, var(--o-color-primary1-light) 0%, var(--o-color-primary4-light) 45%, var(--o-color-primary1-light) 100%);
 }
 
 .submit-banner-title {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: var(--o-font_size-h2);
-  line-height: var(--o-line_height-h2);
+  font-size: var(--o-font_size-h1);
+  line-height: var(--o-line_height-h1);
   letter-spacing: 0px;
   color: var(--o-color-info1);
   margin-bottom: 16px;
@@ -499,8 +544,8 @@ function onPaginationChange(
 .submit-banner-desc {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-font_size-tip1);
-  line-height: var(--o-line_height-tip1);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
   letter-spacing: 0px;
   color: var(--o-color-info1);
   margin-bottom: 24px;
@@ -510,8 +555,8 @@ function onPaginationChange(
 .submit-banner-btn {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--o-font_size-tip1);
+  line-height: var(--o-line_height-tip1);
   letter-spacing: 0px;
 }
 
@@ -519,10 +564,11 @@ function onPaginationChange(
 .dark .submit-banner {
   background:
     radial-gradient(120% 100% at 85% 0%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 55%),
-    linear-gradient(100deg, #222c47 0%, #283351 45%, #232d49 100%);
+    linear-gradient(100deg, var(--o-color-primary1-light) 0%, var(--o-color-primary4-light) 45%, var(--o-color-primary1-light) 100%);
 }
 
 /* OTab button variant: 排序切换 (热门/最新) */
+/* 设计稿：选中态 #002FA7 SemiBold，未选中态 #000000 op=0.80 = --o-color-info2 */
 .sort-tab {
   width: 148px;
 
@@ -549,20 +595,22 @@ function onPaginationChange(
     font-weight: var(--o-font_weight-regular);
     font-size: var(--o-r-font_size-text2);
     line-height: var(--o-r-line_height-text2);
-    color: var(--o-color-primary1) !important;
+    color: var(--o-color-info2) !important;
     border-radius: 4px !important;
     background: transparent !important;
     justify-content: center;
     align-items: center;
 
     &:hover:not(.is-active) {
+      color: var(--o-color-primary1) !important;
       background: color-mix(in srgb, var(--o-color-primary1) 8%, transparent);
     }
 
     &.is-active {
       font-weight: var(--o-font_weight-semibold);
+      color: var(--o-color-primary1) !important;
       background: var(--o-color-fill2) !important;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+      box-shadow: var(--o-shadow-1);
     }
   }
 }
@@ -601,7 +649,7 @@ function onPaginationChange(
 
     &.is-active {
       background: var(--o-color-fill2) !important;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+      box-shadow: var(--o-shadow-1);
     }
   }
 }
@@ -660,7 +708,7 @@ function onPaginationChange(
 
 [data-o-theme="e.dark"] .page-size-select,
 .dark .page-size-select {
-  background-color: #242427;
+  background-color: var(--o-color-fill2);
 }
 
 /* 分页信息文本 */
@@ -684,11 +732,11 @@ function onPaginationChange(
   height: 32px !important;
   border-radius: 4px !important;
   background: var(--o-color-white) !important;
-  border: 1px solid #0000003F !important;
+  border: 1px solid var(--o-color-control1) !important;
   transition: border-color var(--o-duration-s) var(--o-easing-standard);
 
   &:hover {
-    border-color: #002FA7 !important;
+    border-color: var(--o-color-primary1) !important;
   }
 }
 
@@ -701,8 +749,9 @@ function onPaginationChange(
   height: 32px !important;
 }
 
+/* 下拉按钮 92x40，文字 16px regular，颜色 #000000，hover #002FA7 */
 .sort-dropdown-wrapper {
-  margin-left: 14px;
+  margin-left: 16px;
 }
 
 .sort-period-btn {
@@ -710,7 +759,7 @@ function onPaginationChange(
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 32px;
+  height: 40px;
   width: 92px;
   min-width: 92px;
   max-width: 92px;
@@ -718,20 +767,19 @@ function onPaginationChange(
   padding: 0 4px;
   border: none;
   background: none;
-  color: #000000;
+  color: var(--o-color-info1);
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--o-r-font_size-text1);
+  line-height: var(--o-r-line_height-text1);
   letter-spacing: 0px;
   text-align: right;
   cursor: pointer;
-  border-radius: var(--o-radius-s);
+  border-radius: var(--o-radius_control-xs);
   white-space: nowrap;
-  width: auto;
 
   &:hover {
-    color: #002FA7;
+    color: var(--o-color-primary1);
   }
 }
 
@@ -749,7 +797,7 @@ function onPaginationChange(
 :deep(.o_box-main) {
   border-radius: 4px;
   background: var(--o-color-white);
-  border: 1px solid #00000019;
+  border: 1px solid var(--o-color-control4);
 }
 
 /* 分页箭头图标替换 */
@@ -791,8 +839,8 @@ function onPaginationChange(
 
 [data-o-theme="e.dark"] .o-pagination-select.o-select,
 .dark .o-pagination-select.o-select {
-  background: #242427 !important;
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  background: var(--o-color-fill2) !important;
+  border-color: var(--o-color-control4) !important;
 
   &:hover {
     border-color: var(--o-color-primary1) !important;
@@ -806,8 +854,8 @@ function onPaginationChange(
 
 [data-o-theme="e.dark"] .o_box-main,
 .dark .o_box-main {
-  background: #242427;
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--o-color-fill2);
+  border-color: var(--o-color-control4);
 }
 
 [data-o-theme="e.dark"] .o_box-main .o_input-input,

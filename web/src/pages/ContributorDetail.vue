@@ -175,7 +175,7 @@ watch(
                   >{{ contributorRepoLink }}</a>
                 </template>
                 <template v-if="contributorRepoLink && contributorWebsite">
-                  <span class="contributor-link-sep">|</span>
+                  <span class="contributor-link-sep"></span>
                 </template>
                 <template v-if="contributorWebsite">
                   <span class="contributor-link-label">官网：</span>
@@ -213,7 +213,7 @@ watch(
           v-model="searchInput"
           placeholder="搜索Skill"
           size="large"
-          round="8px"
+          round="4px"
           clearable
           style="width: 320px"
         >
@@ -279,7 +279,8 @@ watch(
   margin-top: 40px;
   margin-bottom: 40px;
 
-  --breadcrumb-color: #00000099;
+  /* 设计稿：非当前项 color=#000000 op=0.60 → --o-color-info3（light/dark 自动适配） */
+  --breadcrumb-color: var(--o-color-info3);
 
   :deep(.o-breadcrumb-item-label) {
     font-family: HarmonyHeiTi;
@@ -295,14 +296,16 @@ watch(
     }
   }
 
+  /* 设计稿：当前项（最后一项）color=#002FA7 SemiBold → --o-color-primary1 + semibold */
+  :deep(.o-breadcrumb-item:last-child .o-breadcrumb-item-label) {
+    color: var(--o-color-primary1);
+    font-weight: var(--o-font_weight-semibold);
+    cursor: default;
+  }
+
   :deep(.o-icon-chevron-right) {
     color: var(--breadcrumb-color);
   }
-}
-
-.dark .breadcrumb-wrap,
-[data-o-theme='e.dark'] .breadcrumb-wrap {
-  --breadcrumb-color: rgba(255, 255, 255, 0.6);
 }
 
 /* ===== 加载 & 错误 ===== */
@@ -331,10 +334,11 @@ watch(
 }
 
 /* ===== 贡献者信息卡 ===== */
+/* 设计稿：容器 174 1488x176, fills=#FFFFFF, cornerRadius=4；左 padding 24，右 padding 64（统计区向内推） */
 .contributor-card {
   background: var(--o-color-fill2);
-  border-radius: 8px;
-  padding: 24px;
+  border-radius: var(--o-radius-xs);
+  padding: 24px 64px 24px 24px;
   display: flex;
   justify-content: space-between;
   gap: 24px;
@@ -344,7 +348,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
 }
 
 .contributor-name {
@@ -358,6 +362,7 @@ watch(
   margin-bottom: 0;
 }
 
+/* 设计稿：标签 Tag/信息标签 size=72x24, strokes=#000000 op=0.25, cornerRadius=4, 文本 12px/18px regular */
 .tag {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
@@ -366,42 +371,34 @@ watch(
   letter-spacing: 0px;
   text-align: left;
   color: var(--o-color-info1);
-  border-radius: 4px;
+  border-radius: var(--o-radius-xs);
   height: 24px;
-  padding: 3px 8px;
+  padding: 3px 12px;
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--o-color-control1);
 }
 
 .tag-platform {
-  background: var(--o-color-control2-light);
-}
-
-.dark .tag-platform,
-[data-o-theme='e.dark'] .tag-platform {
-  background: #242427;
+  /* 与 tag-source 一致：信息标签样式（透明底 + 25% 边框） */
 }
 
 .tag-source {
-  background: var(--o-color-white);
-  border: 1px solid var(--o-color-control4);
+  /* 同上 */
 }
 
-.dark .tag-source,
-[data-o-theme='e.dark'] .tag-source {
-  background: #242427;
-}
-
+/* 设计稿：简介 16/24 regular, color=#000000 op=0.60 → info3；简介→链接行间距 32px */
 .contributor-desc {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
+  font-size: var(--o-r-font_size-text1);
   line-height: var(--o-r-line_height-text1);
   letter-spacing: 0px;
   text-align: left;
   color: var(--o-color-info3);
-  margin-bottom: 8px;
+  margin-bottom: 32px;
 }
 
 .contributor-links {
@@ -416,29 +413,30 @@ watch(
   align-items: baseline;
 }
 
+/* 设计稿：仓库地址/官网行 16/24 regular, color=#000000 op=0.60 → info3（label 与 URL 同色） */
 .contributor-link-label {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
+  font-size: var(--o-r-font_size-text1);
   line-height: var(--o-r-line_height-text1);
   color: var(--o-color-info3);
   flex-shrink: 0;
 }
 
+/* 设计稿：仓库地址与官网两段文字间以空格分隔（无"|"竖线），间隙 72px */
 .contributor-link-sep {
-  color: var(--o-color-info3);
-  margin: 0 12px;
+  width: 72px;
   flex-shrink: 0;
 }
 
 .contributor-repo-link {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
+  font-size: var(--o-r-font_size-text1);
   line-height: var(--o-r-line_height-text1);
   letter-spacing: 0px;
   text-align: left;
-  color: var(--o-color-link1);
+  color: var(--o-color-info3);
   text-decoration: none;
   word-break: break-all;
 
@@ -448,10 +446,11 @@ watch(
 }
 
 /* ===== 右侧统计 ===== */
+/* 设计稿：容器 170 200x72（两个 stat 各 64，gap 72）；值 36/48 SemiBold info1；label 16/24 regular info3 */
 .contributor-stats {
   display: flex;
   align-items: center;
-  gap: 56px;
+  gap: 72px;
   flex-shrink: 0;
   align-self: center;
 }
@@ -463,6 +462,7 @@ watch(
 .stat-value {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
+  /* 36px/48px 无对应响应式 token，保持固定 */
   font-size: 36px;
   line-height: 48px;
   letter-spacing: 0px;
@@ -473,8 +473,8 @@ watch(
 .stat-label {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--o-r-font_size-text1);
+  line-height: var(--o-r-line_height-text1);
   letter-spacing: 0px;
   text-align: center;
   color: var(--o-color-info3);
@@ -494,11 +494,12 @@ watch(
   margin-bottom: 24px;
 }
 
+/* 设计稿：贡献的技能 40/56 SemiBold #000000 → --o-r-font_size-display3 / line_height-display3 + info1 */
 .section-title {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: 40px;
-  line-height: 56px;
+  font-size: var(--o-r-font_size-display3);
+  line-height: var(--o-r-line_height-display3);
   letter-spacing: 0px;
   text-align: left;
   color: var(--o-color-info1);
@@ -530,7 +531,7 @@ watch(
   .empty-state-text {
     font-family: HarmonyHeiTi;
     font-weight: var(--o-font_weight-regular);
-    font-size: 16px;
+    font-size: var(--o-r-font_size-text1);
     line-height: var(--o-r-line_height-text1);
     letter-spacing: 0px;
     color: var(--o-color-info3);
@@ -555,6 +556,8 @@ watch(
   .contributor-card {
     flex-direction: column;
     gap: 16px;
+    /* 移动端重置 PC 端非对称 padding（右侧 64 → 24） */
+    padding: 24px;
   }
 
   .contributor-stats {
@@ -565,11 +568,6 @@ watch(
   .list-header-row {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .section-title {
-    font-size: var(--o-r-font_size-h1);
-    line-height: var(--o-r-line_height-h1);
   }
 
   .skills-grid {

@@ -672,9 +672,9 @@ class SkillRepository:
             skill_id_prefix=skill_id_prefix,
             security_level=security_level,
         )
-        total = await self.session.scalar(count_query)
+        rank_by_period = sort_by == "download_count" and sort_period in ("week", "month")
 
-        if sort_by == "download_count" and sort_period in ("week", "month"):
+        if rank_by_period:
             now = datetime.now(timezone.utc)
             if sort_period == "week":
                 cutoff = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -691,13 +691,27 @@ class SkillRepository:
                 .group_by(DownloadHistory.resource_id)
                 .subquery()
             )
+            # 热门-本周/本月：仅展示该周期内有下载的 Skill（inner join 天然排除 0），
+            # 列表查询与计数查询保持同一口径
+            filtered_query = filtered_query.join(
+                dl_subquery, Skill.id == dl_subquery.c.resource_id
+            )
+            count_query = count_query.join(
+                dl_subquery, Skill.id == dl_subquery.c.resource_id
+            )
+        elif sort_by == "download_count":
+            # 热门-全部时间：仅展示累计下载量大于 0 的 Skill
+            filtered_query = filtered_query.where(Skill.download_count > 0)
+            count_query = count_query.where(Skill.download_count > 0)
 
+        total = await self.session.scalar(count_query)
+
+        if rank_by_period:
             query = (
                 filtered_query
                 .add_columns(dl_subquery.c.period_downloads)
-                .outerjoin(dl_subquery, Skill.id == dl_subquery.c.resource_id)
                 .order_by(
-                    desc(func.coalesce(dl_subquery.c.period_downloads, 0)),
+                    desc(dl_subquery.c.period_downloads),
                     desc(Skill.updated_at),
                     desc(Skill.created_at),
                 )
@@ -712,7 +726,7 @@ class SkillRepository:
             query = filtered_query.order_by(*order_by).offset(skip).limit(limit)
 
         result = await self.session.execute(query)
-        if sort_by == "download_count" and sort_period in ("week", "month"):
+        if rank_by_period:
             # 周期排序：查询结果同时包含 Skill 实体与周期下载量，挂载到实体上返回
             skills = []
             for row in result.all():
@@ -1073,8 +1087,8 @@ class ContributorRepository:
         platform: str | None = None,
         keyword: str | None = None,
         sort_by: str = "skill_count",
-    ) -> tuple[list[tuple[Contributor, int]], int, dict[str, int]]:
-        """Return ((contributor, total_downloads) rows, total, platform_counts).
+    ) -> tuple[list[tuple[Contributor, int]], int, dict[str, int], int]:
+        """Return ((contributor, total_downloads) rows, total, platform_counts, grand_total).
 
         ``total_downloads`` aggregates ``skills.download_count`` per
         (source, author) via a correlated subquery (same visibility rule as
@@ -1083,6 +1097,10 @@ class ContributorRepository:
         ``platform_counts`` counts contributors per platform under the same
         keyword filter (ignoring ``platform`` tab selection so the tabs always
         reflect the full search scope).
+
+        ``grand_total`` is the full-scope count under the current keyword only
+        (ignoring ``platform``); used by the "全部" tab so its count stays
+        stable across platform switches.
         """
         base_filter: list[Any] = []
         count_filter: list[Any] = []
@@ -1098,10 +1116,18 @@ class ContributorRepository:
             base_filter.append(like)
             count_filter.append(like)
 
+        # ``total`` 反映当前筛选（含 platform）下的总数，用于分页；
+        # ``grand_total`` 仅按 keyword 聚合（忽略 platform），"全部" tab 计数；
+        # ``platform_counts`` 仅按 keyword 聚合（忽略 platform），各 tab 计数。
         count_q = select(func.count(Contributor.id))
-        if count_filter:
-            count_q = count_q.where(*count_filter)
+        if base_filter:
+            count_q = count_q.where(*base_filter)
         total = (await self.session.execute(count_q)).scalar() or 0
+
+        grand_q = select(func.count(Contributor.id))
+        if count_filter:
+            grand_q = grand_q.where(*count_filter)
+        grand_total = (await self.session.execute(grand_q)).scalar() or 0
 
         # Per-platform counts under current keyword filter
         pc_q = (
@@ -1138,7 +1164,7 @@ class ContributorRepository:
 
         result = await self.session.execute(q)
         rows = [(row[0], int(row[1] or 0)) for row in result.all()]
-        return rows, total, platform_counts
+        return rows, total, platform_counts, grand_total
 
 
 class AgentRepository:

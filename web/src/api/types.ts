@@ -223,6 +223,7 @@ export interface Contributor {
 export interface ContributorListResponse {
   contributors: Contributor[]
   total: number
+  grand_total: number
   skip: number
   limit: number
   platform_counts: Record<string, number>

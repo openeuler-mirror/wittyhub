@@ -520,7 +520,10 @@ repositories:
             repo_root=repository,
             repository_git_metadata={
                 "commit_id": repo_head_commit,
-                "latest_tags": ["v1", "v2"],
+                # 与生产扫描一致：按创建时间降序传入。
+                # v1/v2 两个 tag 的 skill 目录内容相同（仅 README 变化），
+                # tree_hash 去重后只保留最新的 v2 版本行。
+                "latest_tags": ["v2", "v1"],
                 "latest_tag_commits": {"v1": v1_commit, "v2": v2_commit},
             },
         )
@@ -530,7 +533,6 @@ repositories:
             "gitcode:acme/widgets/skill-1",
         }
         assert {(v.version, v.commit_id) for v in tagged_skills} == {
-            ("v1", v1_commit),
             ("v2", v2_commit),
         }
         assert {v.skill_id for v in tagged_skills} == {"gitcode:acme/widgets/skill"}
@@ -596,6 +598,86 @@ repositories:
         ) + len(tagged_skills)
         # Pending audits are a subset of submitted ones.
         assert scanner._security_audit_pending <= scanner._security_audit_submitted
+
+    async def test_skill_scanner_dedups_tags_with_same_skill_tree_hash(self, tmp_path):
+        """Tags whose skill directory content is unchanged must collapse to one row.
+
+        Regression (azure-messaging style): a repo cuts v1/v2/v3 tags where only
+        README changed — the skill's tree_hash is identical across all tags, so
+        only the newest tag may stay in skill_versions; older tags are skipped
+        before record assembly.
+        """
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_dir = repository / "skills" / "skill-1"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: stable-skill\n---\n# Stable Skill\n", encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill")
+        v1_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v1")
+        skill_tree_hash = _git(repository, "rev-parse", "HEAD:skills/skill-1")
+
+        (repository / "README.md").write_text("# change 1\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "change readme 1")
+        v2_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v2")
+
+        (repository / "README.md").write_text("# change 2\n", encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "change readme 2")
+        v3_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v3")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="github",
+            url="https://github.com/acme/agent-skills",
+            branch="master",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": v3_commit,
+                # 与真实扫描一致：按创建时间降序传入
+                "latest_tags": ["v3", "v2", "v1"],
+                "latest_tag_commits": {
+                    "v1": v1_commit,
+                    "v2": v2_commit,
+                    "v3": v3_commit,
+                },
+            },
+        )
+
+        # 三个 tag 的 skill 目录内容相同（tree_hash 一致），只保留最新 tag v3。
+        assert {v.version for v in tagged_skills} == {"v3"}
+        assert all(v.tree_hash == skill_tree_hash for v in tagged_skills)
+        # v3 是首个遇到的（最新）tag，记录保留其自身 commit。
+        assert tagged_skills[0].commit_id == v3_commit
+        # HEAD 的 latest 行内容未变，安全结果经 tree_hash 缓存复用。
+        assert scanner._security_cache_hits + scanner._security_audit_submitted == len(
+            skills
+        ) + len(tagged_skills)
 
     def test_skill_scanner_reuses_security_result_for_unchanged_skill_tree(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations

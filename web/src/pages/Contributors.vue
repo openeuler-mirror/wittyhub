@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { Contributor } from '@/api/types'
-import { OPagination, OLoading } from '@opensig/opendesign'
+import { OPagination, OLoading, OInput, OTab, OTabPane } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
@@ -19,10 +19,6 @@ const platformNames: Record<string, string> = {
   enterprise: '企业组织',
   community: '社区SIG',
   personal: '个人',
-}
-const sourceNames: Record<string, string> = {
-  github: 'GitHub',
-  gitcode: 'GitCode',
 }
 
 // 贡献流程四步
@@ -53,11 +49,15 @@ const flowSteps = [
 // 平台 tabs 顺序：全部 / 企业组织 / 社区SIG / 个人
 const tabOrder = ['', 'enterprise', 'community', 'personal'] as const
 const currentPlatform = ref<string>('')
+const activeTab = ref('all')
 const keyword = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const contributors = ref<Contributor[]>([])
 const total = ref(0)
+/* grand_total：仅 keyword 筛选下的全平台总数，用于"全部" tab 计数，
+   切换 platform 时不变化 */
+const grandTotal = ref(0)
 const platformCounts = ref<Record<string, number>>({})
 const loading = ref(true)
 const error = ref('')
@@ -72,12 +72,22 @@ function tabLabel(key: string): string {
 }
 
 function tabCount(key: string): number {
-  if (!key) return total.value
+  /* "全部" tab 始终显示全平台总数（仅 keyword 筛选），切换 platform 时不变化 */
+  if (!key) return grandTotal.value
   return platformCounts.value[key] || 0
 }
 
 function displayName(c: Contributor): string {
   return c.name?.trim() || c.author
+}
+
+/* 社区 SIG 贡献者名称多为 sig-xxx，头像统一显示 S 不直观；
+   以 sig- 开头时，取 sig- 后首个单词的首字母大写作为头像字母 */
+function avatarLetter(c: Contributor): string {
+  const name = displayName(c)
+  const m = name.match(/^sig-+\s*([A-Za-z])/)
+  if (m) return m[1]!.toUpperCase()
+  return name.charAt(0).toUpperCase()
 }
 
 function displayDesc(c: Contributor): string {
@@ -106,12 +116,14 @@ async function fetchContributors() {
     })
     contributors.value = res.contributors || []
     total.value = res.total || 0
+    grandTotal.value = res.grand_total ?? res.total ?? 0
     platformCounts.value = res.platform_counts || {}
   } catch (e: any) {
     console.error('加载贡献者列表失败:', e)
     error.value = e?.response?.data?.detail || e.message || '加载失败'
     contributors.value = []
     total.value = 0
+    grandTotal.value = 0
     platformCounts.value = {}
   } finally {
     loading.value = false
@@ -129,13 +141,26 @@ function selectPlatform(value: string) {
   fetchContributors()
 }
 
-function onKeywordInput() {
+function onTabChange(value: string | number) {
+  selectPlatform(String(value) === 'all' ? '' : String(value))
+}
+
+/* 下载量按中文习惯格式化（4.5万） */
+function formatDownloads(n: number): string {
+  if (n >= 10000) {
+    const w = n / 10000
+    return `${w >= 100 ? Math.round(w) : Math.round(w * 10) / 10}万`
+  }
+  return String(n)
+}
+
+watch(keyword, () => {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     page.value = 1
     fetchContributors()
   }, 300)
-}
+})
 
 function onPaginationChange(
   newVal: { page: number; pageSize: number },
@@ -174,7 +199,7 @@ onMounted(fetchContributors)
       <div class="absolute inset-0 pointer-events-none">
         <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
       </div>
-      <div class="container-wide relative">
+      <div class="container-wide relative h-full flex flex-col justify-center">
         <h1 class="hero-title">贡献 openEuler Skill</h1>
         <p class="hero-subtitle">每一行经验、每一个自动化脚本、每一个最佳实践，都可以成为帮助社区开发者的Skill。</p>
       </div>
@@ -183,7 +208,6 @@ onMounted(fetchContributors)
     <section class="container-wide flow-section">
       <h2 class="section-title">贡献流程</h2>
       <div class="flow-card">
-        <div class="flow-card-bg"></div>
         <div class="flow-steps">
           <template v-for="(step, idx) in flowSteps" :key="step.title">
             <div class="flow-step">
@@ -214,31 +238,24 @@ onMounted(fetchContributors)
     <section class="container-wide plaza-section">
       <h2 class="section-title">贡献者广场</h2>
       <div class="plaza-toolbar">
-        <div class="platform-tabs">
-          <button
-            v-for="key in tabOrder"
-            :key="key"
-            type="button"
-            :class="['tab-btn', { active: currentPlatform === key }]"
-            @click="selectPlatform(key)"
-          >
-            {{ tabLabel(key) }}
-            <span class="tab-count">{{ tabCount(key) }}</span>
-          </button>
-        </div>
+        <!-- 按钮页签 466×48，容器 #EDEFF2，选中白底蓝字半粗体 -->
+        <OTab v-model="activeTab" variant="button" size="large" class="platform-tabs" @change="onTabChange">
+          <OTabPane v-for="key in tabOrder" :key="key" :value="key || 'all'">
+            <template #nav>
+              {{ tabLabel(key) }}<span class="tab-count">{{ tabCount(key) }}</span>
+            </template>
+          </OTabPane>
+        </OTab>
 
+        <!-- 搜索框 320×48，白底 1px 边框，圆角 4px -->
         <div class="search-wrap">
-          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input
-            v-model="keyword"
-            type="text"
-            placeholder="搜索贡献者"
-            class="search-input"
-            @input="onKeywordInput"
-          />
+          <OInput v-model="keyword" placeholder="搜索贡献者" size="large" round="4px" class="search-input">
+            <template #prefix>
+              <svg class="search-icon" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17.549 16.523l0.087 0.074 2.76 2.754c0.274 0.273 0.274 0.716 0.001 0.99-0.246 0.246-0.629 0.271-0.903 0.075l-0.087-0.074-2.76-2.754c-0.274-0.273-0.274-0.716-0.001-0.99 0.246-0.246 0.629-0.271 0.903-0.075zM10.821 3.454c4.099 0 7.423 3.323 7.423 7.423s-3.323 7.423-7.423 7.423c-4.099 0-7.423-3.323-7.423-7.423s3.323-7.423 7.423-7.423zM10.821 4.854c-3.326 0-6.023 2.696-6.023 6.023s2.696 6.023 6.023 6.023c3.326 0 6.023-2.696 6.023-6.023s-2.696-6.023-6.023-6.023z" fill="currentColor"></path>
+              </svg>
+            </template>
+          </OInput>
         </div>
       </div>
       <!-- 加载态 -->
@@ -290,7 +307,7 @@ onMounted(fetchContributors)
           @keydown.enter.prevent="onClickContributor(c)"
         >
           <div class="card-head">
-            <div class="avatar-wrap">
+            <div :class="['avatar-wrap', c.platform ? `avatar-${c.platform}` : 'avatar-default']">
               <img
                 v-if="avatarSrc(c)"
                 :src="avatarSrc(c)!"
@@ -298,32 +315,15 @@ onMounted(fetchContributors)
                 class="avatar-img"
                 @error="onAvatarError"
               />
-              <svg v-else class="avatar-default" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
+              <span v-else class="avatar-fallback">{{ avatarLetter(c) }}</span>
             </div>
-            <div class="card-title-col">
-              <h3 class="contributor-name">{{ displayName(c) }}</h3>
-              <div class="card-tags">
-                <span v-if="c.platform" :class="['platform-label', `platform-${c.platform}`]">{{ platformNames[c.platform] || c.platform }}</span>
-                <span class="tag tag-source">{{ sourceNames[c.source] || c.source }}</span>
-              </div>
-            </div>
+            <h3 class="contributor-name">{{ displayName(c) }}</h3>
+            <span v-if="c.platform" class="platform-label">{{ platformNames[c.platform] || c.platform }}</span>
           </div>
           <p v-if="displayDesc(c)" class="contributor-desc">{{ displayDesc(c) }}</p>
           <div class="card-footer">
-            <div class="stat-item">
-              <span class="stat-value">{{ c.skill_count }}</span>
-              <span class="stat-label">Skills</span>
-            </div>
-            <div class="stat-item stat-downloads">
-              <svg class="download-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 3.29492C12.3544 3.29492 12.6473 3.55827 12.6936 3.89994L12.7 3.99492L12.7 15.5335L17.2249 10.9581C17.4968 10.6833 17.94 10.6808 18.2149 10.9526C18.4623 11.1973 18.489 11.5808 18.2937 11.8554L18.2204 11.9426L12.5008 17.726C12.3635 17.8647 12.1825 17.9341 12.0016 17.9337L12 17.9337C11.6456 17.9337 11.3527 17.6704 11.3064 17.3287L11.3 17.2337L11.3 3.99492C11.3 3.60832 11.6134 3.29492 12 3.29492ZM6.68698 10.8826C6.41393 10.6851 6.03026 10.7087 5.78362 10.9541C5.50957 11.2268 5.50845 11.67 5.78113 11.9441L8.73786 14.9157L8.82444 14.9897C9.09749 15.1872 9.48116 15.1636 9.72781 14.9182C10.0019 14.6455 10.003 14.2023 9.73029 13.9282L6.77356 10.9566L6.68698 10.8826ZM19.0079 19.3594C19.3945 19.3594 19.7079 19.6728 19.7079 20.0594C19.7079 20.4138 19.4445 20.7066 19.1028 20.753L19.0079 20.7594L5.01445 20.7594C4.62785 20.7594 4.31445 20.446 4.31445 20.0594C4.31445 19.705 4.5778 19.4121 4.91947 19.3658L5.01445 19.3594L19.0079 19.3594Z" fill="currentColor" fill-rule="evenodd"/>
-              </svg>
-              <span class="download-value">{{ c.total_downloads.toLocaleString() }}</span>
-              <span class="stat-label">下载量</span>
-            </div>
+            <span class="stat-text">{{ c.skill_count }} skills</span>
+            <span class="stat-text">{{ formatDownloads(c.total_downloads) }} 下载量</span>
           </div>
         </div>
       </div>
@@ -358,37 +358,46 @@ onMounted(fetchContributors)
     @content;
   }
 }
+/* 与 AppHeader 的 ContentWrapper 同宽（1488px + 24px padding），
+   保证 hero 标题/区块标题与 header logo 左缘对齐 */
 .container-wide {
-  max-width: 1200px;
+  max-width: 1488px;
   margin: 0 auto;
   padding: 0 24px;
 }
 /* ===== Hero 区域 ===== */
+/* 高度与主页 hero 保持一致：背景图为 object-cover，容器宽高比相同时
+   纹理的缩放与裁切位置才能与主页完全对齐 */
 .hero-section {
   position: relative;
   overflow: hidden;
-  padding: 48px 0 32px;
+  height: 319.2px;
 }
 .hero-title {
-  @include font-semibold;
-  font-size: 40px;
-  line-height: 56px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 48px;
+  line-height: 64px;
+  letter-spacing: 0px;
+  text-align: left;
   color: var(--o-color-info1);
   margin-bottom: 8px;
 }
 .hero-subtitle {
-  @include font-base;
-  font-size: var(--o-font_size-text1, 16px);
-  line-height: var(--o-line_height-text1, 24px);
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 18px;
+  line-height: 26px;
+  letter-spacing: 0px;
+  text-align: left;
   color: var(--o-color-info3);
   margin: 0;
-  max-width: 680px;
 }
 /* ===== 公共标题 ===== */
 .section-title {
   @include font-semibold;
-  font-size: 28px;
-  line-height: 40px;
+  font-size: 40px;
+  line-height: 56px;
   color: var(--o-color-info1);
   margin: 0 0 24px;
 }
@@ -398,21 +407,25 @@ onMounted(fetchContributors)
 }
 .flow-card {
   position: relative;
-  border-radius: 8px;
-  background: var(--o-color-fill2);
+  /* （矩形 5874）：圆角 4px，双层渐变——
+     底层 140deg 白→#F2F6FF(52%)→#DFE9FF（左上白右下淡蓝），
+     顶层 110deg rgba(107,136,255,.2)→白（左上叠淡蓝氛围，整体透明度 0.2） */
+  border-radius: 4px;
+  background:
+    linear-gradient(110deg, rgba(107, 136, 255, 0.2) 0%, rgba(226, 232, 255, 0.2) 55%, rgba(255, 255, 255, 0.2) 100%),
+    linear-gradient(140deg, #FFFFFF 0%, #F2F6FF 52%, #DFE9FF 100%);
   padding: 40px 32px 24px;
   overflow: hidden;
   @include dark {
-    background: #1a1a1c;
+    background: linear-gradient(140deg, #1A1A1C 0%, #1F1F24 52%, #242429 100%);
   }
 }
 .flow-card-bg {
+  /* 预留：若需额外装饰可在此扩展 */
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse at 0% 0%, rgba(56, 99, 214, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 100% 100%, rgba(56, 99, 214, 0.06) 0%, transparent 50%);
+  background: transparent;
 }
 .flow-steps {
   position: relative;
@@ -427,22 +440,24 @@ onMounted(fetchContributors)
   align-items: center;
   flex: 0 0 auto;
   width: 160px;
+  /* 允许文字单行溢出（设计稿图标行 56+52*2=160，文字行各自宽度） */
+  overflow: visible;
 }
 .flow-icon {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   background: var(--o-color-control2-light);
   color: var(--o-color-info1);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   position: relative;
   z-index: 1;
   :deep(svg) {
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
   }
   @include dark {
     background: #242427;
@@ -450,18 +465,23 @@ onMounted(fetchContributors)
 }
 .flow-step-title {
   @include font-semibold;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 18px;
+  line-height: 26px;
   color: var(--o-color-info1);
   margin-bottom: 4px;
   text-align: center;
+  white-space: nowrap;
+  overflow: visible;
 }
 .flow-step-desc {
   @include font-base;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 24px;
+  /* 设计稿 opacity=0.6 (#00000099) */
   color: var(--o-color-info3);
   text-align: center;
+  white-space: nowrap;
+  overflow: visible;
 }
 .flow-link {
   color: var(--o-color-link1);
@@ -470,10 +490,10 @@ onMounted(fetchContributors)
 }
 .flow-connector {
   flex: 0 0 auto;
-  width: 80px;
+  width: 160px;
   height: 1px;
   background: var(--o-color-control4);
-  margin-top: 24px;
+  margin-top: 28px;
   @include dark {
     background: #2a2a2c;
   }
@@ -485,8 +505,8 @@ onMounted(fetchContributors)
 }
 .flow-guide-link {
   @include font-base;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 16px;
+  line-height: 24px;
   color: var(--o-color-link1);
   text-decoration: none;
   @include hover { color: var(--o-color-primary1); }
@@ -504,102 +524,43 @@ onMounted(fetchContributors)
   margin-bottom: 32px;
   flex-wrap: wrap;
 }
+/* 平台 tabs：设计稿按钮页签——容器 466×48 圆角 4px 背景 #EDEFF2(fill3)，
+   选中 tab 白底(fill2) 蓝字(primary1) 半粗体 18px，tab 高 40 间距 4，计数紧跟文字 */
 .platform-tabs {
-  display: flex;
-  gap: 0;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--o-color-control4);
-  background: var(--o-color-fill2);
-  @include dark {
-    background: #1a1a1c;
-    border-color: #2a2a2c;
-  }
-}
-.tab-btn {
-  @include font-base;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 20px;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--o-color-info2);
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--o-color-control4);
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-  &:last-child {
-    border-right: none;
-  }
-  @include hover {
-    color: var(--o-color-info1);
-    background: var(--o-color-control2-light);
-  }
-  &.active {
-    background: var(--o-color-primary1);
-    color: #fff;
-    font-weight: var(--o-font_weight-medium);
-    .tab-count {
-      color: rgba(255, 255, 255, 0.85);
-    }
-    @include hover {
-      background: var(--o-color-primary1);
-      color: #fff;
-    }
-  }
-  @include dark {
-    border-right-color: #2a2a2c;
-    @include hover {
-      background: #242427;
-    }
-  }
-}
-.tab-count {
-  @include font-base;
-  font-size: 13px;
-  color: var(--o-color-info3);
-}
-.search-wrap {
-  position: relative;
-  width: 260px;
   flex-shrink: 0;
+  /* tab 总高 = 26(行高) + 6*2(padding) + 2(border) = 40，容器 40 + 4*2 = 48 */
+  --tab-nav-text-size: 18px;
+  --tab-nav-text-height: 26px;
+  --tab-btn-radius: 4px;
+  /* 未选中文字 #000000(info1)（组件默认 info2） */
+  --tab-icon-color: var(--o-color-info1);
+  font-family: HarmonyHeiTi;
+  .tab-count {
+    margin-left: 4px;
+    font-weight: var(--o-font_weight-regular);
+    color: var(--o-color-info3);
+  }
+  :deep(.o-tab-nav-active) {
+    .tab-count {
+      font-weight: var(--o-font_weight-semibold);
+      color: var(--o-color-primary1);
+    }
+  }
 }
-.search-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  color: var(--o-color-info3);
-  pointer-events: none;
+/* 搜索框：设计稿 320×48，白底，1px 边框 #000 op=0.25(control1)，圆角 4px */
+.search-wrap {
+  width: 320px;
+  flex-shrink: 0;
 }
 .search-input {
   width: 100%;
-  height: 36px;
-  padding: 0 12px 0 36px;
-  border: 1px solid var(--o-color-control4);
-  border-radius: 4px;
-  background: var(--o-color-fill2);
-  color: var(--o-color-info1);
+  --_box-height: 48px;
   font-family: HarmonyHeiTi;
-  font-size: 14px;
-  line-height: 22px;
-  outline: none;
-  transition: border-color 0.15s;
-  &::placeholder {
-    color: var(--o-color-info3);
-  }
-  &:focus {
-    border-color: var(--o-color-primary1);
-  }
-  @include dark {
-    background: #1a1a1c;
-    border-color: #2a2a2c;
-  }
+}
+.search-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--o-color-info2);
 }
 /* ===== 加载/空态 ===== */
 .loading-container {
@@ -633,13 +594,13 @@ onMounted(fetchContributors)
   grid-template-columns: repeat(3, 1fr);
   gap: 32px;
 }
+/* 贡献者卡片：设计稿 474×192 白底圆角 8px，padding 24 */
 .contributor-card {
   background: var(--o-color-fill2);
   border-radius: 8px;
   padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.2s;
   outline: none;
@@ -655,157 +616,109 @@ onMounted(fetchContributors)
     background: #1a1a1c;
   }
 }
+/* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */
 .card-head {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  min-height: 30px;
 }
+/* 头像：30×30 圆形，背景平台色，首字母 22px 半粗体白色 */
 .avatar-wrap {
-  width: 52px;
-  height: 52px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   flex-shrink: 0;
   overflow: hidden;
-  background: var(--o-color-control3-light);
   display: flex;
   align-items: center;
   justify-content: center;
-  @include dark {
-    background: #2a2a2c;
-  }
+}
+.avatar-enterprise {
+  background: #2e53fa;
+  @include dark { background: #6b8aff; }
+}
+.avatar-community {
+  background: #7b25f4;
+  @include dark { background: #a87aff; }
+}
+.avatar-personal {
+  background: #e2127a;
+  @include dark { background: #ff6bb0; }
+}
+.avatar-default {
+  background: var(--o-color-primary1);
 }
 .avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.avatar-default {
-  width: 26px;
-  height: 26px;
-  color: var(--o-color-info3);
-}
-.card-title-col {
-  flex: 1;
-  min-width: 0;
+.avatar-fallback {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 22px;
+  line-height: 30px;
+  color: #FFFFFF;
+  text-align: center;
 }
 .contributor-name {
   @include font-semibold;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 22px;
+  line-height: 30px;
   color: var(--o-color-info1);
-  margin-bottom: 6px;
+  margin: 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.tag {
-  @include font-base;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--o-color-info2);
-  border-radius: 4px;
-  height: 22px;
-  padding: 2px 8px;
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  background: var(--o-color-control2-light);
-}
+/* 平台标签：右上角，高 24，白底 1px 边框 op=0.25(control1)，圆角 4px，12px 黑字 */
 .platform-label {
+  margin-left: auto;
+  flex-shrink: 0;
   @include font-base;
   font-size: 12px;
   line-height: 18px;
-  padding: 0;
-  background: transparent;
+  color: var(--o-color-info1);
+  height: 24px;
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
-  flex-shrink: 0;
-}
-.platform-enterprise {
-  color: #2e53fa;
-  @include dark {
-    color: #6b8aff;
-  }
-}
-.platform-community {
-  color: #7b25f4;
-  @include dark {
-    color: #a87aff;
-  }
-}
-.platform-personal {
-  color: #e2127a;
-  @include dark {
-    color: #ff6bb0;
-  }
-}
-.tag-source {
-  background: var(--o-color-white);
-  border: 1px solid var(--o-color-control4);
-  color: var(--o-color-info3);
-  @include dark {
-    background: #242427;
-    border-color: #2a2a2c;
-  }
+  border: 1px solid var(--o-color-control1);
+  border-radius: 4px;
+  background: transparent;
 }
 .contributor-desc {
   @include font-base;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 24px;
   color: var(--o-color-info3);
-  margin: 0;
+  margin: 12px 0 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 40px;
+  min-height: 48px;
 }
+/* 底部：分隔线（距描述 24px）+ 统计（距线 12px），12px op=0.60(info3) */
 .card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-top: 24px;
   padding-top: 12px;
   border-top: 1px solid var(--o-color-control3-light);
-  margin-top: auto;
   @include dark {
     border-top-color: #2a2a2c;
   }
 }
-.stat-item, .stat-downloads {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-}
-.download-icon {
-  width: 12px;
-  height: 12px;
-  color: hsla(0, 0%, 0%, 0.6);
-  flex-shrink: 0;
-  transform: translateY(1px);
-  @include dark {
-    color: hsla(0, 0%, 100%, 0.6);
-  }
-}
-.download-value, .stat-value, .stat-label {
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
+.stat-text {
+  @include font-base;
   font-size: 12px;
   line-height: 18px;
-  color: hsla(0, 0%, 0%, 0.6);
-}
-.dark .download-value,
-.dark .stat-value,
-.dark .stat-label,
-[data-o-theme='e.dark'] .download-value,
-[data-o-theme='e.dark'] .stat-value,
-[data-o-theme='e.dark'] .stat-label {
-  color: hsla(0, 0%, 100%, 0.6);
+  color: var(--o-color-info3);
 }
 /* ===== 分页 ===== */
 .pagination-row {
@@ -844,14 +757,6 @@ onMounted(fetchContributors)
   .plaza-toolbar {
     flex-direction: column;
     align-items: stretch;
-  }
-  .platform-tabs {
-    overflow-x: auto;
-    flex-wrap: nowrap;
-  }
-  .tab-btn {
-    flex-shrink: 0;
-    padding: 8px 14px;
   }
   .search-wrap {
     width: 100%;

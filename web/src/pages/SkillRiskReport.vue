@@ -29,20 +29,23 @@ const LEVEL_COLORS: Record<string, string> = {
 }
 const levelColor = computed(() => LEVEL_COLORS[report.value?.level || 'unknown'] || LEVEL_COLORS.unknown)
 
-// 得分仪表盘：160px 圆环、12 点起顺时针，按等级绘制 1/4 / 1/2 / 3/4 / 全环
-const gaugeArc = computed(() => {
-  switch (report.value?.level) {
-    case 'safe':
-      return 'M 80 8 A 72 72 0 0 1 152 80'
-    case 'low':
-      return 'M 80 8 A 72 72 0 0 1 80 152'
-    case 'medium':
-      return 'M 80 8 A 72 72 0 1 1 8 80'
-    default:
-      return ''
-  }
+// 得分仪表盘：160px 圆环、12 点起顺时针，圆弧角度 = 得分 ÷ 100 × 360°
+// 0 分不绘制圆弧，100 分绘制整圆，其余得分按角度精确对应（得分变化时自动重算）
+const reportScore = computed(() => {
+  const score = report.value?.score
+  return typeof score === 'number' ? Math.min(Math.max(score, 0), 100) : null
 })
-const gaugeFull = computed(() => report.value?.level === 'high')
+const gaugeFull = computed(() => reportScore.value === 100)
+const gaugeArc = computed(() => {
+  const score = reportScore.value
+  // 未检测 / 0 分不绘制圆弧；100 分由整圆元素绘制
+  if (score === null || score <= 0 || score >= 100) return ''
+  const angle = score * 3.6
+  const rad = (angle * Math.PI) / 180
+  const x = (80 + 72 * Math.sin(rad)).toFixed(2)
+  const y = (80 - 72 * Math.cos(rad)).toFixed(2)
+  return `M 80 8 A 72 72 0 ${angle > 180 ? 1 : 0} 1 ${x} ${y}`
+})
 
 // 分类进度条：高 / 中 / 低风险色块长度与命中项数量严格成正比（百分比保留两位小数）
 // 四个分类卡片共用同一比例映射规则；无命中项时整条显示品牌底色
@@ -179,7 +182,7 @@ onMounted(async () => {
                 <div class="gauge">
                   <svg class="gauge-svg" viewBox="0 0 160 160">
                     <circle class="gauge-track" cx="80" cy="80" r="72" />
-                    <!-- 高风险：完整圆环 -->
+                    <!-- 满分：完整圆环 -->
                     <circle
                       v-if="gaugeFull"
                       class="gauge-arc"
@@ -189,7 +192,7 @@ onMounted(async () => {
                       transform="rotate(-90 80 80)"
                       :style="{ stroke: levelColor }"
                     />
-                    <!-- 其他等级：按比例弧 -->
+                    <!-- 其余得分：按得分百分比绘制弧 -->
                     <path
                       v-else-if="gaugeArc"
                       class="gauge-arc"

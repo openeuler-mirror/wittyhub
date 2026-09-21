@@ -157,18 +157,35 @@ async function copyMarkdownCode(e: MouseEvent) {
   }
 }
 
-// riskClass/arcColor/arcPath 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
-// 圆弧比例（从 12 点方向起顺时针，stroke-linecap: butt 直角端头与设计稿一致）：
-//   安全 1/4(90°) → 3点(右)；低风险 1/2(180°) → 6点(下)；中风险 3/4(270°) → 9点(左)；高风险 全环
-function getSecurityLevel(score: number | null): { label: string; class: string; riskClass: string; arcColor: string; arcPath: string; arcFull: boolean; desc: string } {
-  if (score === null) return { label: '未检测', class: 'tag-gray', riskClass: 'risk-gray', arcColor: '', arcPath: '', arcFull: false, desc: '暂无风险评估数据' }
-  if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', arcPath: 'M 70 7 A 63 63 0 0 1 133 70', arcFull: false, desc: '无显著风险，可以放心使用' }
-  if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', arcPath: 'M 70 7 A 63 63 0 0 1 70 133', arcFull: false, desc: '风险较低，可以正常使用' }
-  if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', arcPath: 'M 70 7 A 63 63 0 1 1 7 70', arcFull: false, desc: '存在一定风险，建议谨慎使用' }
-  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', arcPath: '', arcFull: true, desc: '存在较高风险，建议谨慎使用' }
+// riskClass/arcColor 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
+function getSecurityLevel(score: number | null): { label: string; class: string; riskClass: string; arcColor: string; desc: string } {
+  if (score === null) return { label: '未检测', class: 'tag-gray', riskClass: 'risk-gray', arcColor: '', desc: '暂无风险评估数据' }
+  if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', desc: '无显著风险，可以放心使用' }
+  if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', desc: '风险较低，可以正常使用' }
+  if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', desc: '存在一定风险，建议谨慎使用' }
+  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', desc: '存在较高风险，建议谨慎使用' }
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
+
+// 得分圆弧：以 100 分为满分，圆弧从 12 点方向起顺时针填充「得分 ÷ 100 × 360°」的角度
+// 圆心 (70, 70)、半径 63（140px 仪表盘）；得分变化时自动重算
+const riskScore = computed(() => {
+  const score = skill.value?.risk_score
+  return typeof score === 'number' ? Math.min(Math.max(score, 0), 100) : null
+})
+// 满分绘制整圆（arc 起止点重合无法用 path 表达）
+const scoreArcFull = computed(() => riskScore.value === 100)
+const scoreArcPath = computed(() => {
+  const score = riskScore.value
+  // 未检测 / 0 分不绘制圆弧；100 分由整圆元素绘制
+  if (score === null || score <= 0 || score >= 100) return ''
+  const angle = score * 3.6
+  const rad = (angle * Math.PI) / 180
+  const x = (70 + 63 * Math.sin(rad)).toFixed(2)
+  const y = (70 - 63 * Math.cos(rad)).toFixed(2)
+  return `M 70 7 A 63 63 0 ${angle > 180 ? 1 : 0} 1 ${x} ${y}`
+})
 // 风险评分展示：有分值显示 x/100，未检测显示文案
 const riskScoreText = computed(() => {
   const score = skill.value?.risk_score
@@ -599,9 +616,9 @@ onMounted(async () => {
                 <div class="risk-gauge">
                   <svg class="risk-gauge-svg" viewBox="0 0 140 140">
                     <circle class="risk-gauge-track" cx="70" cy="70" r="63" />
-                    <!-- 高风险：完整圆环，circle 默认从 3 点起，旋转 -90° 使其从 12 点起 -->
+                    <!-- 满分：完整圆环，circle 默认从 3 点起，旋转 -90° 使其从 12 点起 -->
                     <circle
-                      v-if="securityLevel.arcFull"
+                      v-if="scoreArcFull"
                       class="risk-gauge-arc risk-gauge-arc-full"
                       cx="70"
                       cy="70"
@@ -609,11 +626,11 @@ onMounted(async () => {
                       transform="rotate(-90 70 70)"
                       :style="{ stroke: securityLevel.arcColor }"
                     />
-                    <!-- 其他等级：按比例弧（path 从 12 点起顺时针，直角端头） -->
+                    <!-- 其余得分：按得分百分比绘制弧（path 从 12 点起顺时针，直角端头） -->
                     <path
-                      v-else-if="securityLevel.arcPath"
+                      v-else-if="scoreArcPath"
                       class="risk-gauge-arc"
-                      :d="securityLevel.arcPath"
+                      :d="scoreArcPath"
                       :style="{ stroke: securityLevel.arcColor }"
                     />
                   </svg>

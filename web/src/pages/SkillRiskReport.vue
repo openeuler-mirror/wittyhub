@@ -429,6 +429,7 @@ onMounted(async () => {
   margin: 24px 0;
 }
 
+/* 摘要正文：HarmonyHeiTi 16/24、regular、字间距 0，颜色为设计稿的 60% 黑（rgba(0,0,0,.6)） */
 .summary-text {
   margin: 0;
   font-family: HarmonyHeiTi;
@@ -436,7 +437,7 @@ onMounted(async () => {
   font-size: 16px;
   line-height: 24px;
   letter-spacing: 0px;
-  color: var(--o-color-info1);
+  color: var(--o-color-info3);
 }
 
 /* ===== 得分 + 分类 一行 ===== */

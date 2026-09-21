@@ -1108,15 +1108,20 @@ onMounted(async () => {
   color: var(--o-color-info1);
 }
 
-/* 标题旁 ⓘ 说明图标（设计稿 提示/形状结合） */
+/* 标题旁 ⓘ 说明图标（设计稿 提示/形状结合）：默认一级文字色，悬停品牌蓝 */
 .risk-info-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: var(--o-color-primary1);
+  color: var(--o-color-info1);
   cursor: pointer;
+  transition: color 0.2s;
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
 
   svg {
     width: 24px;

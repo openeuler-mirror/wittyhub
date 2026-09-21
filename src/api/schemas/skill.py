@@ -312,6 +312,7 @@ class ContributorResponse(BaseModel):
 class ContributorListResponse(BaseModel):
     contributors: list[ContributorResponse]
     total: int
+    grand_total: int = 0
     skip: int
     limit: int
     platform_counts: dict[str, int] = Field(default_factory=dict)

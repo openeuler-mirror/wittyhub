@@ -564,7 +564,7 @@ async def list_contributors(
     筛选），前端标签页展示数量时使用。
     """
     repo = ContributorRepository(db)
-    rows, total, platform_counts = await repo.list(
+    rows, total, platform_counts, grand_total = await repo.list(
         skip=skip,
         limit=limit,
         platform=platform,
@@ -592,6 +592,7 @@ async def list_contributors(
             for c, downloads in rows
         ],
         total=total,
+        grand_total=grand_total,
         skip=skip,
         limit=limit,
         platform_counts=platform_counts,

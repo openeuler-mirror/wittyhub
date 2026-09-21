@@ -1087,8 +1087,8 @@ class ContributorRepository:
         platform: str | None = None,
         keyword: str | None = None,
         sort_by: str = "skill_count",
-    ) -> tuple[list[tuple[Contributor, int]], int, dict[str, int]]:
-        """Return ((contributor, total_downloads) rows, total, platform_counts).
+    ) -> tuple[list[tuple[Contributor, int]], int, dict[str, int], int]:
+        """Return ((contributor, total_downloads) rows, total, platform_counts, grand_total).
 
         ``total_downloads`` aggregates ``skills.download_count`` per
         (source, author) via a correlated subquery (same visibility rule as
@@ -1097,6 +1097,10 @@ class ContributorRepository:
         ``platform_counts`` counts contributors per platform under the same
         keyword filter (ignoring ``platform`` tab selection so the tabs always
         reflect the full search scope).
+
+        ``grand_total`` is the full-scope count under the current keyword only
+        (ignoring ``platform``); used by the "全部" tab so its count stays
+        stable across platform switches.
         """
         base_filter: list[Any] = []
         count_filter: list[Any] = []
@@ -1112,10 +1116,18 @@ class ContributorRepository:
             base_filter.append(like)
             count_filter.append(like)
 
+        # ``total`` 反映当前筛选（含 platform）下的总数，用于分页；
+        # ``grand_total`` 仅按 keyword 聚合（忽略 platform），"全部" tab 计数；
+        # ``platform_counts`` 仅按 keyword 聚合（忽略 platform），各 tab 计数。
         count_q = select(func.count(Contributor.id))
-        if count_filter:
-            count_q = count_q.where(*count_filter)
+        if base_filter:
+            count_q = count_q.where(*base_filter)
         total = (await self.session.execute(count_q)).scalar() or 0
+
+        grand_q = select(func.count(Contributor.id))
+        if count_filter:
+            grand_q = grand_q.where(*count_filter)
+        grand_total = (await self.session.execute(grand_q)).scalar() or 0
 
         # Per-platform counts under current keyword filter
         pc_q = (
@@ -1152,7 +1164,7 @@ class ContributorRepository:
 
         result = await self.session.execute(q)
         rows = [(row[0], int(row[1] or 0)) for row in result.all()]
-        return rows, total, platform_counts
+        return rows, total, platform_counts, grand_total
 
 
 class AgentRepository:

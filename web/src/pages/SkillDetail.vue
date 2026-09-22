@@ -456,7 +456,7 @@ onMounted(async () => {
                 </div>
                 <div class="version-table-rows">
                   <div v-for="v in versions" :key="v.version" class="version-table-row">
-                    <span class="version-col-version">{{ v.version }}</span>
+                    <span class="version-col-version" :title="v.version">{{ v.version }}</span>
                     <span class="version-col-date">{{ formatDate(v.created_at) }}</span>
                     <span class="version-col-action">
                       <button
@@ -1348,6 +1348,10 @@ onMounted(async () => {
 .version-col-version {
   width: 238px;
   flex-shrink: 0;
+  /* 长版本号（如 commit hash）单行截断显示，hover 时通过 title 查看完整值 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .version-col-date {
@@ -1404,6 +1408,14 @@ onMounted(async () => {
     font-size: var(--o-font_size-tip1);
     line-height: var(--o-line_height-tip1);
     color: var(--o-color-info1);
+    /* 让 span 浮在 ::before hover 背景之上，避免被遮挡看不清 */
+    position: relative;
+    z-index: 1;
+  }
+
+  /* 版本号列：commit hash 等长字符串用等宽字体，便于识别 */
+  > .version-col-version {
+    font-family: var(--o-font_family-code);
   }
 
   /* hover 背景：设计稿内容区（左右 24px）内上下各缩 8px，高 40，圆角 4 */
@@ -1437,6 +1449,9 @@ onMounted(async () => {
   color: var(--o-color-info1);
   cursor: pointer;
   transition: color 0.2s;
+  /* 让按钮浮在 ::before hover 背景之上 */
+  position: relative;
+  z-index: 1;
 
   @include hover {
     color: var(--o-color-primary1);

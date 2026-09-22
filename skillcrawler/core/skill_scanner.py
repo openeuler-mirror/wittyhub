@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
+from src.api.services.categories import CANONICAL_CATEGORIES
 from src.security.detector import SecurityDetector, SecurityReport
 from skillcrawler.core.skill_parser import (
     as_optional_str,
@@ -635,10 +636,16 @@ class SkillScanner:
         if skill_id in category_cache:
             return category_cache[skill_id]
 
+        # frontmatter 声明了 category 且值是合法的标准分类 → 直接使用，
+        # 跳过分类器。值不合法时回退到原逻辑（分类器或原样透传）。
+        declared_category = as_optional_str(metadata.get('category'))
+        if declared_category and declared_category in CANONICAL_CATEGORIES:
+            category_cache[skill_id] = declared_category
+            return declared_category
+
         if self.category_classifier is None:
-            category = as_optional_str(metadata.get('category'))
-            category_cache[skill_id] = category
-            return category
+            category_cache[skill_id] = declared_category
+            return declared_category
         category = self.category_classifier.classify(
             skill_file=skill_file,
             metadata=metadata,

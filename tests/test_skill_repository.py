@@ -865,6 +865,116 @@ repositories:
         skill1_versions = by_skill.get(skill1_id, [])
         assert {v.version for v in skill1_versions} == {"v3.0.0"}
 
+    async def test_skill_scanner_uses_declared_category_when_valid(self, tmp_path):
+        """frontmatter 声明了合法 category（在 CANONICAL_CATEGORIES 中）→ 直接使用，
+        跳过分类器。"""
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_dir = repository / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: my-skill\n"
+            "category: Engineering and Compilation\n"
+            "---\n# My Skill\n",
+            encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+
+        # 分类器被 mock，如果被调用会返回错误值
+        classifier = MagicMock()
+        classifier.classify = MagicMock(return_value="Security Hardening")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=classifier,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="github",
+            url="https://github.com/acme/repo",
+            branch="master",
+            platform=None,
+        )
+
+        skills, _ = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={"commit_id": head_commit},
+        )
+
+        # 合法声明 → 直接使用，分类器未被调用
+        classifier.classify.assert_not_called()
+        assert skills[0].category == "Engineering and Compilation"
+
+    async def test_skill_scanner_falls_back_to_classifier_when_category_invalid(
+        self, tmp_path,
+    ):
+        """frontmatter 声明了非法 category（不在 CANONICAL_CATEGORIES 中）→
+        回退到分类器。"""
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_dir = repository / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: my-skill\n"
+            "category: Some Random Category\n"
+            "---\n# My Skill\n",
+            encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+
+        # 分类器返回正确分类
+        classifier = MagicMock()
+        classifier.classify = MagicMock(return_value="Research and Design")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=classifier,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="github",
+            url="https://github.com/acme/repo",
+            branch="master",
+            platform=None,
+        )
+
+        skills, _ = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={"commit_id": head_commit},
+        )
+
+        # 非法声明 → 分类器被调用，使用分类器结果
+        classifier.classify.assert_called_once()
+        assert skills[0].category == "Research and Design"
+
     def test_skill_scanner_reuses_security_result_for_unchanged_skill_tree(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
         from skillcrawler.core.skill_scanner import SkillScanner

@@ -1304,24 +1304,25 @@ onMounted(async () => {
   border: none;
   background: transparent;
   cursor: pointer;
-  font-family: var(--o-font_family);
-  font-weight: var(--o-font_weight-regular);
+  font-family: 'HarmonyHeiTi', var(--o-font_family);
+  font-weight: 400;
   font-size: 20px;
   line-height: 28px;
   letter-spacing: 0px;
-  color: var(--o-color-info2);
+  text-align: left;
+  color: hsla(0, 0%, 0%, 0.8);
   transition: color 0.2s;
 
   @include hover {
-    color: var(--o-color-primary1);
+    color: hsl(223.1, 100%, 32.7%);
   }
 
   &--active {
-    font-weight: var(--o-font_weight-semibold);
-    color: var(--o-color-primary1);
+    font-weight: 600;
+    color: hsl(223.1, 100%, 32.7%);
 
     @include hover {
-      color: var(--o-color-primary1);
+      color: hsl(223.1, 100%, 32.7%);
     }
 
     /* 激活下划线：文字下方 16px，80×2 primary1，两端全圆角 */
@@ -1333,6 +1334,23 @@ onMounted(async () => {
       width: 80px;
       height: 2px;
       border-radius: 100px;
+      background: hsl(223.1, 100%, 32.7%);
+    }
+  }
+}
+
+/* Dark 模式：未激活白色 80% 透明度，激活/下划线用 primary1 token */
+[data-o-theme='e.dark'] .doc-tab-btn {
+  color: hsla(0, 0%, 100%, 0.8);
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
+
+  &.doc-tab-btn--active {
+    color: var(--o-color-primary1);
+
+    &::after {
       background: var(--o-color-primary1);
     }
   }

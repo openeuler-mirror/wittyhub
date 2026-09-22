@@ -492,11 +492,10 @@ onMounted(fetchContributors)
 .flow-connector {
   flex: 0 0 auto;
   width: 160px;
-  height: 1px;
-  background: var(--o-color-control4);
+  border-top: 1px solid hsl(0, 0%, 0%);
   margin-top: 28px;
   @include dark {
-    background: #2a2a2c;
+    border-top-color: hsl(0, 0%, 100%);
   }
 }
 .flow-footer {

@@ -308,7 +308,8 @@ onMounted(async () => {
   position: relative;
   min-height: 100vh;
   padding-bottom: 64px;
-  background: var(--o-color-fill1);
+  /* 不额外刷底色：与 body 底色（--color-bg）保持一致，避免页面盒子底边出现色差分界线 */
+  background: transparent;
 }
 
 /* ===== 顶部纹理 ===== */

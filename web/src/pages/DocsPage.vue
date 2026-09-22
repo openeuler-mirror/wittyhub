@@ -3,14 +3,14 @@
  * 站内文档页：左侧文档目录（三篇文档 + 当前文档标题大纲），右侧渲染正文。
  *
  * 文档源文件位于仓库 `docs/`，发布时同步一份到 `web/public/docs/`（web 镜像只打包
- * web/ 目录），页面按路由参数 `:doc` 取 `/docs/{doc}.md` 渲染，文档内的相对 md
- * 链接改写为站内路由，保证「查看详情」类入口不出站。
+ * web/ 目录），页面按路由参数 `:doc` 取 `/docs/{doc}.md`，正文的解析、排版与站内
+ * 互链改写由 `@/components/MarkdownRenderer.vue` 承接并回传章节大纲。
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { marked } from 'marked'
 import { OLoading, OAnchor, OAnchorItem, OIconChevronRight } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
+import MarkdownRenderer, { type OutlineItem } from '@/components/MarkdownRenderer.vue'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
@@ -37,18 +37,12 @@ const SHORT_TITLES: Record<string, string> = {
   'skillhub-security-audit': '安全评估',
 }
 
-/** 安全等级 emoji → 色点修饰类（配色与详情页/报告页保持一致） */
-const LEVEL_DOTS: Record<string, string> = {
-  '🟢': 'safe',
-  '🔵': 'low',
-  '🟠': 'medium',
-  '🔴': 'high',
-  '⚪': 'unknown',
-}
-
 const content = ref('')
 const loading = ref(true)
 const error = ref('')
+
+/** 章节大纲：由正文渲染组件解析后回传（右侧「本内容」目录使用） */
+const outline = ref<OutlineItem[]>([])
 
 /** 文档标题表：由各文档 H1 读出 */
 const docTitles = ref<Record<string, string>>({})
@@ -70,63 +64,6 @@ function toggleGroup(title: string) {
 
 /** 路由参数只允许字母/数字/连字符，避免路径穿越 */
 const docName = computed(() => String(route.params.doc || '').replace(/[^a-zA-Z0-9-]/g, ''))
-
-/** 目录项为纯文本，需还原 HTML 实体（如 &quot;） */
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-}
-
-/** 大纲项：h2 为一级、h3 为二级（右侧「本内容」目录使用） */
-interface OutlineItem {
-  id: string
-  text: string
-  children: Array<{ id: string; text: string }>
-}
-
-/** 正文渲染（含文档 H1，整篇作为一个完整文档展示）+ 章节大纲（h2/h3 加锚点 id，供右侧目录联动） */
-const parsed = computed<{ html: string; outline: OutlineItem[] }>(() => {
-  if (!content.value) return { html: '', outline: [] }
-
-  // 相对 md 链接改写为站内文档路由
-  let html = marked.parse(content.value) as string
-  html = html.replace(/href="\.?\/?([\w-]+)\.md"/g, 'href="/docs/$1"')
-
-  // 安全等级色点：文档用 emoji 表示等级，各环境 emoji 字体支持不一致，
-  // 统一改写为受控色点，保证颜色稳定显示（配色与详情页/报告页一致）
-  html = html.replace(/(🟢|🔵|🟠|🔴|⚪)\uFE0F?/gu, (_match, emoji: string) => {
-    return `<span class="level-dot level-dot--${LEVEL_DOTS[emoji]}"></span>`
-  })
-
-  const outline: OutlineItem[] = []
-  let h2Count = 0
-  let h3Count = 0
-  html = html.replace(/<(h2|h3)>([\s\S]*?)<\/\1>/g, (_match, tag: string, inner: string) => {
-    const text = decodeEntities(inner.replace(/<[^>]+>/g, '').trim())
-    if (tag === 'h2') {
-      h2Count += 1
-      h3Count = 0
-      const id = `doc-section-${h2Count}`
-      outline.push({ id, text, children: [] })
-      return `<h2 id="${id}">${inner}</h2>`
-    }
-    // h3 挂到最近的 h2 下；若 h2 之前出现 h3，则作为一级项兜底
-    h3Count += 1
-    const id = `doc-section-${h2Count}-${h3Count}`
-    const parent = outline[outline.length - 1]
-    if (parent) parent.children.push({ id, text })
-    else outline.push({ id, text, children: [] })
-    return `<h3 id="${id}">${inner}</h3>`
-  })
-  return { html, outline }
-})
-
-const rendered = computed(() => parsed.value.html)
-const outline = computed(() => parsed.value.outline)
 
 /** 侧栏标题：读取每篇文档的 H1（有短标题配置时优先用短标题） */
 async function loadDocTitles() {
@@ -150,6 +87,8 @@ async function loadDocTitles() {
 async function loadDoc() {
   loading.value = true
   error.value = ''
+  // 切换文档时先清空上一篇章的大纲，避免加载失败时残留旧目录
+  outline.value = []
   try {
     const response = await fetch(`/docs/${docName.value}.md`)
     if (!response.ok) throw new Error(String(response.status))
@@ -220,7 +159,7 @@ watch(() => route.params.doc, () => {
           </nav>
         </aside>
 
-        <!-- ========== 中：正文（整篇文档含标题一起渲染） ========== -->
+        <!-- ========== 中：正文（整篇文档含标题一起渲染，解析与排版由渲染组件承接） ========== -->
         <div class="docs-main">
           <div v-if="loading" class="docs-card state-card">
             <OLoading v-model:visible="loading" size="medium" />
@@ -232,7 +171,7 @@ watch(() => route.params.doc, () => {
           </div>
 
           <div v-else class="docs-card">
-            <div class="doc-body" v-html="rendered"></div>
+            <MarkdownRenderer v-model:outline="outline" :source="content" />
           </div>
         </div>
 
@@ -270,7 +209,8 @@ watch(() => route.params.doc, () => {
   position: relative;
   min-height: 100vh;
   padding-bottom: 64px;
-  background: var(--o-color-fill1);
+  /* 不额外刷底色：与 body 底色（--color-bg）保持一致，避免页面盒子底边出现色差分界线 */
+  background: transparent;
 }
 
 /* ===== 顶部纹理 ===== */
@@ -478,165 +418,7 @@ watch(() => route.params.doc, () => {
   }
 }
 
-/* ===== Markdown 正文 ===== */
-.doc-body {
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
-  line-height: 26px;
-  letter-spacing: 0px;
-  color: var(--o-color-info2);
-
-  /* 文档标题（Markdown H1，与正文同属一篇文档） */
-  :deep(h1) {
-    margin: 0 0 24px;
-    font-weight: var(--o-font_weight-semibold);
-    font-size: 40px;
-    line-height: 56px;
-    color: var(--o-color-info1);
-  }
-
-  :deep(h2) {
-    margin: 32px 0 16px;
-    font-weight: var(--o-font_weight-semibold);
-    font-size: 24px;
-    line-height: 32px;
-    color: var(--o-color-info1);
-    /* 锚点跳转时避开顶部 72px 吸顶导航，再留 24px 呼吸空间 */
-    scroll-margin-top: 96px;
-  }
-
-  :deep(h3) {
-    margin: 24px 0 12px;
-    font-weight: var(--o-font_weight-semibold);
-    font-size: 20px;
-    line-height: 28px;
-    color: var(--o-color-info1);
-    /* 直接以 URL hash 进入时同样避开吸顶导航 */
-    scroll-margin-top: 96px;
-  }
-
-  :deep(p) {
-    margin: 0 0 16px;
-  }
-
-  :deep(ul),
-  :deep(ol) {
-    margin: 0 0 16px;
-    padding-left: 24px;
-  }
-
-  :deep(li) {
-    margin-bottom: 8px;
-  }
-
-  :deep(a) {
-    color: var(--o-color-link1);
-
-    &:hover {
-      color: var(--o-color-link2);
-    }
-  }
-
-  :deep(strong) {
-    font-weight: var(--o-font_weight_semibold);
-    color: var(--o-color-info1);
-  }
-
-  :deep(code) {
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: var(--o-color-control2-light);
-    font-family: var(--o-font_family-code);
-    font-size: 14px;
-    color: var(--o-color-info1);
-  }
-
-  /* 代码块：独占一行，超长命令横向滚动，避免撑破窄屏布局 */
-  :deep(pre) {
-    margin: 0 0 16px;
-    padding: 16px;
-    border-radius: 4px;
-    background: var(--o-color-control2-light);
-    overflow-x: auto;
-
-    code {
-      padding: 0;
-      background: transparent;
-      line-height: 22px;
-    }
-  }
-
-  :deep(blockquote) {
-    margin: 0 0 16px;
-    padding-left: 16px;
-    border-left: 3px solid var(--o-color-primary1);
-    color: var(--o-color-info3);
-  }
-
-  :deep(table) {
-    width: 100%;
-    margin: 0 0 16px;
-    border-collapse: collapse;
-    font-size: 14px;
-    line-height: 22px;
-  }
-
-  /* 安全等级色点（由文档中的等级 emoji 改写而来） */
-  :deep(.level-dot) {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    margin-right: 6px;
-    border-radius: 50%;
-    vertical-align: middle;
-  }
-
-  :deep(.level-dot--safe) {
-    background: var(--o-color-success1);
-  }
-
-  /* 低风险蓝：设计稿定值，与详情页/报告页一致 */
-  :deep(.level-dot--low) {
-    background: #497af8;
-  }
-
-  :deep(.level-dot--medium) {
-    background: var(--o-color-warning1);
-  }
-
-  :deep(.level-dot--high) {
-    background: var(--o-color-danger1);
-  }
-
-  :deep(.level-dot--unknown) {
-    background: var(--o-color-info3);
-  }
-
-  :deep(th),
-  :deep(td) {
-    padding: 10px 12px;
-    text-align: left;
-    color: var(--o-color-info1);
-    border-bottom: 1px solid var(--o-color-control4);
-  }
-
-  :deep(th) {
-    font-weight: var(--o-font_weight_semibold);
-    background: var(--o-color-control2-light);
-  }
-
-  :deep(hr) {
-    height: 1px;
-    margin: 32px 0 24px;
-    border: none;
-    background: var(--o-color-control4);
-  }
-
-  > :deep(:first-child) {
-    margin-top: 0;
-  }
-}
+/* Markdown 正文（.doc-body 系列样式）已收敛到 @/components/MarkdownRenderer.vue */
 
 /* ===== 响应式 ===== */
 /* 全站以 1488px 画布为基准（main.css 固定 min-width，移动端整页等比缩放），

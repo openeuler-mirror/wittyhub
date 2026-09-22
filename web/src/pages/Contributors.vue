@@ -323,7 +323,7 @@ onMounted(fetchContributors)
             <h3 class="contributor-name">{{ displayName(c) }}</h3>
             <span v-if="c.platform" class="platform-label">{{ platformNames[c.platform] || c.platform }}</span>
           </div>
-          <p v-if="displayDesc(c)" class="contributor-desc">{{ displayDesc(c) }}</p>
+          <p class="contributor-desc">{{ displayDesc(c) }}</p>
           <div class="card-footer">
             <span class="stat-text">{{ c.skill_count }} skills</span>
             <span class="stat-text">{{ formatDownloads(c.total_downloads) }} 下载量</span>

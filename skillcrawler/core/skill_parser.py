@@ -188,6 +188,25 @@ def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
     return metadata, content.strip()
 
 
+def extract_declared_version(metadata: dict[str, object]) -> str | None:
+    """提取 SKILL.md frontmatter 声明的版本号，兼容两种写法：
+
+    - 顶层声明：``version: 1.0.0``
+    - 嵌套声明（azure-skills 风格）：``metadata:`` 块下的 ``version``
+
+    当前扁平解析器会把嵌套键提升为顶层键，两种写法都落在顶层；
+    显式再查一次 ``metadata`` 字典，保证将来切换为保留嵌套结构的
+    YAML 解析器时行为不变。顶层声明优先。
+    """
+    top_level = as_optional_str(metadata.get('version'))
+    if top_level:
+        return top_level
+    nested = metadata.get('metadata')
+    if isinstance(nested, dict):
+        return as_optional_str(nested.get('version'))
+    return None
+
+
 def _parse_frontmatter_value(key: str, value: str) -> object:
     if not value:
         return [] if key == 'triggers' else ''

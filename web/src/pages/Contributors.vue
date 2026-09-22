@@ -8,8 +8,8 @@ import { oaReport } from '@opendesign-plus/plugins/analytics'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
-import flowBgLight from '@/assets/bg/card-bg.png'
-import flowBgDark from '@/assets/bg/card-bg-dark.png'
+import flowBgLight from '@/assets/bg/flow-card-bg.png'
+import flowBgDark from '@/assets/bg/flow-card-bg-dark.png'
 import flowPrepareSvg from '@/assets/icons/flow-prepare.svg?raw'
 import flowClaSvg from '@/assets/icons/flow-cla.svg?raw'
 import flowSubmitSvg from '@/assets/icons/flow-submit.svg?raw'
@@ -323,7 +323,7 @@ onMounted(fetchContributors)
             <h3 class="contributor-name">{{ displayName(c) }}</h3>
             <span v-if="c.platform" class="platform-label">{{ platformNames[c.platform] || c.platform }}</span>
           </div>
-          <p v-if="displayDesc(c)" class="contributor-desc">{{ displayDesc(c) }}</p>
+          <p class="contributor-desc">{{ displayDesc(c) }}</p>
           <div class="card-footer">
             <span class="stat-text">{{ c.skill_count }} skills</span>
             <span class="stat-text">{{ formatDownloads(c.total_downloads) }} 下载量</span>
@@ -492,11 +492,10 @@ onMounted(fetchContributors)
 .flow-connector {
   flex: 0 0 auto;
   width: 160px;
-  height: 1px;
-  background: var(--o-color-control4);
+  border-top: 1px solid hsl(0, 0%, 0%);
   margin-top: 28px;
   @include dark {
-    background: #2a2a2c;
+    border-top-color: hsl(0, 0%, 100%);
   }
 }
 .flow-footer {
@@ -615,6 +614,7 @@ onMounted(fetchContributors)
   }
   @include dark {
     background: #1a1a1c;
+    border: 1px solid #2a2a2c;
   }
 }
 /* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */

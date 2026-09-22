@@ -473,7 +473,8 @@ def _build_single_url_discover_request(
     args: argparse.Namespace,
 ) -> SkillRepositoryRequest:
     # argparse choices already validate an explicitly supplied platform.
-    platform = args.platform or _infer_platform_from_repo_url(args.url)
+    # 优先级：显式 --platform > URL 推断（gitcode.com/openeuler/* → community）> 默认 personal
+    platform = args.platform or _infer_platform_from_repo_url(args.url) or "personal"
     return SkillRepositoryRequest(
         url=args.url,
         branch=args.branch,

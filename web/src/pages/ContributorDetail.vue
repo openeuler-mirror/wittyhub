@@ -137,7 +137,7 @@ watch(
               --breadcrumb-gap: 4px;
             "
           >
-            <OBreadcrumbItem to="/">贡献</OBreadcrumbItem>
+            <OBreadcrumbItem to="/contributors">贡献</OBreadcrumbItem>
             <OBreadcrumbItem v-if="contributor">{{ contributor.author }}</OBreadcrumbItem>
             <OBreadcrumbItem v-else>贡献者详情</OBreadcrumbItem>
           </OBreadcrumb>

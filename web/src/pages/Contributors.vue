@@ -614,6 +614,7 @@ onMounted(fetchContributors)
   }
   @include dark {
     background: #1a1a1c;
+    border: 1px solid #2a2a2c;
   }
 }
 /* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */

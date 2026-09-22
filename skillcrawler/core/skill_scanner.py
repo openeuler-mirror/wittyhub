@@ -18,6 +18,7 @@ from skillcrawler.core.skill_parser import (
     build_skill_md_url,
     derive_repository_skill_name,
     derive_skill_source,
+    extract_declared_version,
     parse_skill_frontmatter_text,
     should_skip_relative_path,
 )
@@ -133,7 +134,7 @@ class SkillScanner:
         # version whose content is identical to the already-audited latest
         # (or an earlier tag) reuses the result instead of re-submitting.
         security_cache: dict[str, SecurityResolution] = {}
-        latest_skills = await self._scan_latest_skills(
+        latest_skills, metadata_version_rows = await self._scan_latest_skills(
             repo=repo,
             repo_root=repo_root,
             skill_paths=skill_paths,
@@ -141,6 +142,7 @@ class SkillScanner:
             repository_latest_tags=repository_latest_tags,
             author=author,
             existing_skills=existing_skills,
+            existing_versions=existing_versions,
             category_cache=category_cache,
             security_cache=security_cache,
         )
@@ -158,9 +160,12 @@ class SkillScanner:
                 existing_versions=existing_versions,
                 category_cache=category_cache,
                 security_cache=security_cache,
+                # HEAD 声明了 frontmatter version 的 skill 自管版本，
+                # 完全跳过 tag 扫描（不再以 tag 作为版本来源）。
+                skip_skill_ids={row.skill_id for row in metadata_version_rows},
             )
 
-        return latest_skills, tagged_skills
+        return latest_skills, [*metadata_version_rows, *tagged_skills]
 
     async def _scan_latest_skills(
         self,
@@ -171,10 +176,12 @@ class SkillScanner:
         repository_latest_tags: list[str],
         author: str | None,
         existing_skills: dict[str, Skill],
+        existing_versions: dict[tuple[str, str | None], SkillVersion],
         category_cache: dict[str, str | None],
         security_cache: dict[str, SecurityResolution] | None = None,
-    ) -> list[Skill]:
+    ) -> tuple[list[Skill], list[SkillVersion]]:
         discovered: list[Skill] = []
+        metadata_version_rows: list[SkillVersion] = []
         # skill_id is derived from the SKILL.md directory name, so different
         # paths with the same directory name collide.  Keep the first one so
         # every returned record maps to a persisted row (records dropped here
@@ -228,7 +235,39 @@ class SkillScanner:
                 skill.version or '-', skill.skill_id,
             )
             discovered.append(skill)
-        return discovered
+            # SKILL.md frontmatter 声明了 version（顶层或 metadata 嵌套）→
+            # skill 自管版本：以声明的版本号生成一条 skill_versions 行
+            # （version_source=metadata），该 skill 后续完全跳过 tag 扫描。
+            declared_version = extract_declared_version(metadata_content[0])
+            if declared_version:
+                version_record = await self._build_skill_record(
+                    repo=repo,
+                    skill_file=virtual_skill_file,
+                    relative_path=relative_path,
+                    metadata_content=metadata_content,
+                    ref=None,
+                    version=declared_version,
+                    commit_id=repository_commit_id,
+                    tree_hash=tree_hash,
+                    skill_id=skill_id,
+                    repository_latest_tags=repository_latest_tags,
+                    category_cache=category_cache,
+                    version_source='metadata',
+                    author=author,
+                    scan_started_at=scan_started_at,
+                    input_elapsed=input_elapsed,
+                    return_skill_model=False,
+                    existing_record=existing_versions.get(
+                        (skill_id, declared_version),
+                    ),
+                    security_cache=security_cache,
+                )
+                _logger.info(
+                    'Discovered skill(metadata version:%s): skill_id=%s',
+                    version_record.version or '-', version_record.skill_id,
+                )
+                metadata_version_rows.append(version_record)
+        return discovered, metadata_version_rows
 
     async def _scan_tagged_skills(
         self,
@@ -241,6 +280,7 @@ class SkillScanner:
         existing_versions: dict[tuple[str, str | None], SkillVersion],
         category_cache: dict[str, str | None],
         security_cache: dict[str, SecurityResolution] | None = None,
+        skip_skill_ids: set[str] | None = None,
     ) -> list[SkillVersion]:
         discovered: list[SkillVersion] = []
         seen_versions: set[tuple[str, str]] = set()
@@ -286,6 +326,24 @@ class SkillScanner:
                 skill_id = build_skill_id(
                     repo.source, extract_owner_repo(repo.url), relative_path,
                 )
+                # HEAD 声明了 frontmatter version 的 skill 自管版本，
+                # 完全跳过 tag 扫描（版本行由 latest 扫描生成）。
+                if skip_skill_ids and skill_id in skip_skill_ids:
+                    _logger.debug(
+                        'Skipped tag scan for metadata-versioned skill: '
+                        'skill_id=%s ref=%s',
+                        skill_id,
+                        ref,
+                    )
+                    continue
+                # 版本号以元数据为准：SKILL.md frontmatter 声明了 version
+                # （顶层或 metadata 嵌套）时优先使用，仅当元数据缺失时
+                # 才回退到 tag 名作为版本号。
+                metadata_version = extract_declared_version(metadata_content[0])
+                effective_version = metadata_version or version
+                effective_version_source = (
+                    'metadata' if metadata_version else version_source_val
+                )
                 # 内容去重前置检查：同 tree_hash 的旧 tag 直接跳过，
                 # 省去昂贵的记录组装（含安全审计解析）。
                 tree_hash_key = (skill_id, tree_hash) if tree_hash else None
@@ -317,18 +375,18 @@ class SkillScanner:
                     relative_path=relative_path,
                     metadata_content=metadata_content,
                     ref=ref,
-                    version=version,
+                    version=effective_version,
                     commit_id=commit_id,
                     tree_hash=tree_hash,
                     skill_id=skill_id,
                     repository_latest_tags=repository_latest_tags,
                     category_cache=category_cache,
-                    version_source=version_source_val,
+                    version_source=effective_version_source,
                     author=author,
                     scan_started_at=scan_started_at,
                     input_elapsed=input_elapsed,
                     return_skill_model=False,
-                    existing_record=existing_versions.get((skill_id, version)),
+                    existing_record=existing_versions.get((skill_id, effective_version)),
                     security_cache=security_cache,
                 )
                 version_key = (skill.skill_id, skill.version) if skill.version else None

@@ -254,6 +254,19 @@ class TestSkillRepositoryUnit:
 
         assert request.platform == "personal"
 
+    def test_single_url_discover_defaults_to_personal(self):
+        from skillcrawler.main import _build_single_url_discover_request
+
+        request = _build_single_url_discover_request(
+            SimpleNamespace(
+                url="https://gitcode.com/someone/my-skills",
+                branch=None,
+                platform=None,
+            )
+        )
+
+        assert request.platform == "personal"
+
     def test_settings_env_overrides_yaml(self, tmp_path, monkeypatch):
         from src.core.config import Settings
 
@@ -678,6 +691,179 @@ repositories:
         assert scanner._security_cache_hits + scanner._security_audit_submitted == len(
             skills
         ) + len(tagged_skills)
+
+    async def test_skill_scanner_prefers_metadata_version_over_tag(self, tmp_path):
+        """SKILL.md frontmatter version wins over the tag name as version.
+
+        Tag v1 declares `version: 1.2.3` in frontmatter → skill_versions row
+        uses '1.2.3' (version_source=metadata); tag v2 has no frontmatter
+        version → falls back to the tag name 'v2' (version_source=tag).
+        """
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        skill_dir = repository / "skills" / "skill-1"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: versioned-skill\nversion: 1.2.3\n---\n# V1\n",
+            encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill with metadata version")
+        v1_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v1")
+
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: versioned-skill\n---\n# V2\n", encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "drop metadata version")
+        v2_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v2")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="github",
+            url="https://github.com/acme/agent-skills",
+            branch="master",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": v2_commit,
+                "latest_tags": ["v2", "v1"],
+                "latest_tag_commits": {"v1": v1_commit, "v2": v2_commit},
+            },
+        )
+
+        versions = {v.version: v for v in tagged_skills}
+        # frontmatter 声明的 version 优先于 tag 名
+        assert "1.2.3" in versions
+        assert versions["1.2.3"].commit_id == v1_commit
+        assert versions["1.2.3"].extra_metadata["version_source"] == "metadata"
+        # 元数据缺失 version 时回退 tag 名
+        assert "v2" in versions
+        assert versions["v2"].commit_id == v2_commit
+        assert versions["v2"].extra_metadata["version_source"] == "tag"
+        # tag 名不再进入版本号
+        assert "v1" not in versions
+
+    async def test_skill_scanner_skips_tags_when_head_declares_version(self, tmp_path):
+        """HEAD SKILL.md 声明 version 的 skill 完全跳过 tag 版本收集。
+
+        用户场景（weijihui/test 仓库）：skill-3 在 HEAD 声明 version: 1.0.1，
+        但 tag v2.0.0/v3.0.0 处的 SKILL.md 没有 version → 该 skill 只产出
+        一条 metadata 版本行（1.0.1），不再产出任何 tag 版本行；
+        未声明 version 的 skill-1 仍正常按 tag 名收集版本。
+        """
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        # commit 1: 仅 skill-1（无 version）
+        skill1_dir = repository / "skills" / "skill-1"
+        skill1_dir.mkdir(parents=True)
+        (skill1_dir / "SKILL.md").write_text(
+            "---\nname: plain-skill\n---\n# Plain\n", encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill-1")
+        v1_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v1.0.0")
+
+        # commit 2: 新增 skill-3（无 version）
+        skill3_dir = repository / "skills" / "skill-3"
+        skill3_dir.mkdir(parents=True)
+        (skill3_dir / "SKILL.md").write_text(
+            "---\nname: self-versioned-skill\n---\n# V2 content\n",
+            encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skill-3 without version")
+        v2_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v2.0.0")
+
+        # commit 3 (HEAD): skill-3 声明 version: 1.0.1
+        (skill3_dir / "SKILL.md").write_text(
+            "---\nname: self-versioned-skill\nversion: 1.0.1\n---\n# V3 content\n",
+            encoding="utf-8",
+        )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "declare metadata version")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v3.0.0")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/weijihui/test",
+            branch="main",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": head_commit,
+                "latest_tags": ["v3.0.0", "v2.0.0", "v1.0.0"],
+                "latest_tag_commits": {
+                    "v1.0.0": v1_commit,
+                    "v2.0.0": v2_commit,
+                    "v3.0.0": head_commit,
+                },
+            },
+        )
+
+        by_skill: dict[str, list] = {}
+        for v in tagged_skills:
+            by_skill.setdefault(v.skill_id, []).append(v)
+
+        skill1_id = next(s.skill_id for s in skills if s.name == "plain-skill")
+        skill3_id = next(
+            s.skill_id for s in skills if s.name == "self-versioned-skill"
+        )
+
+        # skill-3：仅一条 metadata 版本行，无任何 tag 版本行
+        skill3_versions = by_skill.get(skill3_id, [])
+        assert len(skill3_versions) == 1
+        assert skill3_versions[0].version == "1.0.1"
+        assert skill3_versions[0].commit_id == head_commit
+        assert (
+            skill3_versions[0].extra_metadata["version_source"] == "metadata"
+        )
+
+        # skill-1：无声明，仍按 tag 名收集（tree_hash 一致去重到最新 tag）
+        skill1_versions = by_skill.get(skill1_id, [])
+        assert {v.version for v in skill1_versions} == {"v3.0.0"}
 
     def test_skill_scanner_reuses_security_result_for_unchanged_skill_tree(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
@@ -1329,6 +1515,61 @@ repositories:
         response = SkillResponse(**skill_dict)
         assert response.skill_id == "test/skill:v1.0.0"
         assert response.name == "test-skill"
+
+
+class TestExtractDeclaredVersion:
+    """frontmatter version 声明位置兼容：顶层 version 与 metadata.version 嵌套。"""
+
+    def test_top_level_version(self):
+        from skillcrawler.core.skill_parser import (
+            extract_declared_version,
+            parse_skill_frontmatter_text,
+        )
+
+        meta, _ = parse_skill_frontmatter_text(
+            "---\nname: s\nversion: 1.0.0\n---\nbody\n"
+        )
+        assert extract_declared_version(meta) == "1.0.0"
+
+    def test_nested_metadata_version_azure_skills_style(self):
+        """azure-skills 真实格式：version 嵌套在 metadata: 块下。"""
+        from skillcrawler.core.skill_parser import (
+            extract_declared_version,
+            parse_skill_frontmatter_text,
+        )
+
+        text = (
+            "---\n"
+            'name: airunway-aks-setup\n'
+            'description: "Set up AI Runway on AKS."\n'
+            "license: MIT\n"
+            "metadata:\n"
+            "  author: Microsoft\n"
+            '  version: "1.1.1"\n'
+            "---\n"
+            "# AI Runway AKS Setup\n"
+        )
+        meta, _ = parse_skill_frontmatter_text(text)
+        assert extract_declared_version(meta) == "1.1.1"
+
+    def test_nested_metadata_version_as_dict(self):
+        """metadata 解析为 dict 时（保留嵌套结构的解析器）也能取到。"""
+        from skillcrawler.core.skill_parser import extract_declared_version
+
+        meta = {"name": "s", "metadata": {"author": "Microsoft", "version": "2.0.0"}}
+        assert extract_declared_version(meta) == "2.0.0"
+
+    def test_top_level_wins_over_nested(self):
+        from skillcrawler.core.skill_parser import extract_declared_version
+
+        meta = {"version": "1.0.0", "metadata": {"version": "9.9.9"}}
+        assert extract_declared_version(meta) == "1.0.0"
+
+    def test_missing_version_returns_none(self):
+        from skillcrawler.core.skill_parser import extract_declared_version
+
+        assert extract_declared_version({"name": "s"}) is None
+        assert extract_declared_version({"metadata": {"author": "x"}}) is None
 
 
 class TestGitOperationsTags:

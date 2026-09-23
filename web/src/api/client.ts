@@ -134,11 +134,6 @@ export const api = {
     return { blob, filename }
   },
 
-  async reindex(): Promise<{ status: string; indexed_count: number; total_skills: number }> {
-    const { data } = await client.post('/index/reindex')
-    return data
-  },
-
   async getStats(): Promise<Stats> {
     const { data } = await client.get('/index/stats')
     return data

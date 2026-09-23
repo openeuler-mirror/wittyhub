@@ -450,6 +450,8 @@ function onPaginationChange(
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 496px;
+  height: 40px;
   gap: 32px;
   font-family: HarmonyHeiTi;
   text-align: center;
@@ -460,6 +462,9 @@ function onPaginationChange(
   display: inline-flex;
   flex-direction: row;
   align-items: flex-start;
+  width: 142px;
+  height: 40px;
+  flex-shrink: 0;
   /*容器高 40，数字 y=0 行盒40，文字 y=13 行盒24，水平间距 8 */
   gap: 8px;
 }
@@ -483,8 +488,7 @@ function onPaginationChange(
   margin-top: 13px;
   letter-spacing: 0px;
   text-align: center;
-  /* 60% 黑 */
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--o-color-info3);
 }
 
 /* 1x17px 竖线，颜色 #000000 op=0.25 = --o-color-control1 */
@@ -494,11 +498,6 @@ function onPaginationChange(
   height: 17px;
   background-color: var(--o-color-control1);
   flex-shrink: 0;
-}
-
-[data-o-theme="e.dark"] .hero-stats-label,
-.dark .hero-stats-label {
-  color: rgba(255, 255, 255, 0.6);
 }
 
 /* 列表视图容器 */

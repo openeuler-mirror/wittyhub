@@ -163,7 +163,7 @@ function getSecurityLevel(score: number | null): { label: string; class: string;
   if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', desc: '无显著风险，可以放心使用' }
   if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', desc: '风险较低，可以正常使用' }
   if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', desc: '存在一定风险，建议谨慎使用' }
-  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', desc: '存在较高风险，建议谨慎使用' }
+  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', desc: '存在较严重问题，不建议直接安装' }
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))

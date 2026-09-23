@@ -104,15 +104,15 @@ function isActive(item: NavItem): boolean {
     color: var(--o-color-primary1);
     font-weight: var(--o-font_weight-medium);
 
+    /* 下划线 1px 高、与文字同宽（不含左右 padding）、primary1 */
     &::after {
       content: '';
       position: absolute;
       left: 20px;
       right: 20px;
       bottom: 0;
-      height: 3px;
+      height: 1px;
       background: var(--o-color-primary1);
-      border-radius: 2px 2px 0 0;
     }
   }
 }

@@ -459,8 +459,9 @@ function onPaginationChange(
 .hero-stats-item {
   display: inline-flex;
   flex-direction: row;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-start;
+  /*容器高 40，数字 y=0 行盒40，文字 y=13 行盒24，水平间距 8 */
+  gap: 8px;
 }
 
 .hero-stats-number {
@@ -477,10 +478,13 @@ function onPaginationChange(
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
   font-size: 16px;
+  /* 文字相对容器顶部偏移 13px，行盒 24px（盒底 37，距数字盒底 3px） */
   line-height: 24px;
+  margin-top: 13px;
   letter-spacing: 0px;
   text-align: center;
-  color: var(--o-color-info3);
+  /* 60% 黑 */
+  color: rgba(0, 0, 0, 0.6);
 }
 
 /* 1x17px 竖线，颜色 #000000 op=0.25 = --o-color-control1 */
@@ -494,7 +498,7 @@ function onPaginationChange(
 
 [data-o-theme="e.dark"] .hero-stats-label,
 .dark .hero-stats-label {
-  color: var(--o-color-info3);
+  color: rgba(255, 255, 255, 0.6);
 }
 
 /* 列表视图容器 */

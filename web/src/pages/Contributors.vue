@@ -484,10 +484,19 @@ onMounted(fetchContributors)
   white-space: nowrap;
   overflow: visible;
 }
+/* CLA 链接：hover 变色 + 下划线从左展开动画 */
 .flow-link {
   color: var(--o-color-link1);
   text-decoration: none;
-  @include hover { color: var(--o-color-primary1); }
+  background: linear-gradient(0deg, var(--o-color-link1), var(--o-color-link1)) no-repeat right bottom;
+  background-size: 0 1px;
+  transition: background-size var(--o-duration-m2, 0.2s) var(--o-easing-standard, ease), color 0.2s;
+  @include hover {
+    color: var(--o-color-link2);
+    background-image: linear-gradient(0deg, var(--o-color-link2), var(--o-color-link2));
+    background-size: 100% 1px;
+    background-position-x: left;
+  }
 }
 .flow-connector {
   flex: 0 0 auto;
@@ -503,13 +512,17 @@ onMounted(fetchContributors)
   text-align: center;
   margin-top: 24px;
 }
+/* 贡献指南链接：hover 仅变色，无下划线 */
 .flow-guide-link {
   @include font-base;
   font-size: 16px;
   line-height: 24px;
   color: var(--o-color-link1);
   text-decoration: none;
-  @include hover { color: var(--o-color-primary1); }
+  transition: color 0.2s;
+  @include hover {
+    color: var(--o-color-link2);
+  }
 }
 /* ===== 贡献者广场 ===== */
 .plaza-section {

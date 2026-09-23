@@ -116,7 +116,9 @@ function avatarLetter(c: Contributor): string {
 
 function displayDesc(c: Contributor): string {
   if (c.description?.trim()) return c.description
-  if (c.platform === 'personal') return '社区贡献者'
+  if (c.platform === 'enterprise') return '企业贡献者'
+  if (c.platform === 'community') return '社区SIG贡献者'
+  if (c.platform === 'personal') return '社区个人贡献者'
   return ''
 }
 

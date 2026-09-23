@@ -318,7 +318,7 @@ onMounted(fetchContributors)
                 class="avatar-img"
                 @error="onAvatarError"
               />
-              <span v-else class="avatar-fallback">{{ avatarLetter(c) }}</span>
+              <span v-else class="avatar-fallback">{{ avatarLetter(c).toUpperCase() }}</span>
             </div>
             <h3 class="contributor-name">{{ displayName(c) }}</h3>
             <span v-if="c.platform" class="platform-label">{{ platformNames[c.platform] || c.platform }}</span>
@@ -659,7 +659,13 @@ onMounted(fetchContributors)
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
   font-size: 22px;
-  line-height: 30px;
+  /* line-height 与容器同高，保证字形垂直居中于圆心 */
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
   color: #FFFFFF;
   text-align: center;
 }

@@ -38,7 +38,10 @@ const searchInput = ref('')
 const contributorDesc = computed(() => {
   if (!contributor.value) return ''
   if (contributor.value.description?.trim()) return contributor.value.description
-  if (contributor.value.platform === 'personal') return '社区贡献者'
+  if (contributor.value.platform === 'personal') return '社区个人贡献者'
+  if (contributor.value.platform === 'enterprise') return '企业贡献者'
+  if (contributor.value.platform === 'community') return '社区SIG贡献者'
+
   return ''
 })
 

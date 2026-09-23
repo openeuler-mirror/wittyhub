@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { Contributor } from '@/api/types'
@@ -67,6 +67,28 @@ const error = ref('')
 const page = ref(1)
 const pageSize = ref(24)
 const pageSizeOptions = [12, 24, 48, 96]
+const avatarColorCount = 6
+
+function contributorHash(c: Contributor): number {
+  const key = `${c.source}:${c.author}:${c.id}`
+  let hash = 2166136261
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+/* 稳定地随机分配设计稿头像色，并从候选中排除前一个颜色。 */
+const avatarColorIndexes = computed(() => {
+  let previous = -1
+  return contributors.value.map((contributor) => {
+    let colorIndex = contributorHash(contributor) % (avatarColorCount - 1)
+    if (previous >= 0 && colorIndex >= previous) colorIndex += 1
+    previous = colorIndex
+    return colorIndex
+  })
+})
 
 function tabLabel(key: string): string {
   if (!key) return '全部'
@@ -94,7 +116,9 @@ function avatarLetter(c: Contributor): string {
 
 function displayDesc(c: Contributor): string {
   if (c.description?.trim()) return c.description
-  if (c.platform === 'personal') return '社区贡献者'
+  if (c.platform === 'enterprise') return '企业贡献者'
+  if (c.platform === 'community') return '社区SIG贡献者'
+  if (c.platform === 'personal') return '社区个人贡献者'
   return ''
 }
 
@@ -301,7 +325,7 @@ onMounted(fetchContributors)
       <!-- 贡献者卡片网格 -->
       <div v-else class="contributors-grid">
         <div
-          v-for="c in contributors"
+          v-for="(c, index) in contributors"
           :key="c.id"
           class="contributor-card"
           role="link"
@@ -310,7 +334,7 @@ onMounted(fetchContributors)
           @keydown.enter.prevent="onClickContributor(c)"
         >
           <div class="card-head">
-            <div :class="['avatar-wrap', c.platform ? `avatar-${c.platform}` : 'avatar-default']">
+            <div :class="['avatar-wrap', `avatar-color-${avatarColorIndexes[index]}`]">
               <img
                 v-if="avatarSrc(c)"
                 :src="avatarSrc(c)!"
@@ -484,10 +508,19 @@ onMounted(fetchContributors)
   white-space: nowrap;
   overflow: visible;
 }
+/* CLA 链接：hover 变色 + 下划线从左展开动画 */
 .flow-link {
   color: var(--o-color-link1);
   text-decoration: none;
-  @include hover { color: var(--o-color-primary1); }
+  background: linear-gradient(0deg, var(--o-color-link1), var(--o-color-link1)) no-repeat right bottom;
+  background-size: 0 1px;
+  transition: background-size var(--o-duration-m2, 0.2s) var(--o-easing-standard, ease), color 0.2s;
+  @include hover {
+    color: var(--o-color-link2);
+    background-image: linear-gradient(0deg, var(--o-color-link2), var(--o-color-link2));
+    background-size: 100% 1px;
+    background-position-x: left;
+  }
 }
 .flow-connector {
   flex: 0 0 auto;
@@ -503,13 +536,17 @@ onMounted(fetchContributors)
   text-align: center;
   margin-top: 24px;
 }
+/* 贡献指南链接：hover 仅变色，无下划线 */
 .flow-guide-link {
   @include font-base;
   font-size: 16px;
   line-height: 24px;
   color: var(--o-color-link1);
   text-decoration: none;
-  @include hover { color: var(--o-color-primary1); }
+  transition: color 0.2s;
+  @include hover {
+    color: var(--o-color-link2);
+  }
 }
 /* ===== 贡献者广场 ===== */
 .plaza-section {
@@ -635,20 +672,23 @@ onMounted(fetchContributors)
   align-items: center;
   justify-content: center;
 }
-.avatar-enterprise {
+.avatar-color-0 {
   background: #2e53fa;
-  @include dark { background: #6b8aff; }
 }
-.avatar-community {
+.avatar-color-1 {
   background: #7b25f4;
-  @include dark { background: #a87aff; }
 }
-.avatar-personal {
+.avatar-color-2 {
+  background: #c725d4;
+}
+.avatar-color-3 {
   background: #e2127a;
-  @include dark { background: #ff6bb0; }
 }
-.avatar-default {
-  background: var(--o-color-primary1);
+.avatar-color-4 {
+  background: #f5cd05;
+}
+.avatar-color-5 {
+  background: #03b5a5;
 }
 .avatar-img {
   width: 100%;

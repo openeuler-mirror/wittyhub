@@ -1453,11 +1453,6 @@ onMounted(async () => {
     z-index: 1;
   }
 
-  /* 版本号列：commit hash 等长字符串用等宽字体，便于识别 */
-  > .version-col-version {
-    font-family: var(--o-font_family-code);
-  }
-
   /* hover 背景：设计稿内容区（左右 24px）内上下各缩 8px，高 40，圆角 4 */
   &::before {
     content: '';

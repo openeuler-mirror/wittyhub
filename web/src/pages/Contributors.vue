@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { Contributor } from '@/api/types'
@@ -67,6 +67,28 @@ const error = ref('')
 const page = ref(1)
 const pageSize = ref(24)
 const pageSizeOptions = [12, 24, 48, 96]
+const avatarColorCount = 6
+
+function contributorHash(c: Contributor): number {
+  const key = `${c.source}:${c.author}:${c.id}`
+  let hash = 2166136261
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+/* 稳定地随机分配设计稿头像色，并从候选中排除前一个颜色。 */
+const avatarColorIndexes = computed(() => {
+  let previous = -1
+  return contributors.value.map((contributor) => {
+    let colorIndex = contributorHash(contributor) % (avatarColorCount - 1)
+    if (previous >= 0 && colorIndex >= previous) colorIndex += 1
+    previous = colorIndex
+    return colorIndex
+  })
+})
 
 function tabLabel(key: string): string {
   if (!key) return '全部'
@@ -301,7 +323,7 @@ onMounted(fetchContributors)
       <!-- 贡献者卡片网格 -->
       <div v-else class="contributors-grid">
         <div
-          v-for="c in contributors"
+          v-for="(c, index) in contributors"
           :key="c.id"
           class="contributor-card"
           role="link"
@@ -310,7 +332,7 @@ onMounted(fetchContributors)
           @keydown.enter.prevent="onClickContributor(c)"
         >
           <div class="card-head">
-            <div :class="['avatar-wrap', c.platform ? `avatar-${c.platform}` : 'avatar-default']">
+            <div :class="['avatar-wrap', `avatar-color-${avatarColorIndexes[index]}`]">
               <img
                 v-if="avatarSrc(c)"
                 :src="avatarSrc(c)!"
@@ -648,20 +670,23 @@ onMounted(fetchContributors)
   align-items: center;
   justify-content: center;
 }
-.avatar-enterprise {
+.avatar-color-0 {
   background: #2e53fa;
-  @include dark { background: #6b8aff; }
 }
-.avatar-community {
+.avatar-color-1 {
   background: #7b25f4;
-  @include dark { background: #a87aff; }
 }
-.avatar-personal {
+.avatar-color-2 {
+  background: #c725d4;
+}
+.avatar-color-3 {
   background: #e2127a;
-  @include dark { background: #ff6bb0; }
 }
-.avatar-default {
-  background: var(--o-color-primary1);
+.avatar-color-4 {
+  background: #f5cd05;
+}
+.avatar-color-5 {
+  background: #03b5a5;
 }
 .avatar-img {
   width: 100%;

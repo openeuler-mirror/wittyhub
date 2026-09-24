@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { OTab, OTabPane } from '@opensig/opendesign'
 import HeaderTheme from './HeaderTheme.vue'
 import HeaderLogin from './HeaderLogin.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 interface NavItem {
   label: string
@@ -30,32 +33,31 @@ function isActive(item: NavItem): boolean {
   }
   return false
 }
+
+const activeTab = computed(() => {
+  const activeItem = navItems.find(isActive)
+  return activeItem?.label || navItems[0].label
+})
+
+function onTabChange(value: string | number) {
+  const item = navItems.find(navItem => navItem.label === String(value))
+  if (item?.to && item.to !== route.path) router.push(item.to)
+}
 </script>
 
 <template>
   <div class="header-nav">
     <!-- 主导航 tabs -->
-    <nav class="nav-tabs" aria-label="主导航">
-      <template v-for="item in navItems" :key="item.label">
-        <a
-          v-if="item.to"
-          :href="item.to"
-          :class="['nav-tab', { active: isActive(item) }]"
-          @click.prevent
-        >
-          <router-link :to="item.to" class="nav-tab-link">{{ item.label }}</router-link>
-        </a>
-        <a
-          v-else-if="item.href"
-          :href="item.href"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="nav-tab"
-        >
-          {{ item.label }}
-        </a>
-      </template>
-    </nav>
+    <OTab
+      :model-value="activeTab"
+      variant="text"
+      size="small"
+      :line="false"
+      class="nav-tabs"
+      @change="onTabChange"
+    >
+      <OTabPane v-for="item in navItems" :key="item.label" :value="item.label" :label="item.label" />
+    </OTab>
 
     <div class="header-tool">
       <HeaderTheme />
@@ -75,54 +77,41 @@ function isActive(item: NavItem): boolean {
 }
 
 .nav-tabs {
-  display: flex;
-  align-items: stretch;
+  flex: 0 0 auto;
+  align-self: stretch;
   height: 100%;
-  gap: 0;
+  --tab-nav-justify: flex-start;
+  --tab-nav-gap: 40px;
+  --tab-nav-padding: 0;
+  --tab-nav-text-size: var(--o-font_size-text1);
+  /* 与 AppHeader 中 SkillHub 标题的 20px / 26px 文字盒保持一致 */
+  --tab-nav-text-height: var(--o-line_height-text2);
 }
 
-.nav-tab {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 20px;
+.nav-tabs :global(.o-tab-body) { display: none; }
+.nav-tabs :global(.o-tab-head),
+.nav-tabs :global(.o-tab-navs),
+.nav-tabs :global(.o-tab-navs-container),
+.nav-tabs :global(.o-tab-nav-list),
+.nav-tabs :global(.o-tab-nav) {
+  height: 100%;
+}
+
+.nav-tabs :global(.o-tab-nav) {
+  box-sizing: border-box;
+  transform: translateY(-10px);
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
+  letter-spacing: 0;
+  text-align: left;
   color: var(--o-color-info1);
-  text-decoration: none;
-  transition: color 0.15s;
-  cursor: pointer;
-  white-space: nowrap;
-
-  &:hover {
-    color: var(--o-color-primary1);
-  }
-
-  &.active {
-    color: var(--o-color-primary1);
-    font-weight: var(--o-font_weight-medium);
-
-    /* 下划线 1px 高、与文字同宽（不含左右 padding）、primary1 */
-    &::after {
-      content: '';
-      position: absolute;
-      left: 20px;
-      right: 20px;
-      bottom: 0;
-      height: 1px;
-      background: var(--o-color-primary1);
-    }
-  }
 }
 
-.nav-tab-link {
-  color: inherit;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  height: 100%;
+.nav-tabs :global(.o-tab-nav-active) {
+  font-weight: var(--o-font_weight-regular);
+  color: var(--o-color-info1);
 }
 
 .header-tool {
@@ -133,14 +122,9 @@ function isActive(item: NavItem): boolean {
 }
 
 @media (max-width: 768px) {
-  .nav-tab {
-    padding: 0 12px;
-    font-size: 14px;
-
-    &.active::after {
-      left: 12px;
-      right: 12px;
-    }
+  .nav-tabs {
+    max-width: 60%;
+    --tab-nav-gap: 24px;
   }
 }
 </style>

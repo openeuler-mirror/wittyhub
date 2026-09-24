@@ -1544,15 +1544,15 @@ onMounted(async () => {
 
   :deep(pre) {
     background: var(--o-color-control2-light);
-    border-radius: 4px;
-    padding: 16px;
+    border-radius: var(--o-radius-m);
+    padding: var(--o-r-gap-4);
     overflow-x: auto;
     margin-bottom: 16px;
     color: var(--o-color-info1);
-    font-family: HarmonyHeiTi;
-    font-weight: regular;
-    font-size: 14px;
-    line-height: 22px;
+    font-family: var(--o-font_family-code);
+    font-weight: var(--o-font_weight-regular);
+    font-size: var(--o-r-font_size-tip1);
+    line-height: var(--o-r-line_height-tip1);
     letter-spacing: 0px;
     text-align: left;
 
@@ -1566,16 +1566,15 @@ onMounted(async () => {
 
     &::-webkit-scrollbar-thumb {
       background: var(--o-color-control4);
-      border-radius: 3px;
+      border-radius: var(--o-radius-s);
     }
 
     code {
       background: none;
       padding: 0;
       color: inherit;
-      font-size: 14px;
+      font-size: inherit;
     }
-    font-size: 14px;
   }
 
   /* ===== Shiki 双主题：浅色默认，深色由 --shiki-dark ===== */

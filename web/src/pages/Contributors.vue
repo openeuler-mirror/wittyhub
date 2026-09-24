@@ -14,6 +14,7 @@ import flowPrepareSvg from '@/assets/icons/flow-prepare.svg?raw'
 import flowClaSvg from '@/assets/icons/flow-cla.svg?raw'
 import flowSubmitSvg from '@/assets/icons/flow-submit.svg?raw'
 import flowPublishSvg from '@/assets/icons/flow-publish.svg?raw'
+import emptyContributorsImg from '@/assets/empty-contributors.png'
 const router = useRouter()
 const appStore = useAppStore()
 
@@ -296,29 +297,7 @@ onMounted(fetchContributors)
       <!-- 空态 -->
       <div v-else-if="contributors.length === 0" class="empty-state">
         <div class="empty-illustration">
-          <svg viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="emptyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#e8eef7" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#e8eef7" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <!-- 底座椭圆 -->
-            <ellipse cx="100" cy="140" rx="80" ry="12" fill="url(#emptyGrad)"/>
-            <!-- 盒子 -->
-            <rect x="55" y="80" width="90" height="50" rx="6" fill="#d8dfe8" opacity="0.7"/>
-            <rect x="60" y="70" width="80" height="20" rx="4" fill="#c8d0db" opacity="0.6"/>
-            <rect x="85" y="100" width="30" height="6" rx="3" fill="#fff" opacity="0.8"/>
-            <!-- 纸飞机 -->
-            <g transform="translate(120,50) rotate(20)" opacity="0.5">
-              <path d="M0 0 L18 -6 L14 8 Z" fill="#a8b5c4"/>
-              <path d="M0 0 L10 4 L14 8" stroke="#a8b5c4" stroke-width="1.5" fill="none"/>
-            </g>
-            <!-- 飘叶 -->
-            <path d="M40 95 Q45 90 50 95 Q45 100 40 95" fill="#b8c5d4" opacity="0.4"/>
-            <path d="M155 110 Q160 105 165 110 Q160 115 155 110" fill="#b8c5d4" opacity="0.4"/>
-            <path d="M145 90 Q150 88 152 93 Q148 96 145 90" fill="#b8c5d4" opacity="0.3"/>
-          </svg>
+          <img :src="emptyContributorsImg" alt="" />
         </div>
         <p class="empty-state-text">没有匹配的结果</p>
       </div>
@@ -618,9 +597,18 @@ onMounted(fetchContributors)
   justify-content: center;
   padding: 80px 0 64px;
   .empty-illustration {
-    width: 200px;
-    height: 160px;
+    width: 320px;
+    height: 280px;
     margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    img {
+      display: block;
+      width: 320px;
+      height: 280px;
+    }
   }
   .empty-state-text {
     @include font-base;

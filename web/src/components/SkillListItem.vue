@@ -43,8 +43,9 @@ function getSecurityLevel(score: number | null): { label: string; class: string 
 const securityLevel = computed(() => getSecurityLevel(props.skill.risk_score))
 
 function truncate(text: string | null, length: number): string {
-  if (!text) return ''
-  return text.length > length ? text.slice(0, length) + '...' : text
+  const description = text?.trim()
+  if (!description) return '暂无说明'
+  return description.length > length ? description.slice(0, length) + '...' : description
 }
 </script>
 

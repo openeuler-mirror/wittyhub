@@ -576,11 +576,12 @@ onMounted(async () => {
             <div class="risk-card">
               <div class="risk-card-header">
                 <h3 class="risk-card-title">风险评估</h3>
+                <!-- 箭头尖距 ⓘ 图标框顶边 4px：offset = 4 + 5.66（官方 8×8 锚点斜向伸出量） -->
                 <OPopover
                   position="top"
                   trigger="hover"
                   wrap-class="risk-popover"
-                  anchor-class="risk-popover-anchor"
+                  :offset="9.66"
                   :adjust-width="false"
                   :adjust-min-width="false"
                 >
@@ -1850,32 +1851,14 @@ onMounted(async () => {
 </style>
 
 <style lang="scss">
-/* ===== 风险评估说明浮层（设计稿 气泡提示 Popover） ===== */
+/* ===== 风险评估说明浮层（设计稿 气泡提示 → OpenDesign OPopover） ===== */
 /* OPopover teleport 到 body，样式需全局；宽度 375 含内边距 */
+/* 其余视觉（圆角 4px、边框 --o-color-control4、阴影 --o-shadow-1、8×8 锚点箭头）
+   均沿用 OPopover 组件规范默认值，light/dark 由 token 自动适配 */
 .risk-popover {
   width: 375px;
   box-sizing: border-box;
-  --popup-radius: 8px;
-  --popup-bd: 1px solid rgba(0, 0, 0, 0.1);
-  --popup-shadow: 0 2px 24px rgba(0, 0, 0, 0.15);
   --popup-padding: 16px 16px 8px;
-}
-
-[data-o-theme='e.dark'] .risk-popover {
-  --popup-bd: 1px solid rgba(255, 255, 255, 0.15);
-  --popup-shadow: 0 2px 24px rgba(255, 255, 255, 0.12);
-}
-
-/* 指向三角：18x11 圆润弧形，与设计稿 指示三角 一致 */
-.risk-popover-anchor {
-  width: 18px !important;
-  height: 11px !important;
-  /* JS 以 bottom:0 定位锚点，向下位移一个高度使三角露出卡片外 */
-  transform: translate(-50%, calc(100% - 1px)) rotate(0deg) !important;
-  background-color: var(--popup-bg-color) !important;
-  border: none !important;
-  border-radius: 0 !important;
-  clip-path: path('M 0 0 L 18 0 C 18 5.5 13.5 8.5 9 11 C 4.5 8.5 0 5.5 0 0 Z');
 }
 
 .risk-popover-title {

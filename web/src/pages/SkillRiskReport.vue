@@ -348,15 +348,15 @@ onMounted(async () => {
     font-weight: var(--o-font_weight-regular);
     letter-spacing: 0px;
     color: var(--breadcrumb-color);
-    transition: color 0.2s;
+    transition: color var(--o-duration-s) var(--o-easing-standard);
   }
 
-  :deep(.o-breadcrumb-item-label[href]),
-  :deep(.o-breadcrumb-item a) {
+  /* 可点击项：hover 主色降一级（OBreadcrumb 规范：info3 → primary2） */
+  :deep(.o-breadcrumb-item-label[href]) {
     cursor: pointer;
 
-    &:hover .o-breadcrumb-item-label {
-      color: var(--o-color-primary1);
+    @include hover {
+      color: var(--o-color-primary2);
     }
   }
 
@@ -399,6 +399,8 @@ onMounted(async () => {
   line-height: 24px;
   letter-spacing: 0px;
   color: var(--o-color-info3);
+  /* 设计稿分隔符两侧各 3 个空格（约 13px），需保留空格不被合并 */
+  white-space: pre-wrap;
 }
 
 /* ===== 卡片容器 ===== */
@@ -700,6 +702,9 @@ onMounted(async () => {
   display: flex;
   height: 8px;
   margin-top: 8px;
+  /* 设计稿：整条两端为圆角（半径 = 高度一半），内部色块拼接处仍为直角 */
+  border-radius: 4px;
+  overflow: hidden;
 
   /* 段宽由 barSegments 按命中项数量计算（百分比保留两位小数），此处不做二次分配 */
   span {

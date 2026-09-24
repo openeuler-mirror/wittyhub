@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { OTab, OTabPane } from '@opensig/opendesign'
+import { useRoute } from 'vue-router'
+import { OLink } from '@opensig/opendesign'
 import HeaderTheme from './HeaderTheme.vue'
 import HeaderLogin from './HeaderLogin.vue'
 
 const route = useRoute()
-const router = useRouter()
 
 interface NavItem {
   label: string
@@ -34,30 +32,21 @@ function isActive(item: NavItem): boolean {
   return false
 }
 
-const activeTab = computed(() => {
-  const activeItem = navItems.find(isActive)
-  return activeItem?.label || navItems[0].label
-})
-
-function onTabChange(value: string | number) {
-  const item = navItems.find(navItem => navItem.label === String(value))
-  if (item?.to && item.to !== route.path) router.push(item.to)
-}
 </script>
 
 <template>
   <div class="header-nav">
     <!-- 主导航 tabs -->
-    <OTab
-      :model-value="activeTab"
-      variant="text"
-      size="small"
-      :line="false"
-      class="nav-tabs"
-      @change="onTabChange"
-    >
-      <OTabPane v-for="item in navItems" :key="item.label" :value="item.label" :label="item.label" />
-    </OTab>
+    <nav class="nav-tabs" aria-label="主导航">
+      <OLink
+        v-for="item in navItems"
+        :key="item.label"
+        :to="item.to"
+        :class="['nav-tab', { active: isActive(item) }]"
+        color="normal"
+        :hover-underline="false"
+      >{{ item.label }}</OLink>
+    </nav>
 
     <div class="header-tool">
       <HeaderTheme />
@@ -77,29 +66,18 @@ function onTabChange(value: string | number) {
 }
 
 .nav-tabs {
+  display: flex;
+  align-items: center;
   flex: 0 0 auto;
-  align-self: stretch;
   height: 100%;
-  --tab-nav-justify: flex-start;
-  --tab-nav-gap: 40px;
-  --tab-nav-padding: 0;
-  --tab-nav-text-size: var(--o-font_size-text1);
-  /* 与 AppHeader 中 SkillHub 标题的 20px / 26px 文字盒保持一致 */
-  --tab-nav-text-height: var(--o-line_height-text2);
+  gap: 40px;
 }
 
-.nav-tabs :global(.o-tab-body) { display: none; }
-.nav-tabs :global(.o-tab-head),
-.nav-tabs :global(.o-tab-navs),
-.nav-tabs :global(.o-tab-navs-container),
-.nav-tabs :global(.o-tab-nav-list),
-.nav-tabs :global(.o-tab-nav) {
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
   height: 100%;
-}
-
-.nav-tabs :global(.o-tab-nav) {
-  box-sizing: border-box;
-  transform: translateY(-10px);
+  padding: 0;
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
   font-size: var(--o-font_size-text1);
@@ -107,11 +85,16 @@ function onTabChange(value: string | number) {
   letter-spacing: 0;
   text-align: left;
   color: var(--o-color-info1);
-}
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  transition: color var(--o-duration-m1, 0.2s) var(--o-easing-standard, ease),
+    border-color var(--o-duration-m1, 0.2s) var(--o-easing-standard, ease);
 
-.nav-tabs :global(.o-tab-nav-active) {
-  font-weight: var(--o-font_weight-regular);
-  color: var(--o-color-info1);
+  &:hover,
+  &.active {
+    color: var(--o-color-info1);
+    border-bottom-color: var(--o-color-primary1);
+  }
 }
 
 .header-tool {
@@ -124,7 +107,7 @@ function onTabChange(value: string | number) {
 @media (max-width: 768px) {
   .nav-tabs {
     max-width: 60%;
-    --tab-nav-gap: 24px;
+    gap: 24px;
   }
 }
 </style>

@@ -466,7 +466,7 @@ function onPaginationChange(
   height: 40px;
   flex-shrink: 0;
   /*容器高 40，数字 y=0 行盒40，文字 y=13 行盒24，水平间距 8 */
-  gap: 8px;
+  column-gap: 8px;
 }
 
 .hero-stats-number {

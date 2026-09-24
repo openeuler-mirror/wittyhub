@@ -1356,8 +1356,7 @@ onMounted(async () => {
   }
 }
 
-/* ===== 版本信息表格（设计稿：表头 38px 底部 primary1 边框 14px SemiBold 80% 黑，
-   数据行 56px 底部分割线 10% 黑，hover 内容区圆角 4 浅色背景，下载图标 24×24） ===== */
+/* ===== 版本信息表格（表头 38px、数据行 56px、下载图标 24×24） ===== */
 .version-table {
   display: flex;
   flex-direction: column;
@@ -1426,27 +1425,6 @@ onMounted(async () => {
     font-size: var(--o-font_size-tip1);
     line-height: var(--o-line_height-tip1);
     color: var(--o-color-info1);
-    /* 让 span 浮在 ::before hover 背景之上，避免被遮挡看不清 */
-    position: relative;
-    z-index: 1;
-  }
-
-  /* hover 背景：设计稿内容区（左右 24px）内上下各缩 8px，高 40，圆角 4 */
-  &::before {
-    content: '';
-    position: absolute;
-    top: 8px;
-    bottom: 8px;
-    left: 24px;
-    right: 24px;
-    border-radius: 4px;
-    background: transparent;
-    transition: background 0.2s;
-    pointer-events: none;
-  }
-
-  &:hover::before {
-    background: var(--o-color-control2-light);
   }
 }
 
@@ -1462,10 +1440,6 @@ onMounted(async () => {
   color: var(--o-color-info1);
   cursor: pointer;
   transition: color 0.2s;
-  /* 让按钮浮在 ::before hover 背景之上 */
-  position: relative;
-  z-index: 1;
-
   @include hover {
     color: var(--o-color-primary1);
   }

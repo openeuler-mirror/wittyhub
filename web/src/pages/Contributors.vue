@@ -225,7 +225,7 @@ onMounted(fetchContributors)
       <div class="absolute inset-0 pointer-events-none">
         <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
       </div>
-      <div class="container-wide relative h-full flex flex-col justify-center">
+      <div class="container-wide relative h-full flex flex-col">
         <h1 class="hero-title">贡献 openEuler Skill</h1>
         <p class="hero-subtitle">每一行经验、每一个自动化脚本、每一个最佳实践，都可以成为帮助社区开发者的Skill。</p>
       </div>
@@ -398,7 +398,11 @@ onMounted(fetchContributors)
 .hero-section {
   position: relative;
   overflow: hidden;
-  height: 319.2px;
+  height: 174px;
+}
+
+.hero-section .container-wide {
+  padding-top: 48px;
 }
 .hero-title {
   font-family: HarmonyHeiTi;
@@ -430,6 +434,7 @@ onMounted(fetchContributors)
 }
 /* ===== 贡献流程 ===== */
 .flow-section {
+  padding-top: 48px;
   padding-bottom: 48px;
 }
 .flow-card {

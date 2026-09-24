@@ -731,6 +731,8 @@ onMounted(fetchContributors)
 }
 .contributor-desc {
   @include font-base;
+  width: 100%;
+  box-sizing: border-box;
   font-size: 16px;
   line-height: 24px;
   color: var(--o-color-info3);
@@ -745,6 +747,8 @@ onMounted(fetchContributors)
 /* 底部：分隔线（距描述 24px）+ 统计（距线 12px），12px op=0.60(info3) */
 .card-footer {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   align-items: center;
   justify-content: space-between;
   margin-top: 24px;

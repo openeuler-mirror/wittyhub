@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
+import { OLink } from '@opensig/opendesign'
 import HeaderTheme from './HeaderTheme.vue'
 import HeaderLogin from './HeaderLogin.vue'
 
@@ -30,31 +31,21 @@ function isActive(item: NavItem): boolean {
   }
   return false
 }
+
 </script>
 
 <template>
   <div class="header-nav">
     <!-- 主导航 tabs -->
     <nav class="nav-tabs" aria-label="主导航">
-      <template v-for="item in navItems" :key="item.label">
-        <a
-          v-if="item.to"
-          :href="item.to"
-          :class="['nav-tab', { active: isActive(item) }]"
-          @click.prevent
-        >
-          <router-link :to="item.to" class="nav-tab-link">{{ item.label }}</router-link>
-        </a>
-        <a
-          v-else-if="item.href"
-          :href="item.href"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="nav-tab"
-        >
-          {{ item.label }}
-        </a>
-      </template>
+      <OLink
+        v-for="item in navItems"
+        :key="item.label"
+        :to="item.to"
+        :class="['nav-tab', { active: isActive(item) }]"
+        color="normal"
+        :hover-underline="false"
+      >{{ item.label }}</OLink>
     </nav>
 
     <div class="header-tool">
@@ -76,53 +67,34 @@ function isActive(item: NavItem): boolean {
 
 .nav-tabs {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  flex: 0 0 auto;
   height: 100%;
-  gap: 0;
+  gap: 40px;
 }
 
 .nav-tab {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 20px;
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: 16px;
-  line-height: 24px;
-  color: var(--o-color-info1);
-  text-decoration: none;
-  transition: color 0.15s;
-  cursor: pointer;
-  white-space: nowrap;
-
-  &:hover {
-    color: var(--o-color-primary1);
-  }
-
-  &.active {
-    color: var(--o-color-primary1);
-    font-weight: var(--o-font_weight-medium);
-
-    /* 下划线 1px 高、与文字同宽（不含左右 padding）、primary1 */
-    &::after {
-      content: '';
-      position: absolute;
-      left: 20px;
-      right: 20px;
-      bottom: 0;
-      height: 1px;
-      background: var(--o-color-primary1);
-    }
-  }
-}
-
-.nav-tab-link {
-  color: inherit;
-  text-decoration: none;
   display: inline-flex;
   align-items: center;
   height: 100%;
+  padding: 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
+  letter-spacing: 0;
+  text-align: left;
+  color: var(--o-color-info1);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  transition: color var(--o-duration-m1, 0.2s) var(--o-easing-standard, ease),
+    border-color var(--o-duration-m1, 0.2s) var(--o-easing-standard, ease);
+
+  &:hover,
+  &.active {
+    color: var(--o-color-info1);
+    border-bottom-color: var(--o-color-primary1);
+  }
 }
 
 .header-tool {
@@ -133,14 +105,9 @@ function isActive(item: NavItem): boolean {
 }
 
 @media (max-width: 768px) {
-  .nav-tab {
-    padding: 0 12px;
-    font-size: 14px;
-
-    &.active::after {
-      left: 12px;
-      right: 12px;
-    }
+  .nav-tabs {
+    max-width: 60%;
+    gap: 24px;
   }
 }
 </style>

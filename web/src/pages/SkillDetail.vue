@@ -556,7 +556,7 @@ onMounted(async () => {
                   <a
                     v-if="skill.source_url"
                     href="javascript:void(0)"
-                    class="info-link"
+                    class="info-link info-repo-link"
                     @click.prevent="confirmExternalLink"
                   >{{ skill.source_url }}</a>
                   <span v-else class="info-value">-</span>
@@ -1006,10 +1006,22 @@ onMounted(async () => {
   text-align: right;
   word-break: break-all;
   text-decoration: none;
+  transition: color 0.2s;
 
   @include hover {
-    text-decoration: underline;
+    color: var(--o-color-link2);
+    text-decoration: none;
   }
+
+  &:focus-visible {
+    color: var(--o-color-link2);
+    text-decoration: none;
+  }
+}
+
+.info-repo-link:hover,
+.info-repo-link:focus-visible {
+  text-decoration: underline;
 }
 
 /* ===== 安装卡片（设计稿-使用描述画板） ===== */
@@ -1378,8 +1390,7 @@ onMounted(async () => {
   }
 }
 
-/* ===== 版本信息表格（设计稿：表头 38px 底部 primary1 边框 14px SemiBold 80% 黑，
-   数据行 56px 底部分割线 10% 黑，hover 内容区圆角 4 浅色背景，下载图标 24×24） ===== */
+/* ===== 版本信息表格（表头 38px、数据行 56px、下载图标 24×24） ===== */
 .version-table {
   display: flex;
   flex-direction: column;
@@ -1448,27 +1459,6 @@ onMounted(async () => {
     font-size: var(--o-font_size-tip1);
     line-height: var(--o-line_height-tip1);
     color: var(--o-color-info1);
-    /* 让 span 浮在 ::before hover 背景之上，避免被遮挡看不清 */
-    position: relative;
-    z-index: 1;
-  }
-
-  /* hover 背景：设计稿内容区（左右 24px）内上下各缩 8px，高 40，圆角 4 */
-  &::before {
-    content: '';
-    position: absolute;
-    top: 8px;
-    bottom: 8px;
-    left: 24px;
-    right: 24px;
-    border-radius: 4px;
-    background: transparent;
-    transition: background 0.2s;
-    pointer-events: none;
-  }
-
-  &:hover::before {
-    background: var(--o-color-control2-light);
   }
 }
 
@@ -1484,10 +1474,6 @@ onMounted(async () => {
   color: var(--o-color-info1);
   cursor: pointer;
   transition: color 0.2s;
-  /* 让按钮浮在 ::before hover 背景之上 */
-  position: relative;
-  z-index: 1;
-
   @include hover {
     color: var(--o-color-primary1);
   }
@@ -1592,15 +1578,15 @@ onMounted(async () => {
 
   :deep(pre) {
     background: var(--o-color-control2-light);
-    border-radius: 4px;
-    padding: 16px;
+    border-radius: var(--o-radius-m);
+    padding: var(--o-r-gap-4);
     overflow-x: auto;
     margin-bottom: 16px;
     color: var(--o-color-info1);
-    font-family: HarmonyHeiTi;
-    font-weight: regular;
-    font-size: 14px;
-    line-height: 22px;
+    font-family: var(--o-font_family-code);
+    font-weight: var(--o-font_weight-regular);
+    font-size: var(--o-r-font_size-tip1);
+    line-height: var(--o-r-line_height-tip1);
     letter-spacing: 0px;
     text-align: left;
 
@@ -1614,16 +1600,15 @@ onMounted(async () => {
 
     &::-webkit-scrollbar-thumb {
       background: var(--o-color-control4);
-      border-radius: 3px;
+      border-radius: var(--o-radius-s);
     }
 
     code {
       background: none;
       padding: 0;
       color: inherit;
-      font-size: 14px;
+      font-size: inherit;
     }
-    font-size: 14px;
   }
 
   /* ===== Shiki 双主题：浅色默认，深色由 --shiki-dark ===== */

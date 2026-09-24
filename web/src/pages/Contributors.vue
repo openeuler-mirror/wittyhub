@@ -14,6 +14,7 @@ import flowPrepareSvg from '@/assets/icons/flow-prepare.svg?raw'
 import flowClaSvg from '@/assets/icons/flow-cla.svg?raw'
 import flowSubmitSvg from '@/assets/icons/flow-submit.svg?raw'
 import flowPublishSvg from '@/assets/icons/flow-publish.svg?raw'
+import emptyContributorsImg from '@/assets/empty-contributors.png'
 const router = useRouter()
 const appStore = useAppStore()
 
@@ -225,7 +226,7 @@ onMounted(fetchContributors)
       <div class="absolute inset-0 pointer-events-none">
         <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
       </div>
-      <div class="container-wide relative h-full flex flex-col justify-center">
+      <div class="container-wide relative h-full flex flex-col">
         <h1 class="hero-title">贡献 openEuler Skill</h1>
         <p class="hero-subtitle">每一行经验、每一个自动化脚本、每一个最佳实践，都可以成为帮助社区开发者的Skill。</p>
       </div>
@@ -296,29 +297,7 @@ onMounted(fetchContributors)
       <!-- 空态 -->
       <div v-else-if="contributors.length === 0" class="empty-state">
         <div class="empty-illustration">
-          <svg viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="emptyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#e8eef7" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#e8eef7" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <!-- 底座椭圆 -->
-            <ellipse cx="100" cy="140" rx="80" ry="12" fill="url(#emptyGrad)"/>
-            <!-- 盒子 -->
-            <rect x="55" y="80" width="90" height="50" rx="6" fill="#d8dfe8" opacity="0.7"/>
-            <rect x="60" y="70" width="80" height="20" rx="4" fill="#c8d0db" opacity="0.6"/>
-            <rect x="85" y="100" width="30" height="6" rx="3" fill="#fff" opacity="0.8"/>
-            <!-- 纸飞机 -->
-            <g transform="translate(120,50) rotate(20)" opacity="0.5">
-              <path d="M0 0 L18 -6 L14 8 Z" fill="#a8b5c4"/>
-              <path d="M0 0 L10 4 L14 8" stroke="#a8b5c4" stroke-width="1.5" fill="none"/>
-            </g>
-            <!-- 飘叶 -->
-            <path d="M40 95 Q45 90 50 95 Q45 100 40 95" fill="#b8c5d4" opacity="0.4"/>
-            <path d="M155 110 Q160 105 165 110 Q160 115 155 110" fill="#b8c5d4" opacity="0.4"/>
-            <path d="M145 90 Q150 88 152 93 Q148 96 145 90" fill="#b8c5d4" opacity="0.3"/>
-          </svg>
+          <img :src="emptyContributorsImg" alt="" />
         </div>
         <p class="empty-state-text">没有匹配的结果</p>
       </div>
@@ -398,7 +377,11 @@ onMounted(fetchContributors)
 .hero-section {
   position: relative;
   overflow: hidden;
-  height: 319.2px;
+  height: 174px;
+}
+
+.hero-section .container-wide {
+  padding-top: var(--o-gap-8);
 }
 .hero-title {
   font-family: HarmonyHeiTi;
@@ -408,7 +391,7 @@ onMounted(fetchContributors)
   letter-spacing: 0px;
   text-align: left;
   color: var(--o-color-info1);
-  margin-bottom: 8px;
+  margin: 0 0 var(--o-gap-3);
 }
 .hero-subtitle {
   font-family: HarmonyHeiTi;
@@ -430,7 +413,11 @@ onMounted(fetchContributors)
 }
 /* ===== 贡献流程 ===== */
 .flow-section {
+  padding-top: 48px;
   padding-bottom: 48px;
+}
+.flow-section .section-title {
+  margin-bottom: var(--o-gap-7);
 }
 .flow-card {
   position: relative;
@@ -438,7 +425,7 @@ onMounted(fetchContributors)
      圆角 4px，图片绝对铺满；底色仅作加载前回退 */
   border-radius: 4px;
   background: var(--o-color-fill2);
-  padding: 40px 32px 24px;
+  padding: 40px 32px var(--o-gap-6);
   overflow: hidden;
   @include dark {
     background: #1a1a1c;
@@ -613,9 +600,18 @@ onMounted(fetchContributors)
   justify-content: center;
   padding: 80px 0 64px;
   .empty-illustration {
-    width: 200px;
-    height: 160px;
+    width: 320px;
+    height: 280px;
     margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    img {
+      display: block;
+      width: 320px;
+      height: 280px;
+    }
   }
   .empty-state-text {
     @include font-base;
@@ -738,6 +734,8 @@ onMounted(fetchContributors)
 }
 .contributor-desc {
   @include font-base;
+  width: 100%;
+  box-sizing: border-box;
   font-size: 16px;
   line-height: 24px;
   color: var(--o-color-info3);
@@ -752,13 +750,15 @@ onMounted(fetchContributors)
 /* 底部：分隔线（距描述 24px）+ 统计（距线 12px），12px op=0.60(info3) */
 .card-footer {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   align-items: center;
   justify-content: space-between;
   margin-top: 24px;
   padding-top: 12px;
-  border-top: 1px solid var(--o-color-control3-light);
+  border-top: 1px solid var(--o-color-control4);
   @include dark {
-    border-top-color: #2a2a2c;
+    border-top-color: var(--o-color-control4);
   }
 }
 .stat-text {
@@ -796,7 +796,7 @@ onMounted(fetchContributors)
     line-height: 32px;
   }
   .flow-card {
-    padding: 24px 16px 20px;
+    padding: 24px 16px var(--o-gap-6);
   }
   .flow-step {
     width: 140px;

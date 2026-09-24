@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
 import type { Skill, ContributorSkillsResponse } from '@/api/types'
 import SkillCard from '@/components/SkillCard.vue'
-import { OBreadcrumb, OBreadcrumbItem, OInput, OPagination, OLoading } from '@opensig/opendesign'
+import { OBreadcrumb, OBreadcrumbItem, OInput, OPagination, OLoading, OLink } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 import { useAppStore } from '@/stores/app'
 import heroBgLight from '@/assets/bg/hero-top-texture.png'
@@ -169,26 +169,28 @@ watch(
               <div class="contributor-link-row">
                 <template v-if="contributorRepoLink">
                   <span class="contributor-link-label">git主页：</span>
-                  <a
+                  <OLink
                     :href="contributorRepoLink"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="contributor-repo-link"
+                    color="normal"
                     @click="oaReport('click_contributor_repo', { module: 'contributor_detail', author: contributor.author })"
-                  >{{ contributorRepoLink }}</a>
+                  >{{ contributorRepoLink }}</OLink>
                 </template>
                 <template v-if="contributorRepoLink && contributorWebsite">
                   <span class="contributor-link-sep"></span>
                 </template>
                 <template v-if="contributorWebsite">
                   <span class="contributor-link-label">官网：</span>
-                  <a
+                  <OLink
                     :href="contributorWebsite"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="contributor-repo-link"
+                    color="normal"
                     @click="oaReport('click_contributor_homepage', { module: 'contributor_detail', author: contributor.author })"
-                  >{{ contributorWebsite }}</a>
+                  >{{ contributorWebsite }}</OLink>
                 </template>
               </div>
             </div>
@@ -439,13 +441,9 @@ watch(
   line-height: var(--o-r-line_height-text1);
   letter-spacing: 0px;
   text-align: left;
-  color: var(--o-color-info3);
+  color: var(--o-color-link1);
   text-decoration: none;
   word-break: break-all;
-
-  @include hover {
-    color: var(--o-color-primary1);
-  }
 }
 
 /* ===== 右侧统计 ===== */

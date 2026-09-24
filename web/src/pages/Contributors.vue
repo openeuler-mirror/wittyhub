@@ -381,7 +381,7 @@ onMounted(fetchContributors)
 }
 
 .hero-section .container-wide {
-  padding-top: 48px;
+  padding-top: var(--o-gap-8);
 }
 .hero-title {
   font-family: HarmonyHeiTi;
@@ -391,7 +391,7 @@ onMounted(fetchContributors)
   letter-spacing: 0px;
   text-align: left;
   color: var(--o-color-info1);
-  margin-bottom: 8px;
+  margin: 0 0 var(--o-gap-3);
 }
 .hero-subtitle {
   font-family: HarmonyHeiTi;
@@ -416,13 +416,16 @@ onMounted(fetchContributors)
   padding-top: 48px;
   padding-bottom: 48px;
 }
+.flow-section .section-title {
+  margin-bottom: var(--o-gap-7);
+}
 .flow-card {
   position: relative;
   /* 设计稿卡片背景图（卡片背景.png / 卡片背景-dark.png，2976×400 @2x），
      圆角 4px，图片绝对铺满；底色仅作加载前回退 */
   border-radius: 4px;
   background: var(--o-color-fill2);
-  padding: 40px 32px 24px;
+  padding: 40px 32px var(--o-gap-6);
   overflow: hidden;
   @include dark {
     background: #1a1a1c;
@@ -793,7 +796,7 @@ onMounted(fetchContributors)
     line-height: 32px;
   }
   .flow-card {
-    padding: 24px 16px 20px;
+    padding: 24px 16px var(--o-gap-6);
   }
   .flow-step {
     width: 140px;

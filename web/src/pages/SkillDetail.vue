@@ -539,7 +539,7 @@ onMounted(async () => {
                   <a
                     v-if="skill.source_url"
                     href="javascript:void(0)"
-                    class="info-link"
+                    class="info-link info-repo-link"
                     @click.prevent="confirmExternalLink"
                   >{{ skill.source_url }}</a>
                   <span v-else class="info-value">-</span>
@@ -989,10 +989,22 @@ onMounted(async () => {
   text-align: right;
   word-break: break-all;
   text-decoration: none;
+  transition: color 0.2s;
 
   @include hover {
-    text-decoration: underline;
+    color: var(--o-color-link2);
+    text-decoration: none;
   }
+
+  &:focus-visible {
+    color: var(--o-color-link2);
+    text-decoration: none;
+  }
+}
+
+.info-repo-link:hover,
+.info-repo-link:focus-visible {
+  text-decoration: underline;
 }
 
 /* ===== 安装卡片（设计稿-使用描述画板） ===== */

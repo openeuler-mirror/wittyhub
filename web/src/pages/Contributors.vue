@@ -749,9 +749,9 @@ onMounted(fetchContributors)
   justify-content: space-between;
   margin-top: 24px;
   padding-top: 12px;
-  border-top: 1px solid var(--o-color-control3-light);
+  border-top: 1px solid var(--o-color-control4);
   @include dark {
-    border-top-color: #2a2a2c;
+    border-top-color: var(--o-color-control4);
   }
 }
 .stat-text {

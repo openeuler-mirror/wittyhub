@@ -590,6 +590,8 @@ function onPaginationChange(
   width: 148px;
 
   :deep(.o-tab-head) {
+    display: flex;
+    align-items: center;
     background: var(--o-color-fill1);
     border-radius: 4px;
     padding: 4px;
@@ -600,6 +602,13 @@ function onPaginationChange(
 
   :deep(.o-tab-navs) {
     gap: 0;
+    height: 40px;
+    align-items: center;
+  }
+
+  :deep(.o-tab-nav-list) {
+    height: 40px;
+    align-items: center;
   }
 
   :deep(.o-tab-nav) {
@@ -618,12 +627,12 @@ function onPaginationChange(
     justify-content: center;
     align-items: center;
 
-    &:hover:not(.is-active) {
+    &:hover:not(.o-tab-nav-active) {
       color: var(--o-color-primary1) !important;
       background: color-mix(in srgb, var(--o-color-primary1) 8%, transparent);
     }
 
-    &.is-active {
+    &.o-tab-nav-active {
       font-weight: var(--o-font_weight-semibold);
       color: var(--o-color-primary1) !important;
       background: var(--o-color-fill2) !important;

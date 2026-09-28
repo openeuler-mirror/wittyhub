@@ -1,11 +1,51 @@
 <script lang="ts">
 /**
- * 章节大纲项：h2 为一级、h3 挂在其 children 下（右侧「本内容」目录使用）
+ * 章节大纲项：h2 为一级、h3 挂在其 children 下（文档页左侧目录/页内目录使用）
  */
 export interface OutlineItem {
   id: string
   text: string
   children: Array<{ id: string; text: string }>
+}
+
+/** 目录项为纯文本，需还原 HTML 实体（如 &quot;） */
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+/** 为正文 h2/h3 注入锚点 id（doc-section-N / N-M），并产出章节大纲 */
+export function parseOutline(html: string): { html: string; outline: OutlineItem[] } {
+  const outline: OutlineItem[] = []
+  let h2Count = 0
+  let h3Count = 0
+  const result = html.replace(/<(h2|h3)>([\s\S]*?)<\/\1>/g, (_match, tag: string, inner: string) => {
+    const text = decodeEntities(inner.replace(/<[^>]+>/g, '').trim())
+    if (tag === 'h2') {
+      h2Count += 1
+      h3Count = 0
+      const id = `doc-section-${h2Count}`
+      outline.push({ id, text, children: [] })
+      return `<h2 id="${id}">${inner}</h2>`
+    }
+    // h3 挂到最近的 h2 下；若 h2 之前出现 h3，则作为一级项兜底
+    h3Count += 1
+    const id = `doc-section-${h2Count}-${h3Count}`
+    const parent = outline[outline.length - 1]
+    if (parent) parent.children.push({ id, text })
+    else outline.push({ id, text, children: [] })
+    return `<h3 id="${id}">${inner}</h3>`
+  })
+  return { html: result, outline }
+}
+
+/** 由 Markdown 原文解析章节大纲（文档页左侧目录使用，锚点 id 规则与正文渲染一致） */
+export function parseDocOutline(source: string): OutlineItem[] {
+  return parseOutline(marked.parse(source) as string).outline
 }
 </script>
 
@@ -31,6 +71,12 @@ import checkSvg from '@/assets/icons/check.svg?raw'
 const props = defineProps<{
   /** Markdown 原文 */
   source: string
+  /**
+   * 排版变体：
+   * - default：与技能详情页「使用描述」块一致（默认）
+   * - docs：文档页（使用指南）版式，对齐设计稿「使用指南示例」的 28/40 标题、20/28 二级标题等规格
+   */
+  variant?: 'default' | 'docs'
 }>()
 
 const emit = defineEmits<{
@@ -89,16 +135,6 @@ renderer.code = (code: string, lang: string | undefined) => {
 </div>\n`
 }
 
-/** 目录项为纯文本，需还原 HTML 实体（如 &quot;） */
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-}
-
 /** 解析 Markdown：一次解析同时产出正文 HTML 与章节大纲（h2/h3 注入锚点 id） */
 const parsed = computed<{ html: string; outline: OutlineItem[] }>(() => {
   if (!props.source) return { html: '', outline: [] }
@@ -113,27 +149,7 @@ const parsed = computed<{ html: string; outline: OutlineItem[] }>(() => {
     return `<span class="level-dot level-dot--${LEVEL_DOTS[emoji]}"></span>`
   })
 
-  const outline: OutlineItem[] = []
-  let h2Count = 0
-  let h3Count = 0
-  html = html.replace(/<(h2|h3)>([\s\S]*?)<\/\1>/g, (_match, tag: string, inner: string) => {
-    const text = decodeEntities(inner.replace(/<[^>]+>/g, '').trim())
-    if (tag === 'h2') {
-      h2Count += 1
-      h3Count = 0
-      const id = `doc-section-${h2Count}`
-      outline.push({ id, text, children: [] })
-      return `<h2 id="${id}">${inner}</h2>`
-    }
-    // h3 挂到最近的 h2 下；若 h2 之前出现 h3，则作为一级项兜底
-    h3Count += 1
-    const id = `doc-section-${h2Count}-${h3Count}`
-    const parent = outline[outline.length - 1]
-    if (parent) parent.children.push({ id, text })
-    else outline.push({ id, text, children: [] })
-    return `<h3 id="${id}">${inner}</h3>`
-  })
-  return { html, outline }
+  return parseOutline(html)
 })
 
 /** 大纲同步给父级：首屏渲染与切换文档时都会触发 */
@@ -173,7 +189,12 @@ onMounted(initHighlighter)
 </script>
 
 <template>
-  <div class="markdown-body" v-html="parsed.html" @click="handleCodeClick"></div>
+  <div
+    class="markdown-body"
+    :class="{ 'markdown-body--docs': variant === 'docs' }"
+    v-html="parsed.html"
+    @click="handleCodeClick"
+  ></div>
 </template>
 
 <style lang="scss" scoped>
@@ -428,6 +449,137 @@ onMounted(initHighlighter)
 
   :deep(.level-dot--unknown) {
     background: var(--o-color-info3);
+  }
+}
+
+/* ===== 文档页变体（docs）：版式对齐设计稿「使用指南示例」 =====
+   与技能详情页「使用描述」的差异：标题更紧凑（28/40、20/28、18/26）、正文行高 24、
+   引用块为浅蓝色块（圆角 4、内边距 24）、表格固定 960px（首列 401px，其余列均分）、
+   无序列表为 6px 圆点 + 文本缩进 38px */
+.markdown-body.markdown-body--docs {
+  :deep(h1) {
+    margin: 0 0 32px;
+    /* 设计稿定值：28/40 */
+    font-size: 28px;
+    line-height: 40px;
+    font-weight: var(--o-font_weight-medium);
+  }
+
+  :deep(h2) {
+    margin: 32px 0 12px;
+    font-size: var(--o-font_size-h4);
+    line-height: var(--o-line_height-h4);
+    font-weight: var(--o-font_weight-medium);
+  }
+
+  :deep(h3) {
+    margin: 12px 0;
+    font-size: var(--o-font_size-text2);
+    line-height: var(--o-line_height-text2);
+    font-weight: var(--o-font_weight-medium);
+  }
+
+  :deep(h4),
+  :deep(h5),
+  :deep(h6) {
+    margin: 12px 0;
+    font-size: var(--o-font_size-text1);
+    line-height: var(--o-line_height-text1);
+    font-weight: var(--o-font_weight-medium);
+  }
+
+  :deep(p) {
+    margin: 0 0 8px;
+    font-size: var(--o-font_size-text1);
+    line-height: var(--o-line_height-text1);
+  }
+
+  /* 圆点距正文左边缘 24px、文本缩进 38px（设计稿） */
+  :deep(ul) {
+    margin: 0 0 8px;
+    padding-left: 38px;
+    list-style: none;
+  }
+
+  :deep(ul > li) {
+    position: relative;
+    margin-bottom: 0;
+    font-size: var(--o-font_size-text1);
+    line-height: var(--o-line_height-text1);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: -14px;
+      top: 9px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--o-color-info1);
+    }
+  }
+
+  :deep(ol) {
+    margin: 0 0 8px;
+    padding-left: 38px;
+  }
+
+  :deep(ol > li) {
+    margin-bottom: 0;
+    font-size: var(--o-font_size-text1);
+    line-height: var(--o-line_height-text1);
+  }
+
+  /* 引用块：浅蓝色块 + 圆角 4 + 内边距 24，无左侧竖线（设计稿） */
+  :deep(blockquote) {
+    margin: 12px 0;
+    padding: 24px;
+    border-left: none;
+    border-radius: 4px;
+    background: var(--o-color-control2-light);
+    color: var(--o-color-info1);
+
+    p {
+      margin: 0;
+    }
+  }
+
+  /* 表格：固定 960px 宽，首列 401px，其余列均分（设计稿） */
+  :deep(table) {
+    width: 960px;
+    max-width: 100%;
+    margin: 12px 0;
+  }
+
+  :deep(th),
+  :deep(td) {
+    padding: 8px 24px;
+    background: transparent;
+    font-size: var(--o-font_size-tip1);
+    line-height: var(--o-line_height-tip1);
+    color: var(--o-color-info1);
+  }
+
+  /* 首列列宽由首行单元格决定（设计稿：401px） */
+  :deep(th:first-child),
+  :deep(td:first-child) {
+    width: 401px;
+  }
+
+  :deep(th) {
+    border-radius: 0;
+    border-bottom: 1px solid var(--o-color-primary1);
+    font-weight: var(--o-font_weight-semibold);
+    color: var(--o-color-info2);
+  }
+
+  :deep(tbody tr) {
+    background: transparent;
+
+    /* 设计稿：#EBF1FA 40% */
+    &:nth-child(even) {
+      background: rgba(235, 241, 250, 0.4);
+    }
   }
 }
 

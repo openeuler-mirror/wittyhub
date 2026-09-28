@@ -52,7 +52,10 @@ const router = createRouter({
       component: Contributors
     }
   ],
-  scrollBehavior() {
+  scrollBehavior(to) {
+    // 带锚点的导航（文档页章节跳转）滚动到锚点元素，top 偏移避开 72px 吸顶导航；
+    // 目标元素尚未渲染时（文档正文异步加载）由页面在内容就绪后再定位
+    if (to.hash) return { el: to.hash, top: 96 }
     return { top: 0 }
   }
 })

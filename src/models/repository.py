@@ -869,6 +869,26 @@ class SkillRepository:
         await self.session.flush()
         await self.session.commit()
 
+    async def update_embeddings_batch(
+        self, embeddings: List[tuple[str, datetime, List[float]]]
+    ) -> int:
+        """仅在记录版本未变化时批量写入 embedding，返回更新行数。"""
+        now = datetime.now(timezone.utc)
+        count = 0
+        for skill_id, expected_updated_at, embedding in embeddings:
+            result = await self.session.execute(
+                update(Skill)
+                .where(
+                    Skill.skill_id == skill_id,
+                    Skill.updated_at == expected_updated_at,
+                )
+                .values(embedding=embedding, last_indexed_at=now)
+            )
+            count += result.rowcount or 0
+        await self.session.flush()
+        await self.session.commit()
+        return count
+
     async def get_stats(self) -> dict[str, Any]:
         latest_skills = self._latest_unique_skills_subquery()
 

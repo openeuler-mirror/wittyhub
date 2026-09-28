@@ -1,0 +1,342 @@
+"""embedding 索引共享核心：全量重建与增量补嵌入。
+
+供两处调用：
+- scripts/reindex_embeddings.py   手动全量或单 Skill 重建（独立进程）
+- DiscoverScheduler               每轮 discover 结束后增量补 NULL 行
+
+跨进程互斥：pg_advisory_lock（会话断开自动释放，无需清理）。
+- 全量运行中，增量 try_lock 失败 → 跳过本轮（全量本身覆盖一切，含 NULL 行）
+- 增量运行中，全量 fail-fast 提示稍后重试
+- 同一任务内部全量结束后的 NULL 尾扫复用已持有的锁
+
+批次三段式短事务（避免 embedding HTTP 60s 超时期间占用连接池）：
+  ① 短会话读 (skill_id, 文本字段) → 关闭
+  ② 无 DB 连接调 embedding 服务批量编码
+  ③ 短会话按 skill_id 排序批量 UPDATE → commit → 关闭（排序写消除并发批间死锁）
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import text
+
+from src.ai.embedding import generate_embeddings, prepare_skill_text
+from src.core.config import get_settings
+from src.core.database import AsyncSessionLocal
+
+logger = logging.getLogger(__name__)
+
+# advisory lock 的 bigint key（pg_advisory_lock 单参数版）
+_REINDEX_LOCK_KEY = 742_301_990_122  # hashtext('wittyhub:embedding_reindex') 量级的固定值
+
+BATCH_SIZE = 100
+
+
+@dataclass
+class ReindexStats:
+    """一次全量/增量任务的统计。"""
+
+    total: int = 0           # 扫描到的目标行数
+    indexed: int = 0         # 成功写入 embedding 的行数
+    failed_batches: int = 0  # embedding 请求或写库失败的批次数
+    failed_rows: int = 0     # embedding 请求或响应校验失败的行数
+    skipped_empty: int = 0   # 文本为空被跳过的行数
+    stale_skipped: int = 0   # 编码期间内容发生变化或记录消失的行数
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "indexed": self.indexed,
+            "failed_batches": self.failed_batches,
+            "failed_rows": self.failed_rows,
+            "skipped_empty": self.skipped_empty,
+            "stale_skipped": self.stale_skipped,
+        }
+
+
+class LockBusyError(RuntimeError):
+    """另一个 embedding 索引任务正持有锁。"""
+
+
+class SkillNotFoundError(LookupError):
+    """指定的 Skill 不存在。"""
+
+
+@dataclass(frozen=True)
+class EmbeddingTarget:
+    """一次读取快照中的待编码记录。"""
+
+    skill_id: str
+    text: str
+    updated_at: datetime
+
+
+def _validate_batch_size(batch_size: int) -> None:
+    if not 1 <= batch_size <= 1000:
+        raise ValueError("batch_size must be between 1 and 1000")
+
+
+def _validate_embeddings(
+    embeddings: list[list[float]], expected_count: int, expected_dimension: int
+) -> None:
+    if len(embeddings) != expected_count:
+        raise ValueError(
+            f"embedding response count mismatch: expected {expected_count}, "
+            f"got {len(embeddings)}"
+        )
+    for index, embedding in enumerate(embeddings):
+        if len(embedding) != expected_dimension:
+            raise ValueError(
+                f"embedding dimension mismatch at index {index}: "
+                f"expected {expected_dimension}, got {len(embedding)}"
+            )
+        if not all(
+            isinstance(value, (int, float)) and math.isfinite(value)
+            for value in embedding
+        ):
+            raise ValueError(f"embedding contains non-finite value at index {index}")
+
+
+async def _fetch_batch(
+    after_skill_id: str | None, limit: int, only_missing: bool
+) -> list[EmbeddingTarget]:
+    """使用 keyset pagination 短会话读取一批待编码行。
+
+    only_missing=True 时仅取 embedding IS NULL 且 risk_score IS NOT NULL 的行
+    （与 _vector_search 的可见口径一致：无风险分的行对语义搜索不可见，
+    无需消耗 embedding 计算）。
+    """
+    target_cond = (
+        "embedding IS NULL AND risk_score IS NOT NULL"
+        if only_missing
+        else "TRUE"
+    )
+    cursor_cond = "AND skill_id > :after_skill_id" if after_skill_id is not None else ""
+    sql = text(
+        f"""
+        SELECT skill_id, name, description, content, updated_at
+        FROM skills
+        WHERE {target_cond}
+        {cursor_cond}
+        ORDER BY skill_id
+        LIMIT :limit
+        """
+    )
+    params: dict[str, Any] = {"limit": limit}
+    if after_skill_id is not None:
+        params["after_skill_id"] = after_skill_id
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(sql, params)
+        rows = result.all()
+    return [
+        EmbeddingTarget(
+            skill_id=row[0],
+            text=prepare_skill_text(
+                {"name": row[1], "description": row[2], "content": row[3]}
+            ),
+            updated_at=row[4],
+        )
+        for row in rows
+    ]
+
+
+async def _count_targets(only_missing: bool) -> int:
+    cond = (
+        "embedding IS NULL AND risk_score IS NOT NULL" if only_missing else "TRUE"
+    )
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(text(f"SELECT count(*) FROM skills WHERE {cond}"))
+        return result.scalar() or 0
+
+
+async def _fetch_target(skill_id: str) -> EmbeddingTarget | None:
+    """读取单个 Skill 的文本快照。"""
+    sql = text(
+        """
+        SELECT skill_id, name, description, content, updated_at
+        FROM skills
+        WHERE skill_id = :skill_id
+        """
+    )
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(sql, {"skill_id": skill_id})
+        row = result.first()
+    if row is None:
+        return None
+    return EmbeddingTarget(
+        skill_id=row[0],
+        text=prepare_skill_text(
+            {"name": row[1], "description": row[2], "content": row[3]}
+        ),
+        updated_at=row[4],
+    )
+
+
+async def _write_embeddings(
+    pairs: list[tuple[EmbeddingTarget, list[float]]],
+) -> int:
+    """仅在内容版本未变化时批量写库，返回更新行数。"""
+    from src.models.repository import SkillRepository
+
+    ordered = [
+        (target.skill_id, target.updated_at, embedding)
+        for target, embedding in sorted(pairs, key=lambda pair: pair[0].skill_id)
+    ]
+    async with AsyncSessionLocal() as session:
+        repo = SkillRepository(session)
+        return await repo.update_embeddings_batch(ordered)
+
+
+async def _run_batches(
+    only_missing: bool,
+    stats: ReindexStats,
+    batch_size: int,
+    progress_cb=None,
+) -> None:
+    """批次主循环：读 → 编码 → 写，每批独立短会话。单批失败跳过继续。"""
+    stats.total = await _count_targets(only_missing)
+    after_skill_id: str | None = None
+    while True:
+        rows = await _fetch_batch(after_skill_id, batch_size, only_missing)
+        if not rows:
+            return
+        # 无论空文本或批次失败都推进游标，避免增量模式反复读取同一批。
+        after_skill_id = rows[-1].skill_id
+
+        to_encode = [target for target in rows if target.text.strip()]
+        stats.skipped_empty += len(rows) - len(to_encode)
+        if to_encode:
+            try:
+                embeddings = await generate_embeddings(
+                    [target.text for target in to_encode]
+                )
+                _validate_embeddings(
+                    embeddings,
+                    expected_count=len(to_encode),
+                    expected_dimension=get_settings().ai.embedding_dimension,
+                )
+                pairs = [
+                    (target, embedding)
+                    for target, embedding in zip(to_encode, embeddings, strict=True)
+                ]
+                updated = await _write_embeddings(pairs)
+                stats.indexed += updated
+                stats.stale_skipped += len(pairs) - updated
+            except Exception:
+                stats.failed_batches += 1
+                stats.failed_rows += len(to_encode)
+                logger.exception(
+                    "embedding 批次失败 (after_skill_id=%s, only_missing=%s)，跳过",
+                    after_skill_id,
+                    only_missing,
+                )
+
+        if progress_cb:
+            progress_cb(stats)
+
+        if len(rows) < batch_size:
+            return
+
+
+async def embed_missing(batch_size: int = BATCH_SIZE) -> ReindexStats:
+    """增量补嵌入：仅处理 embedding IS NULL 且 risk_score IS NOT NULL 的行。
+
+    锁被全量任务持有时抛 LockBusyError，由调用方决定跳过。
+    """
+    _validate_batch_size(batch_size)
+    async with AsyncSessionLocal() as lock_session:
+        locked = await lock_session.execute(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": _REINDEX_LOCK_KEY}
+        )
+        if not locked.scalar():
+            raise LockBusyError("embedding reindex lock is held by another task")
+        try:
+            stats = ReindexStats()
+            await _run_batches(
+                only_missing=True, stats=stats, batch_size=batch_size
+            )
+            return stats
+        finally:
+            await lock_session.execute(
+                text("SELECT pg_advisory_unlock(:key)"), {"key": _REINDEX_LOCK_KEY}
+            )
+
+
+async def reindex_skill(skill_id: str) -> ReindexStats:
+    """重建单个 Skill 的 embedding，与全量及增量任务互斥。"""
+    async with AsyncSessionLocal() as lock_session:
+        locked = await lock_session.execute(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": _REINDEX_LOCK_KEY}
+        )
+        if not locked.scalar():
+            raise LockBusyError("embedding reindex lock is held by another task")
+        try:
+            target = await _fetch_target(skill_id)
+            if target is None:
+                raise SkillNotFoundError(skill_id)
+
+            stats = ReindexStats(total=1)
+            if not target.text.strip():
+                stats.skipped_empty = 1
+                return stats
+
+            try:
+                embeddings = await generate_embeddings([target.text])
+                _validate_embeddings(
+                    embeddings,
+                    expected_count=1,
+                    expected_dimension=get_settings().ai.embedding_dimension,
+                )
+                stats.indexed = await _write_embeddings([(target, embeddings[0])])
+                stats.stale_skipped = 1 - stats.indexed
+            except Exception:
+                stats.failed_batches = 1
+                stats.failed_rows = 1
+                logger.exception("单 Skill embedding 重建失败 (skill_id=%s)", skill_id)
+            return stats
+        finally:
+            await lock_session.execute(
+                text("SELECT pg_advisory_unlock(:key)"), {"key": _REINDEX_LOCK_KEY}
+            )
+
+
+async def reindex_all(batch_size: int = BATCH_SIZE, progress_cb=None) -> ReindexStats:
+    """全量重建：重算所有 skill 的 embedding，结束后追加 NULL 尾扫兜底
+    mid-run 新插入的行。锁被占用时抛 LockBusyError。
+    """
+    _validate_batch_size(batch_size)
+    async with AsyncSessionLocal() as lock_session:
+        locked = await lock_session.execute(
+            text("SELECT pg_try_advisory_lock(:key)"), {"key": _REINDEX_LOCK_KEY}
+        )
+        if not locked.scalar():
+            raise LockBusyError("embedding reindex lock is held by another task")
+        try:
+            stats = ReindexStats()
+            await _run_batches(
+                only_missing=False,
+                stats=stats,
+                batch_size=batch_size,
+                progress_cb=progress_cb,
+            )
+            # 尾扫：兜住全量期间 discover 新插入（embedding IS NULL）的行
+            tail = ReindexStats()
+            await _run_batches(
+                only_missing=True, stats=tail, batch_size=batch_size
+            )
+            stats.total += tail.total
+            stats.indexed += tail.indexed
+            stats.failed_batches += tail.failed_batches
+            stats.failed_rows += tail.failed_rows
+            stats.skipped_empty += tail.skipped_empty
+            stats.stale_skipped += tail.stale_skipped
+            return stats
+        finally:
+            await lock_session.execute(
+                text("SELECT pg_advisory_unlock(:key)"), {"key": _REINDEX_LOCK_KEY}
+            )

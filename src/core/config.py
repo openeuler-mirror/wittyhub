@@ -92,8 +92,8 @@ class LoggingConfig(BaseSettings):
 
 
 class AIConfig(BaseSettings):
-    embedding_model: str = "bge-base-zh-v1.5"
-    embedding_host: str = "http://localhost:8081"
+    embedding_model: str = "BAAI/bge-base-zh-v1.5"
+    embedding_host: str = "http://localhost:8082"
     embedding_dimension: int = 768
     enable_semantic_search: bool = True
 

@@ -9,6 +9,11 @@ from src.api.services.categories import category_label
 from src.models.orm import Skill
 
 
+# Hybrid search ranks a stable, bounded candidate pool so total and pagination
+# do not change as the caller moves between pages.
+HYBRID_CANDIDATE_LIMIT = 200
+
+
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
     """
     合并多个排序列表，使用 RRF 算法
@@ -171,7 +176,7 @@ class SearchService:
         is_hybrid = bool(embedding and mode == "hybrid")
         text_results = await self._text_search(
             query=query,
-            limit=limit * 2 if is_hybrid else limit,
+            limit=HYBRID_CANDIDATE_LIMIT if is_hybrid else limit,
             offset=0 if is_hybrid else offset,
             category=category,
             platform=platform,
@@ -183,7 +188,7 @@ class SearchService:
         if is_hybrid:
             vector_results = await self._vector_search(
                 embedding=embedding,
-                limit=limit * 2,
+                limit=HYBRID_CANDIDATE_LIMIT,
                 offset=0,
                 category=category,
                 platform=platform,
@@ -197,7 +202,7 @@ class SearchService:
             deduped = self._dedupe_skill_results(combined)
             return {
                 "results": deduped[offset:offset + limit],
-                "total": text_results["total"],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -413,8 +418,9 @@ class SearchService:
 
         results = []
         for row in rows:
-            similarity = 1 / (1 + float(row.distance)) if row.distance else None
-            if similarity and similarity < min_similarity:
+            distance = float(row.distance)
+            similarity = 1 / (1 + distance)
+            if similarity < min_similarity:
                 continue
             results.append({
                 "id": str(row.id),
@@ -434,7 +440,7 @@ class SearchService:
                 "rating": row.rating,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "distance": float(row.distance) if row.distance else None,
+                "distance": distance,
                 "similarity": similarity,
             })
 

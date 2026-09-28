@@ -1965,6 +1965,50 @@ class TestSearchService:
         service._vector_search.assert_not_awaited()
         assert result["results"] == [{"skill_id": "skill-1"}]
 
+    def test_hybrid_search_total_and_pagination_use_fused_candidates(self):
+        from src.indexer.search import HYBRID_CANDIDATE_LIMIT, SearchService
+
+        service = SearchService(MagicMock())
+        service._text_search = AsyncMock(
+            return_value={
+                "results": [
+                    {"id": "1", "skill_id": "skill-1"},
+                    {"id": "2", "skill_id": "skill-2"},
+                ],
+                "total": 2,
+            }
+        )
+        service._vector_search = AsyncMock(
+            return_value={
+                "results": [
+                    {"id": "3", "skill_id": "skill-3"},
+                    {"id": "4", "skill_id": "skill-4"},
+                    {"id": "1", "skill_id": "skill-1"},
+                ],
+                "total": 3,
+                "mode": "semantic",
+            }
+        )
+
+        result = asyncio.run(
+            service.search_skills(
+                query="日志分析",
+                embedding=[0.1, 0.2],
+                mode="hybrid",
+                limit=2,
+                offset=2,
+            )
+        )
+
+        assert result["total"] == 4
+        assert len(result["results"]) == 2
+        assert result["skip"] == 2
+        assert result["limit"] == 2
+        assert service._text_search.await_args.kwargs["limit"] == HYBRID_CANDIDATE_LIMIT
+        assert service._text_search.await_args.kwargs["offset"] == 0
+        assert service._vector_search.await_args.kwargs["limit"] == HYBRID_CANDIDATE_LIMIT
+        assert service._vector_search.await_args.kwargs["offset"] == 0
+
 
 class TestConfig:
     async def test_get_settings(self):

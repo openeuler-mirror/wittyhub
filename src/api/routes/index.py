@@ -1,11 +1,11 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.ai.embedding import generate_embeddings, prepare_skill_text
-from src.core.auth import require_admin_token
+
+from src.ai.embedding import generate_query_embedding
+from src.core.config import get_settings
 from src.core.database import get_db
-from src.core.config import  get_settings
 from src.indexer.search import SearchService
 from src.models.repository import SkillRepository
 
@@ -35,8 +35,7 @@ async def search(
 
     if mode in ("semantic", "hybrid") and semantic_enabled:
         try:
-            embeddings = await generate_embeddings([q])
-            embedding = embeddings[0] if embeddings else None
+            embedding = await generate_query_embedding(q)
         except Exception:
             embedding = None
             mode = "text"
@@ -59,60 +58,6 @@ async def search(
     )
 
     return results
-
-
-@router.post("/reindex", dependencies=[Depends(require_admin_token)])
-async def reindex(
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    repo = SkillRepository(db)
-    skills, total = await repo.list(skip=0, limit=1000)
-
-    indexed_count = 0
-    for skill in skills:
-        try:
-            text = prepare_skill_text(skill)
-            if text.strip():
-                embeddings = await generate_embeddings([text])
-                if embeddings and embeddings[0]:
-                    await repo.update_embedding(skill.skill_id, embeddings[0])
-                    indexed_count += 1
-        except Exception:
-            continue
-
-    return {
-        "status": "completed",
-        "indexed_count": indexed_count,
-        "total_skills": total,
-    }
-
-
-@router.post(
-    "/reindex/{skill_id:path}",
-    dependencies=[Depends(require_admin_token)],
-)
-async def reindex_skill(
-    skill_id: Annotated[str, Path(min_length=1, max_length=255)],
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    repo = SkillRepository(db)
-    skill = await repo.get_by_skill_id(skill_id)
-
-    if not skill:
-        return {"status": "error", "message": "Skill not found"}
-
-    try:
-        text = prepare_skill_text(skill)
-        if text.strip():
-            embeddings = await generate_embeddings([text])
-            if embeddings and embeddings[0]:
-                await repo.update_embedding(skill_id, embeddings[0])
-                return {"status": "completed", "skill_id": skill_id, "embedding_generated": True}
-    except Exception as e:
-        return {"status": "completed", "skill_id": skill_id, "embedding_generated": False, "error": str(e)}
-
-    await repo.update_last_indexed(skill_id)
-    return {"status": "completed", "skill_id": skill_id}
 
 
 @router.get("/stats")

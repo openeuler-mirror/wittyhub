@@ -92,6 +92,9 @@ async def lifespan(app: FastAPI):
         await discover_scheduler.stop()
     if collector is not None:
         await collector.stop()
+    from src.ai.embedding import close_embedding_service
+
+    await close_embedding_service()
     logger.info("wittyhub shutting down")
 
 

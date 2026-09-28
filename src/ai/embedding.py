@@ -1,8 +1,16 @@
 from abc import ABC, abstractmethod
+from collections import OrderedDict
+import time
 from typing import Any
 
 import httpx
 from src.core.config import get_settings
+
+
+# BGE v1.5 的 query-side instruction，文档向量不添加该前缀。
+BGE_QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
+QUERY_CACHE_TTL_SECONDS = 300.0
+QUERY_CACHE_MAX_ENTRIES = 256
 
 
 class EmbeddingProvider(ABC):
@@ -20,16 +28,19 @@ class LocalEmbeddingService(EmbeddingProvider):
         self.host = host
         self.model = model
         self._dimension = dimension
+        self._client = httpx.AsyncClient(timeout=60.0)
 
     async def encode(self, texts: list[str]) -> list[list[float]]:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{self.host}/v1/embeddings",
-                json={"input": texts, "model": self.model},
-            )
-            response.raise_for_status()
-            data = response.json()
-            return [item["embedding"] for item in data["data"]]
+        response = await self._client.post(
+            f"{self.host}/v1/embeddings",
+            json={"input": texts, "model": self.model},
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [item["embedding"] for item in data["data"]]
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     def dimension(self) -> int:
         return self._dimension
@@ -54,6 +65,7 @@ class MockEmbeddingService(EmbeddingProvider):
 
 
 _embedding_service: EmbeddingProvider | None = None
+_query_embedding_cache: OrderedDict[str, tuple[float, list[float]]] = OrderedDict()
 
 
 def get_embedding_service() -> EmbeddingProvider:
@@ -76,6 +88,38 @@ async def generate_embeddings(texts: list[str]) -> list[list[float]]:
     return await service.encode(texts)
 
 
+async def generate_query_embedding(query: str) -> list[float] | None:
+    """生成带 BGE 查询指令的向量，并缓存短期重复查询。"""
+    normalized_query = query.strip()
+    if not normalized_query:
+        return None
+
+    now = time.monotonic()
+    cached = _query_embedding_cache.get(normalized_query)
+    if cached is not None:
+        cached_at, embedding = cached
+        if now - cached_at < QUERY_CACHE_TTL_SECONDS:
+            _query_embedding_cache.move_to_end(normalized_query)
+            return embedding
+        _query_embedding_cache.pop(normalized_query, None)
+
+    embeddings = await generate_embeddings([prepare_search_query(normalized_query)])
+    embedding = embeddings[0] if embeddings else None
+    if embedding is not None:
+        _query_embedding_cache[normalized_query] = (now, embedding)
+        _query_embedding_cache.move_to_end(normalized_query)
+        while len(_query_embedding_cache) > QUERY_CACHE_MAX_ENTRIES:
+            _query_embedding_cache.popitem(last=False)
+    return embedding
+
+
+async def close_embedding_service() -> None:
+    """关闭进程级 Embedding HTTP 客户端。"""
+    service = _embedding_service
+    if isinstance(service, LocalEmbeddingService):
+        await service.close()
+
+
 def prepare_skill_text(skill: dict[str, Any] | Any) -> str:
     """
     组合 skill 的 name、description、content 生成用于 embedding 的文本
@@ -95,6 +139,11 @@ def prepare_skill_text(skill: dict[str, Any] | Any) -> str:
         if skill.get("content"):
             parts.append(skill["content"])
     return " ".join(parts)
+
+
+def prepare_search_query(query: str) -> str:
+    """为 BGE 检索查询添加 query-side instruction。"""
+    return f"{BGE_QUERY_INSTRUCTION}{query.strip()}"
 
 
 async def generate_skill_embedding(skill: dict[str, Any] | Any) -> list[float] | None:

@@ -21,6 +21,11 @@ const appStore = useAppStore()
 const route = useRoute()
 const router = useRouter()
 const searchInput = ref('')
+const showSearchHistory = ref(false)
+const searchHistory = ref<string[]>([])
+
+const SEARCH_HISTORY_KEY = 'wittyhub-search-history'
+const SEARCH_HISTORY_LIMIT = 8
 
 const sortOptions = [
   { label: '全部时间', value: 'all' },
@@ -54,6 +59,8 @@ const showHotResultCount = computed(
 )
 
 onMounted(async () => {
+  loadSearchHistory()
+  document.addEventListener('mousedown', onDocumentMouseDown)
   if (searchQuery.value) {
     searchInput.value = searchQuery.value
     skillStore.setFilter('keyword', searchQuery.value)
@@ -132,7 +139,54 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResizeAlign)
+  document.removeEventListener('mousedown', onDocumentMouseDown)
 })
+
+function loadSearchHistory() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]')
+    if (Array.isArray(stored)) {
+      searchHistory.value = stored.filter(
+        (item): item is string => typeof item === 'string' && item.trim().length > 0
+      ).slice(0, SEARCH_HISTORY_LIMIT)
+    }
+  } catch {
+    searchHistory.value = []
+  }
+}
+
+function persistSearchHistory() {
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.value))
+  } catch {
+    // Storage may be unavailable in privacy-restricted browser contexts.
+  }
+}
+
+function addSearchHistory(query: string) {
+  searchHistory.value = [
+    query,
+    ...searchHistory.value.filter(item => item !== query)
+  ].slice(0, SEARCH_HISTORY_LIMIT)
+  persistSearchHistory()
+}
+
+function removeSearchHistory(query: string) {
+  searchHistory.value = searchHistory.value.filter(item => item !== query)
+  persistSearchHistory()
+}
+
+function clearSearchHistory() {
+  searchHistory.value = []
+  persistSearchHistory()
+}
+
+function onDocumentMouseDown(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (!target.closest('.search-box-wrapper')) {
+    showSearchHistory.value = false
+  }
+}
 
 // 下载量格式化：超过一万显示 xxx.xw（w=万），否则原样
 function formatDownloads(n?: number): string {
@@ -144,6 +198,8 @@ function formatDownloads(n?: number): string {
 function handleSearch() {
   const q = searchInput.value.trim()
   if (q) {
+    addSearchHistory(q)
+    showSearchHistory.value = false
     oaReport('search_submit', { module: 'home', keyword: q })
     router.push({
       path: '/skills/search',
@@ -154,6 +210,11 @@ function handleSearch() {
     skillStore.setFilter('keyword', '')
     skillStore.fetchSkills()
   }
+}
+
+function selectSearchHistory(query: string) {
+  searchInput.value = query
+  handleSearch()
 }
 
 function handleClear() {
@@ -210,7 +271,7 @@ function onPaginationChange(
 <template>
   <div>
     <!-- Hero 区域 -->
-    <section class="hero-section relative overflow-hidden" style="height: 319.2px">
+    <section class="hero-section relative" style="height: 319.2px">
       <!-- 设计稿背景图 -->
       <div class="absolute inset-0 pointer-events-none">
         <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" class="w-full h-full object-cover" />
@@ -237,13 +298,14 @@ function onPaginationChange(
         </p>
 
         <!-- 搜索框：660x40 圆角 4px -->
-        <div style="max-width:660px; width:100%; margin:0 auto">
+        <div class="search-box-wrapper" style="max-width:660px; width:100%; margin:0 auto">
           <OInput
             v-model="searchInput"
             placeholder="搜索 Skill"
             size="large"
             round="4px"
             clearable
+            @focus="showSearchHistory = true"
             @press-enter="handleSearch"
             @clear="handleClear"
             style="width: 100%"
@@ -254,6 +316,43 @@ function onPaginationChange(
               </svg>
             </template>
           </OInput>
+          <div
+            v-if="showSearchHistory && searchHistory.length"
+            class="search-history-panel"
+            role="listbox"
+            aria-label="搜索历史"
+          >
+            <div class="search-history-header">
+              <span>搜索历史</span>
+              <button type="button" class="search-history-clear" @mousedown.prevent="clearSearchHistory">
+                清空
+              </button>
+            </div>
+            <div
+              v-for="item in searchHistory"
+              :key="item"
+              class="search-history-item"
+              role="option"
+              tabindex="0"
+              @mousedown.prevent="selectSearchHistory(item)"
+              @keydown.enter.prevent="selectSearchHistory(item)"
+            >
+              <svg class="search-history-clock" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4a8 8 0 1 0 8 8 8.01 8.01 0 0 0-8-8Zm0 14a6 6 0 1 1 6-6 6.01 6.01 0 0 1-6 6Zm.5-9h-1v3.4l2.7 1.6.5-.86-2.2-1.3Z" fill="currentColor" />
+              </svg>
+              <span class="search-history-text">{{ item }}</span>
+              <button
+                type="button"
+                class="search-history-remove"
+                aria-label="删除搜索历史"
+                @mousedown.stop.prevent="removeSearchHistory(item)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m7.41 6 5.09 5.09L17.59 6 19 7.41 13.91 12.5 19 17.59 17.59 19 12.5 13.91 7.41 19 6Z" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -408,6 +507,10 @@ function onPaginationChange(
   padding: 0 24px;
 }
 
+.hero-section {
+  z-index: 10;
+}
+
 /* 加载容器 */
 .loading-container {
   display: flex;
@@ -421,6 +524,106 @@ function onPaginationChange(
   width: 24px;
   height: 24px;
   color: var(--o-color-info2);
+}
+
+.search-box-wrapper {
+  position: relative;
+  z-index: 2;
+}
+
+.search-history-panel {
+  position: absolute;
+  top: calc(100% + var(--o-gap-1));
+  left: 0;
+  width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--o-gap-2) 0;
+  border: 1px solid var(--o-color-control4);
+  border-radius: var(--o-radius-m);
+  background-color: var(--o-color-fill2);
+  box-shadow: var(--o-shadow-l1);
+  text-align: left;
+}
+
+.search-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 var(--o-gap-4);
+  color: var(--o-color-info3);
+  font-size: var(--o-font_size-tip1);
+  line-height: var(--o-line_height-tip1);
+}
+
+.search-history-clear,
+.search-history-remove {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--o-color-info3);
+  cursor: pointer;
+}
+
+.search-history-clear {
+  min-height: 32px;
+  font-size: var(--o-font_size-tip1);
+  line-height: var(--o-line_height-tip1);
+}
+
+.search-history-clear:hover,
+.search-history-remove:hover {
+  color: var(--o-color-primary1);
+}
+
+.search-history-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--o-gap-4);
+  color: var(--o-color-info1);
+  cursor: pointer;
+  outline: none;
+}
+
+.search-history-item:hover,
+.search-history-item:focus-visible {
+  background-color: var(--o-color-control2-light);
+}
+
+.search-history-clock,
+.search-history-remove svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.search-history-clock {
+  margin-right: var(--o-gap-3);
+  color: var(--o-color-info3);
+}
+
+.search-history-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--o-color-info1);
+  font-size: var(--o-font_size-text1);
+  line-height: var(--o-line_height-text1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-history-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: var(--o-gap-2);
+  flex-shrink: 0;
 }
 
 /* Hero 标题： size=40 weight=SemiBold color=#000000 */

@@ -57,7 +57,7 @@ export const useSkillStore = defineStore('skill', () => {
       if (filter.value.keyword) {
         const res = await api.searchSkills({
           q: filter.value.keyword,
-          mode: 'text',
+          mode: 'hybrid',
           scope: 'summary',
           ...params
         })

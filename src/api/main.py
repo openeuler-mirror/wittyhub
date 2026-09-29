@@ -95,6 +95,9 @@ async def lifespan(app: FastAPI):
     from src.ai.embedding import close_embedding_service
 
     await close_embedding_service()
+    from src.ai.translation import close_translation_service
+
+    await close_translation_service()
     logger.info("wittyhub shutting down")
 
 

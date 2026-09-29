@@ -161,6 +161,8 @@ class SearchService:
         embedding: list[float] | None = None,
         mode: str = "hybrid",
         scope: str = "summary",
+        translated_query: str | None = None,
+        translated_embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         if embedding and mode == "semantic":
             return await self._vector_search(
@@ -195,10 +197,22 @@ class SearchService:
                 tags=tags,
                 security_level=security_level,
             )
-            combined = reciprocal_rank_fusion(
-                text_results.get("results", []),
-                vector_results.get("results", []),
-            )
+            ranked_lists = [text_results.get("results", []), vector_results.get("results", [])]
+            if translated_query:
+                translated_text = await self._text_search(
+                    query=translated_query, limit=HYBRID_CANDIDATE_LIMIT,
+                    category=category, platform=platform, tags=tags,
+                    scope=scope, security_level=security_level,
+                )
+                ranked_lists.append(translated_text.get("results", []))
+            if translated_embedding:
+                translated_vector = await self._vector_search(
+                    embedding=translated_embedding, limit=HYBRID_CANDIDATE_LIMIT,
+                    offset=0, category=category, platform=platform, tags=tags,
+                    security_level=security_level,
+                )
+                ranked_lists.append(translated_vector.get("results", []))
+            combined = reciprocal_rank_fusion(*ranked_lists)
             deduped = self._dedupe_skill_results(combined)
             return {
                 "results": deduped[offset:offset + limit],

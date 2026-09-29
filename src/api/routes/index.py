@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.embedding import generate_query_embedding
+from src.ai.translation import translate_query_to_english
 from src.core.config import get_settings
 from src.core.database import get_db
 from src.indexer.search import SearchService
@@ -43,6 +44,16 @@ async def search(
     if embedding is None:
         mode = "text"
 
+    translated_query = None
+    translated_embedding = None
+    if mode == "hybrid":
+        translated_query = await translate_query_to_english(q)
+        if translated_query:
+            try:
+                translated_embedding = await generate_query_embedding(translated_query)
+            except Exception:
+                translated_embedding = None
+
     search_service = SearchService(db)
     results = await search_service.search_skills(
         query=q,
@@ -55,6 +66,8 @@ async def search(
         embedding=embedding,
         mode=mode,
         scope=scope,
+        translated_query=translated_query,
+        translated_embedding=translated_embedding,
     )
 
     return results

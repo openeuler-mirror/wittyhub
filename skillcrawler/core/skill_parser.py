@@ -252,8 +252,6 @@ def derive_repository_skill_name(
     return skill_file.stem
 
 
-
-
 def should_skip_relative_path(relative_path: str) -> bool:
     relative_path = relative_path.lower()
     path_parts = relative_path.split('/')
@@ -276,6 +274,8 @@ def normalize_git_clone_url(url: str | None) -> str:
     ssh_match = re.match(r'git@([^:]+):(.+)', stripped)
     if ssh_match:
         host = ssh_match.group(1)
+        if host.lower() == 'atomgit.com':
+            host = 'gitcode.com'
         path = ssh_match.group(2).strip('/')
         return f'git@{host}:{path}'
 
@@ -283,10 +283,13 @@ def normalize_git_clone_url(url: str | None) -> str:
     if not parsed.scheme or not parsed.netloc:
         return ''
 
+    host = parsed.netloc
+    if host.lower() == 'atomgit.com':
+        host = 'gitcode.com'
     path = parsed.path.strip('/')
     if path.endswith('.git'):
         path = path[:-4]
-    return f'{parsed.scheme}://{parsed.netloc}/{path}'
+    return f'{parsed.scheme}://{host}/{path}'
 
 
 def normalize_clone_url_for_git(repo_url: str | None) -> str:

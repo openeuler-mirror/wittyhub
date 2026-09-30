@@ -227,6 +227,28 @@ class DiscoverScheduler:
                 "Contributor profiles synced from catalog: %d entries", profile_count
             )
 
+        # 增量补嵌入：只为本轮新入库（embedding IS NULL 且 risk_score 就绪）的
+        # skill 生成向量，使其立即可被语义搜索命中。锁被全量重建脚本持有时跳过
+        # （全量本身会覆盖一切）；失败不重试，漏掉的行由下轮 discover 自愈。
+        try:
+            from src.core.config import get_settings as _get_settings
+
+            if _get_settings().ai.enable_semantic_search:
+                from src.ai.embedding_indexer import LockBusyError, embed_missing
+
+                try:
+                    embed_stats = await embed_missing()
+                    logger.info(
+                        "Incremental embedding after discover: %s",
+                        embed_stats.as_dict(),
+                    )
+                except LockBusyError:
+                    logger.info(
+                        "Incremental embedding skipped: reindex lock held by another task"
+                    )
+        except Exception:
+            logger.exception("Incremental embedding after discover failed")
+
         run_elapsed = time.monotonic() - run_started
         avg_elapsed = run_elapsed / total if total else 0.0
         slowest = sorted(repo_durations, key=lambda item: item[1], reverse=True)[:3]

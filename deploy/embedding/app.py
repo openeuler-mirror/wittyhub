@@ -1,6 +1,7 @@
 """
 Simple embedding service using sentence-transformers
 """
+import math
 import os
 from pathlib import Path
 from typing import List
@@ -56,15 +57,22 @@ async def create_embeddings(request: EmbedRequest) -> JSONResponse:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
-        embeddings = model.encode(request.input, convert_to_numpy=True)
+        embeddings = model.encode(
+            request.input,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
 
         data = []
         for i, emb in enumerate(embeddings):
             embedding_list = emb.tolist()
             if len(embedding_list) != DIMENSION:
-                embedding_list = embedding_list[:DIMENSION]
-                while len(embedding_list) < DIMENSION:
-                    embedding_list.append(0.0)
+                raise ValueError(
+                    f"model output dimension {len(embedding_list)} does not match "
+                    f"configured dimension {DIMENSION}"
+                )
+            if not all(math.isfinite(value) for value in embedding_list):
+                raise ValueError("model output contains non-finite values")
 
             data.append({
                 "embedding": embedding_list,

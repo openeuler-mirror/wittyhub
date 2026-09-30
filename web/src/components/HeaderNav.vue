@@ -90,7 +90,10 @@ function isActive(item: NavItem): boolean {
   transition: color var(--o-duration-m1, 0.2s) var(--o-easing-standard, ease),
     border-color var(--o-duration-m1, 0.2s) var(--o-easing-standard, ease);
 
-  &:hover,
+  &:hover {
+    color: var(--o-color-info1);
+  }
+
   &.active {
     color: var(--o-color-info1);
     border-bottom-color: var(--o-color-primary1);

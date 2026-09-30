@@ -23,6 +23,7 @@ from skillcrawler.core.popularity import (
     estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+from skillcrawler.core.skill_parser import normalize_git_clone_url
 from src.core.config import get_settings
 from src.core.database import get_db_context
 from src.models.repository import (
@@ -472,11 +473,12 @@ def _infer_platform_from_repo_url(repo_url: str | None) -> str | None:
 def _build_single_url_discover_request(
     args: argparse.Namespace,
 ) -> SkillRepositoryRequest:
+    normalized_url = normalize_git_clone_url(args.url)
     # argparse choices already validate an explicitly supplied platform.
     # 优先级：显式 --platform > URL 推断（gitcode.com/openeuler/* → community）> 默认 personal
-    platform = args.platform or _infer_platform_from_repo_url(args.url) or "personal"
+    platform = args.platform or _infer_platform_from_repo_url(normalized_url) or "personal"
     return SkillRepositoryRequest(
-        url=args.url,
+        url=normalized_url,
         branch=args.branch,
         platform=platform,
     )

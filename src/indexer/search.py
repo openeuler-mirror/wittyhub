@@ -9,6 +9,11 @@ from src.api.services.categories import category_label
 from src.models.orm import Skill
 
 
+# Hybrid search ranks a stable, bounded candidate pool so total and pagination
+# do not change as the caller moves between pages.
+HYBRID_CANDIDATE_LIMIT = 200
+
+
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
     """
     合并多个排序列表，使用 RRF 算法
@@ -156,6 +161,8 @@ class SearchService:
         embedding: list[float] | None = None,
         mode: str = "hybrid",
         scope: str = "summary",
+        translated_query: str | None = None,
+        translated_embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         if embedding and mode == "semantic":
             return await self._vector_search(
@@ -171,7 +178,7 @@ class SearchService:
         is_hybrid = bool(embedding and mode == "hybrid")
         text_results = await self._text_search(
             query=query,
-            limit=limit * 2 if is_hybrid else limit,
+            limit=HYBRID_CANDIDATE_LIMIT if is_hybrid else limit,
             offset=0 if is_hybrid else offset,
             category=category,
             platform=platform,
@@ -183,21 +190,33 @@ class SearchService:
         if is_hybrid:
             vector_results = await self._vector_search(
                 embedding=embedding,
-                limit=limit * 2,
+                limit=HYBRID_CANDIDATE_LIMIT,
                 offset=0,
                 category=category,
                 platform=platform,
                 tags=tags,
                 security_level=security_level,
             )
-            combined = reciprocal_rank_fusion(
-                text_results.get("results", []),
-                vector_results.get("results", []),
-            )
+            ranked_lists = [text_results.get("results", []), vector_results.get("results", [])]
+            if translated_query:
+                translated_text = await self._text_search(
+                    query=translated_query, limit=HYBRID_CANDIDATE_LIMIT,
+                    category=category, platform=platform, tags=tags,
+                    scope=scope, security_level=security_level,
+                )
+                ranked_lists.append(translated_text.get("results", []))
+            if translated_embedding:
+                translated_vector = await self._vector_search(
+                    embedding=translated_embedding, limit=HYBRID_CANDIDATE_LIMIT,
+                    offset=0, category=category, platform=platform, tags=tags,
+                    security_level=security_level,
+                )
+                ranked_lists.append(translated_vector.get("results", []))
+            combined = reciprocal_rank_fusion(*ranked_lists)
             deduped = self._dedupe_skill_results(combined)
             return {
                 "results": deduped[offset:offset + limit],
-                "total": text_results["total"],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
@@ -413,8 +432,9 @@ class SearchService:
 
         results = []
         for row in rows:
-            similarity = 1 / (1 + float(row.distance)) if row.distance else None
-            if similarity and similarity < min_similarity:
+            distance = float(row.distance)
+            similarity = 1 / (1 + distance)
+            if similarity < min_similarity:
                 continue
             results.append({
                 "id": str(row.id),
@@ -434,7 +454,7 @@ class SearchService:
                 "rating": row.rating,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "distance": float(row.distance) if row.distance else None,
+                "distance": distance,
                 "similarity": similarity,
             })
 

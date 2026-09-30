@@ -22,7 +22,9 @@ class PostgresConfig(BaseSettings):
 
     @property
     def sync_url(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
+        # Keep the synchronous driver explicit. SQLAlchemy's default PostgreSQL
+        # driver can vary across major releases; this project installs psycopg2.
+        return f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class StorageConfig(BaseSettings):

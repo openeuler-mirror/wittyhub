@@ -508,7 +508,7 @@ class SkillRepository:
                 )
             )
 
-        for skill_id in scanned_ids - existing_ids:
+        for skill_id in scanned_ids:
             skill = scanned_skills[skill_id]
             skill.skill_repo_id = skill_repo_id
             existing_skill = existing_skills.get(skill_id)

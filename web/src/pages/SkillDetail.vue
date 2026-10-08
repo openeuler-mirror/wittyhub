@@ -157,18 +157,35 @@ async function copyMarkdownCode(e: MouseEvent) {
   }
 }
 
-// riskClass/arcColor/arcPath 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
-// 圆弧比例（从 12 点方向起顺时针，stroke-linecap: butt 直角端头与设计稿一致）：
-//   安全 1/4(90°) → 3点(右)；低风险 1/2(180°) → 6点(下)；中风险 3/4(270°) → 9点(左)；高风险 全环
-function getSecurityLevel(score: number | null): { label: string; class: string; riskClass: string; arcColor: string; arcPath: string; arcFull: boolean; desc: string } {
-  if (score === null) return { label: '未检测', class: 'tag-gray', riskClass: 'risk-gray', arcColor: '', arcPath: '', arcFull: false, desc: '暂无风险评估数据' }
-  if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', arcPath: 'M 70 7 A 63 63 0 0 1 133 70', arcFull: false, desc: '无显著风险，可以放心使用' }
-  if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', arcPath: 'M 70 7 A 63 63 0 0 1 70 133', arcFull: false, desc: '风险较低，可以正常使用' }
-  if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', arcPath: 'M 70 7 A 63 63 0 1 1 7 70', arcFull: false, desc: '存在一定风险，建议谨慎使用' }
-  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', arcPath: '', arcFull: true, desc: '存在较高风险，建议谨慎使用' }
+// riskClass/arcColor 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
+function getSecurityLevel(score: number | null): { label: string; class: string; riskClass: string; arcColor: string; desc: string } {
+  if (score === null) return { label: '未检测', class: 'tag-gray', riskClass: 'risk-gray', arcColor: '', desc: '暂无风险评估数据' }
+  if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', desc: '无显著风险，可以放心使用' }
+  if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', desc: '风险较低，可以正常使用' }
+  if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', desc: '存在一定风险，建议谨慎使用' }
+  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', desc: '存在较严重问题，不建议直接安装' }
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
+
+// 得分圆弧：以 100 分为满分，圆弧从 12 点方向起顺时针填充「得分 ÷ 100 × 360°」的角度
+// 圆心 (70, 70)、半径 63（140px 仪表盘）；得分变化时自动重算
+const riskScore = computed(() => {
+  const score = skill.value?.risk_score
+  return typeof score === 'number' ? Math.min(Math.max(score, 0), 100) : null
+})
+// 满分绘制整圆（arc 起止点重合无法用 path 表达）
+const scoreArcFull = computed(() => riskScore.value === 100)
+const scoreArcPath = computed(() => {
+  const score = riskScore.value
+  // 未检测 / 0 分不绘制圆弧；100 分由整圆元素绘制
+  if (score === null || score <= 0 || score >= 100) return ''
+  const angle = score * 3.6
+  const rad = (angle * Math.PI) / 180
+  const x = (70 + 63 * Math.sin(rad)).toFixed(2)
+  const y = (70 - 63 * Math.cos(rad)).toFixed(2)
+  return `M 70 7 A 63 63 0 ${angle > 180 ? 1 : 0} 1 ${x} ${y}`
+})
 // 风险评分展示：有分值显示 x/100，未检测显示文案
 const riskScoreText = computed(() => {
   const score = skill.value?.risk_score
@@ -559,11 +576,12 @@ onMounted(async () => {
             <div class="risk-card">
               <div class="risk-card-header">
                 <h3 class="risk-card-title">风险评估</h3>
+                <!-- 箭头尖距 ⓘ 图标框顶边 4px：offset = 4 + 5.66（官方 8×8 锚点斜向伸出量） -->
                 <OPopover
                   position="top"
                   trigger="hover"
                   wrap-class="risk-popover"
-                  anchor-class="risk-popover-anchor"
+                  :offset="9.66"
                   :adjust-width="false"
                   :adjust-min-width="false"
                 >
@@ -598,9 +616,9 @@ onMounted(async () => {
                 <div class="risk-gauge">
                   <svg class="risk-gauge-svg" viewBox="0 0 140 140">
                     <circle class="risk-gauge-track" cx="70" cy="70" r="63" />
-                    <!-- 高风险：完整圆环，circle 默认从 3 点起，旋转 -90° 使其从 12 点起 -->
+                    <!-- 满分：完整圆环，circle 默认从 3 点起，旋转 -90° 使其从 12 点起 -->
                     <circle
-                      v-if="securityLevel.arcFull"
+                      v-if="scoreArcFull"
                       class="risk-gauge-arc risk-gauge-arc-full"
                       cx="70"
                       cy="70"
@@ -608,11 +626,11 @@ onMounted(async () => {
                       transform="rotate(-90 70 70)"
                       :style="{ stroke: securityLevel.arcColor }"
                     />
-                    <!-- 其他等级：按比例弧（path 从 12 点起顺时针，直角端头） -->
+                    <!-- 其余得分：按得分百分比绘制弧（path 从 12 点起顺时针，直角端头） -->
                     <path
-                      v-else-if="securityLevel.arcPath"
+                      v-else-if="scoreArcPath"
                       class="risk-gauge-arc"
-                      :d="securityLevel.arcPath"
+                      :d="scoreArcPath"
                       :style="{ stroke: securityLevel.arcColor }"
                     />
                   </svg>
@@ -1113,15 +1131,20 @@ onMounted(async () => {
   color: var(--o-color-info1);
 }
 
-/* 标题旁 ⓘ 说明图标（设计稿 提示/形状结合） */
+/* 标题旁 ⓘ 说明图标（设计稿 提示/形状结合）：默认一级文字色，悬停品牌蓝 */
 .risk-info-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
-  color: var(--o-color-primary1);
+  color: var(--o-color-info1);
   cursor: pointer;
+  transition: color 0.2s;
+
+  @include hover {
+    color: var(--o-color-primary1);
+  }
 
   svg {
     width: 24px;
@@ -1863,32 +1886,14 @@ onMounted(async () => {
 </style>
 
 <style lang="scss">
-/* ===== 风险评估说明浮层（设计稿 气泡提示 Popover） ===== */
+/* ===== 风险评估说明浮层（设计稿 气泡提示 → OpenDesign OPopover） ===== */
 /* OPopover teleport 到 body，样式需全局；宽度 375 含内边距 */
+/* 其余视觉（圆角 4px、边框 --o-color-control4、阴影 --o-shadow-1、8×8 锚点箭头）
+   均沿用 OPopover 组件规范默认值，light/dark 由 token 自动适配 */
 .risk-popover {
   width: 375px;
   box-sizing: border-box;
-  --popup-radius: 8px;
-  --popup-bd: 1px solid rgba(0, 0, 0, 0.1);
-  --popup-shadow: 0 2px 24px rgba(0, 0, 0, 0.15);
   --popup-padding: 16px 16px 8px;
-}
-
-[data-o-theme='e.dark'] .risk-popover {
-  --popup-bd: 1px solid var(--o-color-control4);
-  --popup-shadow: var(--o-shadow-2);
-}
-
-/* 指向三角：18x11 圆润弧形，与设计稿 指示三角 一致 */
-.risk-popover-anchor {
-  width: 18px !important;
-  height: 11px !important;
-  /* JS 以 bottom:0 定位锚点，向下位移一个高度使三角露出卡片外 */
-  transform: translate(-50%, calc(100% - 1px)) rotate(0deg) !important;
-  background-color: var(--popup-bg-color) !important;
-  border: none !important;
-  border-radius: 0 !important;
-  clip-path: path('M 0 0 L 18 0 C 18 5.5 13.5 8.5 9 11 C 4.5 8.5 0 5.5 0 0 Z');
 }
 
 .risk-popover-title {

@@ -36,7 +36,8 @@ const LEVEL_TABS = [
 ]
 const activeCategory = ref('all')
 const activeLevel = ref('all')
-const expandedKey = ref<string | null>(null)
+// 展开态：支持同时展开多个检测项（用 Set 记录已展开的行 key）
+const expandedKeys = ref<Set<string>>(new Set())
 
 /** 详情表的行：维度 -> 检测项（每行一个检测项，风险维度列取所属维度中文名） */
 interface DetailRow {
@@ -84,7 +85,8 @@ function issuesOfRule(row: DetailRow): AuditReportFinding[] {
 }
 
 function toggleRow(key: string) {
-  expandedKey.value = expandedKey.value === key ? null : key
+  if (expandedKeys.value.has(key)) expandedKeys.value.delete(key)
+  else expandedKeys.value.add(key)
 }
 
 /** issue 定位路径：`文件:起始行-结束行`（单行只保留起始行） */
@@ -156,13 +158,13 @@ function statusLabel(status: string): string {
         </div>
 
         <template v-for="row in filteredRows" :key="row.key">
-          <div class="table-row" :class="{ 'is-expanded': expandedKey === row.key }">
+          <div class="table-row" :class="{ 'is-expanded': expandedKeys.has(row.key) }">
             <span class="col col-main">
               <button
                 class="row-toggle"
-                :class="{ 'is-open': expandedKey === row.key }"
+                :class="{ 'is-open': expandedKeys.has(row.key) }"
                 type="button"
-                :aria-label="expandedKey === row.key ? '收起' : '展开'"
+                :aria-label="expandedKeys.has(row.key) ? '收起' : '展开'"
                 @click="toggleRow(row.key)"
               >
                 <span class="row-toggle-icon" v-html="chevronDownSvg"></span>
@@ -181,7 +183,7 @@ function statusLabel(status: string): string {
           </div>
 
           <!-- 展开：该检测项下每个 issue 一行（仅展示完整定位路径） -->
-          <div v-if="expandedKey === row.key" class="issue-list">
+          <div v-if="expandedKeys.has(row.key)" class="issue-list">
             <div
               v-for="(issue, index) in issuesOfRule(row)"
               :key="`${issue.rule_id}-${index}`"
@@ -236,7 +238,7 @@ function statusLabel(status: string): string {
 .filters {
   display: flex;
   flex-direction: column;
-  gap: 33px;
+  gap: 16px;
   margin-bottom: 24px;
 }
 
@@ -276,16 +278,25 @@ function statusLabel(status: string): string {
   line-height: 24px;
   letter-spacing: 0px;
   cursor: pointer;
-  transition: color 0.2s, background-color 0.2s, border-color 0.2s;
+  /* 过渡使用 OpenDesign 动效 token（对齐 OToggle：all var(--o-duration-s) var(--o-easing-standard)） */
+  transition: all var(--o-duration-s) var(--o-easing-standard);
 
+  /* 未选中 hover：底色加深一级（OToggle 规范：control2-light → control3-light），文字色不变 */
   @include hover {
-    color: var(--o-color-primary1);
+    background: var(--o-color-control3-light);
   }
 
+  /* 选中态（OToggle checked）：主色边框 + 主色文字 */
   &.is-active {
     border-color: var(--o-color-primary1);
     background: var(--o-color-fill2);
     color: var(--o-color-primary1);
+
+    /* 选中 hover：主色降一级（OToggle 规范：primary1 → primary2） */
+    @include hover {
+      border-color: var(--o-color-primary2);
+      color: var(--o-color-primary2);
+    }
   }
 }
 
@@ -296,7 +307,7 @@ function statusLabel(status: string): string {
 .table-head {
   display: flex;
   align-items: center;
-  height: 38px;
+  height: 48px;
   border-bottom: 1px solid var(--o-color-primary1);
   font-size: 14px;
   line-height: 22px;
@@ -308,7 +319,7 @@ function statusLabel(status: string): string {
 .table-row {
   display: flex;
   align-items: center;
-  height: 38px;
+  height: 48px;
   border-bottom: 1px solid var(--o-color-control4);
   font-size: 14px;
   line-height: 22px;
@@ -320,6 +331,12 @@ function statusLabel(status: string): string {
     background: var(--o-color-control3-light);
     border-bottom-color: transparent;
   }
+}
+
+/* 表格最底部（最后一行 / 展开明细的末行）不加分割线 */
+.table-row:last-child,
+.issue-list:last-child .issue-line:last-child {
+  border-bottom: none;
 }
 
 .col {
@@ -334,6 +351,11 @@ function statusLabel(status: string): string {
   flex-shrink: 0;
   gap: 8px;
   padding-left: 16px;
+}
+
+/* 表头「风险项」距表格左边界 48px（设计稿：与数据行检测项文字左对齐） */
+.table-head .col-main {
+  padding-left: 48px;
 }
 
 .col-remediation {
@@ -439,7 +461,7 @@ function statusLabel(status: string): string {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 38px;
+  height: 48px;
   /* 设计稿：代码行内容起点 = 行文本起点（48px）+ 13px */
   padding-left: 61px;
   border-bottom: 1px solid var(--o-color-control4);

@@ -645,6 +645,11 @@ onMounted(fetchContributors)
   color: var(--o-color-primary1);
 }
 
+[data-o-theme="e.dark"] .contributor-card:hover,
+.dark .contributor-card:hover {
+  box-shadow: none;
+}
+
 /* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */
 .card-head {
   display: flex;

@@ -386,7 +386,7 @@ onMounted(fetchContributors)
 .hero-title {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: 48px;
+  font-size: 40px;
   line-height: 64px;
   letter-spacing: 0px;
   text-align: left;
@@ -406,7 +406,7 @@ onMounted(fetchContributors)
 /* ===== 公共标题 ===== */
 .section-title {
   @include font-semibold;
-  font-size: 40px;
+  font-size: 32px;
   line-height: 56px;
   color: var(--o-color-info1);
   margin: 0 0 24px;

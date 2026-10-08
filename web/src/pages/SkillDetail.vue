@@ -53,11 +53,19 @@ function openExternalUrl() {
   oaReport('click_external_source', { module: 'skill_detail', skill_id: skill.value?.skill_id, host: (() => { try { return new URL(externalUrl.value).host } catch { return '' } })() })
 }
 
+/** 风险评估报告页链接：作为 OButton 的 href，使按钮渲染为 <a>，支持右击“在新标签页/新窗口打开” */
+const riskReportHref = computed(() =>
+  skill.value ? `/skills/${encodeURIComponent(skill.value.skill_id)}/report` : ''
+)
+
 /** 进入该 Skill 的风险评估报告页 */
-function goRiskReport() {
+function goRiskReport(e?: MouseEvent) {
   if (!skill.value) return
   oaReport('click_risk_report', { module: 'skill_detail', skill_id: skill.value.skill_id })
-  router.push(`/skills/${encodeURIComponent(skill.value.skill_id)}/report`)
+  // 修饰键 / 非左键点击交给浏览器原生 <a> 行为（新标签页、新窗口），不拦截
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0)) return
+  e?.preventDefault()
+  router.push(riskReportHref.value)
 }
 
 /** 「风险评估说明」浮层的查看详情：打开安全评估说明文档（docs/skillhub-security-audit.md） */
@@ -641,7 +649,15 @@ onMounted(async () => {
                 </div>
                 <span :class="['risk-tag', securityLevel.riskClass]">{{ securityLevel.label }}</span>
                 <p class="risk-desc">{{ securityLevel.desc }}</p>
-                <OButton class="risk-report-btn" color="primary" variant="text" size="large" round="pill" @click="goRiskReport">
+                <OButton
+                  class="risk-report-btn"
+                  color="primary"
+                  variant="text"
+                  size="large"
+                  round="pill"
+                  :href="riskReportHref"
+                  @click="goRiskReport"
+                >
                   查看风险评估报告
                 </OButton>
               </div>
@@ -1168,7 +1184,9 @@ onMounted(async () => {
 
 .risk-gauge-track {
   fill: none;
-  stroke: rgb(var(--o-brand-1));
+  /* 圆环底色：light 主题等同 brand-1（浅紫 246,238,253）保持设计稿效果；
+     dark 主题自动切换为 control2-light（深灰 43,43,47），避免深紫底环 */
+  stroke: var(--o-color-control2-light);
   stroke-width: 14;
 }
 

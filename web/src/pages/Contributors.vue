@@ -286,9 +286,9 @@ onMounted(fetchContributors)
           </OInput>
         </div>
       </div>
-      <!-- 加载态 -->
+      <!-- 加载态：内联 spinner，不使用全屏遮罩，避免整页变黑 -->
       <div v-if="loading" class="loading-container">
-        <OLoading v-model:visible="loading" size="medium" />
+        <OLoading :visible="true" size="medium" :mask="false" />
       </div>
       <!-- 错误态 -->
       <div v-else-if="error" class="empty-state">

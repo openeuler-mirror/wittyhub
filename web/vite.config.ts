@@ -18,10 +18,13 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5174,
+    port: 5173,
     host: '0.0.0.0',
     proxy: {
-      '/api': {
+      // `^/api/` (regex) instead of `/api`: a plain `/api` prefix would also
+      // match `/api-dsapi/...` (startsWith is checked in insertion order) and
+      // hijack the analytics proxy below into the backend, which 404s.
+      '^/api/': {
         target: process.env.VITE_API_URL || 'http://localhost:8081',
         changeOrigin: true
       },

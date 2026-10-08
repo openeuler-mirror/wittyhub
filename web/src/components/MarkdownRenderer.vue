@@ -65,6 +65,7 @@ export function parseDocOutline(source: string): OutlineItem[] {
 import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { createHighlighter, type Highlighter } from 'shiki'
+import { useRouter } from 'vue-router'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 
@@ -83,6 +84,29 @@ const emit = defineEmits<{
   /** 解析结果变化时回传章节大纲 */
   'update:outline': [outline: OutlineItem[]]
 }>()
+
+const router = useRouter()
+
+/**
+ * 正文内链拦截：Markdown 里的相对链接被改写为 `/docs/xxx` 的原生 <a>，
+ * 直接点击会触发浏览器整页导航（整页刷新）。此处改为交给 vue-router 处理，
+ * 与文档页左栏目保持一致的客户端跳转；外链/新标签打开等保持默认行为。
+ */
+function handleContentClick(e: MouseEvent) {
+  // 代码块复制按钮由同一容器承接
+  handleCodeClick(e)
+
+  const target = e.target as HTMLElement | null
+  const anchor = target?.closest('a') as HTMLAnchorElement | null
+  if (!anchor) return
+  // 仅拦截站内文档链接，外链（http/https/mailto 等）交给浏览器
+  const href = anchor.getAttribute('href') || ''
+  if (!href.startsWith('/docs/')) return
+  // Cmd/Ctrl/Shift/Alt 或中键等保留默认行为（新标签打开）
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+  e.preventDefault()
+  router.push(href)
+}
 
 /** 安全等级 emoji → 色点修饰类（配色与详情页/报告页保持一致） */
 const LEVEL_DOTS: Record<string, string> = {
@@ -193,7 +217,7 @@ onMounted(initHighlighter)
     class="markdown-body"
     :class="{ 'markdown-body--docs': variant === 'docs' }"
     v-html="parsed.html"
-    @click="handleCodeClick"
+    @click="handleContentClick"
   ></div>
 </template>
 

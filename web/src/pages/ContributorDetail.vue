@@ -148,7 +148,7 @@ watch(
 
         <!-- 加载态 -->
         <div v-if="loading" class="contributor-card loading-card">
-          <OLoading v-model:visible="loading" size="medium" />
+          <OLoading :visible="true" size="medium" :mask="false" />
         </div>
 
         <!-- 错误态 -->
@@ -232,7 +232,7 @@ watch(
 
       <!-- 加载态 -->
       <div v-if="loading" class="loading-container">
-        <OLoading v-model:visible="loading" size="medium" />
+        <OLoading :visible="true" size="medium" :mask="false" />
       </div>
 
       <!-- 空态 -->

@@ -382,7 +382,7 @@ onMounted(async () => {
 
         <!-- 加载态 -->
         <div v-if="loading" class="info-card-hero loading-card">
-          <OLoading v-model:visible="loading" size="medium" />
+          <OLoading :visible="true" size="medium" :mask="false" />
         </div>
 
         <!-- 错误态 -->

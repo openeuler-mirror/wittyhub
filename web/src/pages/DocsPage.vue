@@ -55,7 +55,7 @@ const outline = ref<OutlineItem[]>([])
 /** 滚动联动到的章节 id（当前章节） */
 const activeSectionId = ref('')
 
-/** 文档行折叠态：默认全部展开（与设计稿一致） */
+/** 文档行折叠态：默认仅当前文档展开、其余收起；手动切换后以手动状态为准 */
 const collapsedDocs = ref<Record<string, boolean>>({})
 
 /** 含子章节的章节行折叠态（key = `${doc}::${sectionId}`，章节 id 在各文档间重复，必须带文档名） */
@@ -118,8 +118,19 @@ function handleSectionClick(e: MouseEvent, doc: string, sectionId: string) {
   else router.push({ path: `/docs/${doc}`, hash })
 }
 
+/**
+ * 文档分组是否展开：
+ * - 手动切换过：以手动状态为准；
+ * - 否则仅当前文档展开，其余文档收起（避免不相关文档目录全部铺开）。
+ */
+function isDocExpanded(name: string) {
+  const manual = collapsedDocs.value[name]
+  if (manual !== undefined) return !manual
+  return name === docName.value
+}
+
 function toggleDoc(name: string) {
-  collapsedDocs.value[name] = !collapsedDocs.value[name]
+  collapsedDocs.value[name] = isDocExpanded(name)
 }
 
 /** 章节折叠态的存储 key：章节 id 在各文档间是重复的，必须带上文档名 */
@@ -234,11 +245,11 @@ watch(outline, async () => {
   scrollToHash()
 })
 
-// 切换文档时展开其所属文档行，并重新解析正文与联动位置
+// 切换文档时重置文档行折叠态：默认仅当前文档展开（不保留上一次的手动展开，避免目录越点越乱）
 watch(
   () => route.params.doc,
   async () => {
-    collapsedDocs.value[docName.value] = false
+    collapsedDocs.value = {}
     await loadDoc()
     await nextTick()
     measureActiveSection()
@@ -270,19 +281,19 @@ watch(
                 <button
                   type="button"
                   class="nav-toggle"
-                  :aria-expanded="!collapsedDocs[doc.name]"
-                  :aria-label="`${collapsedDocs[doc.name] ? '展开' : '收起'}${doc.title}的章节`"
+                  :aria-expanded="isDocExpanded(doc.name)"
+                  :aria-label="`${isDocExpanded(doc.name) ? '收起' : '展开'}${doc.title}的章节`"
                   @click="toggleDoc(doc.name)"
                 >
                   <span
                     class="nav-chevron"
-                    :class="{ 'is-expanded': !collapsedDocs[doc.name] }"
+                    :class="{ 'is-expanded': isDocExpanded(doc.name) }"
                     v-html="chevronDownSvg"
                   ></span>
                 </button>
               </div>
 
-              <div v-show="!collapsedDocs[doc.name]" class="nav-sections">
+              <div v-show="isDocExpanded(doc.name)" class="nav-sections">
                 <div v-for="section in doc.outline" :key="section.id" class="nav-section">
                   <div
                     class="nav-row nav-row--section"
@@ -346,7 +357,7 @@ watch(
         <div class="docs-main">
           <div class="docs-card">
             <div v-if="loading" class="state-block">
-              <OLoading v-model:visible="loading" size="medium" />
+              <OLoading :visible="true" size="medium" :mask="false" />
             </div>
 
             <div v-else-if="error" class="state-block">

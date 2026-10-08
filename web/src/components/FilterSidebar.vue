@@ -209,17 +209,17 @@ const hasActiveFilter = computed(() => {
 
 [data-o-theme="e.dark"] .filter-radio,
 .dark .filter-radio {
-  background-color: #242427;
+  background-color: var(--o-color-fill2);
 }
 
 [data-o-theme="e.dark"] .filter-radio-active::after,
 .dark .filter-radio-active::after {
-  background: #242427;
+  background: var(--o-color-fill2);
 }
 
 [data-o-theme="e.dark"] .filter-checkbox,
 .dark .filter-checkbox {
-  background-color: #242427;
+  background-color: var(--o-color-fill2);
 }
 
 .filter-item-label {
@@ -262,7 +262,7 @@ const hasActiveFilter = computed(() => {
 
 [data-o-theme="e.dark"] .filter-item:hover,
 .dark .filter-item:hover {
-  background: #2B2B2F;
+  background: var(--o-color-fill3);
 }
 
 .filter-item-active {

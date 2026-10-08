@@ -96,7 +96,7 @@ body {
 
 [data-o-theme="e.dark"] .card-hover:hover,
 .dark .card-hover:hover {
-  box-shadow: 0 2px 24px rgba(255, 255, 255, 0.12);
+  box-shadow: none;
 }
 
 .tag {

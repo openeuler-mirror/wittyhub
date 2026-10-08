@@ -386,7 +386,7 @@ onMounted(fetchContributors)
 .hero-title {
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: 48px;
+  font-size: 40px;
   line-height: 64px;
   letter-spacing: 0px;
   text-align: left;
@@ -406,7 +406,7 @@ onMounted(fetchContributors)
 /* ===== 公共标题 ===== */
 .section-title {
   @include font-semibold;
-  font-size: 40px;
+  font-size: 32px;
   line-height: 56px;
   color: var(--o-color-info1);
   margin: 0 0 24px;
@@ -427,9 +427,6 @@ onMounted(fetchContributors)
   background: var(--o-color-fill2);
   padding: 40px 32px var(--o-gap-6);
   overflow: hidden;
-  @include dark {
-    background: #1a1a1c;
-  }
 }
 .flow-card-bg {
   position: absolute;
@@ -470,9 +467,6 @@ onMounted(fetchContributors)
   :deep(svg) {
     width: 24px;
     height: 24px;
-  }
-  @include dark {
-    background: #242427;
   }
 }
 .flow-step-title {
@@ -515,7 +509,7 @@ onMounted(fetchContributors)
   border-top: 1px solid hsl(0, 0%, 0%);
   margin-top: 28px;
   @include dark {
-    border-top-color: hsl(0, 0%, 100%);
+    border-top-color: var(--o-color-control1);
   }
 }
 .flow-footer {
@@ -645,11 +639,17 @@ onMounted(fetchContributors)
   &:focus-visible {
     box-shadow: 0 0 0 2px var(--o-color-primary1);
   }
-  @include dark {
-    background: #1a1a1c;
-    border: 1px solid #2a2a2c;
-  }
 }
+
+.contributor-card:hover .contributor-name {
+  color: var(--o-color-primary1);
+}
+
+[data-o-theme="e.dark"] .contributor-card:hover,
+.dark .contributor-card:hover {
+  box-shadow: none;
+}
+
 /* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */
 .card-head {
   display: flex;
@@ -757,9 +757,6 @@ onMounted(fetchContributors)
   margin-top: 24px;
   padding-top: 12px;
   border-top: 1px solid var(--o-color-control4);
-  @include dark {
-    border-top-color: var(--o-color-control4);
-  }
 }
 .stat-text {
   @include font-base;

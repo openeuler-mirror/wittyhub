@@ -669,14 +669,25 @@ onMounted(async () => {
     </div>
 
     <!-- ========== 第三方链接跳转提示 ========== -->
-    <ODialog v-model:visible="externalDialogVisible" size="auto" :mask-close="false">
-      <template #header>跳转提示</template>
-      <p class="external-dialog-desc">您即将离开本站，前往第三方外部链接：</p>
-      <p class="external-dialog-url">{{ externalUrl }}</p>
+    <ODialog
+      v-model:visible="externalDialogVisible"
+      size="auto"
+      main-class="external-jump-dialog"
+      :mask-close="false"
+    >
+      <template #header>
+        <p class="external-title">即将跳转到外部网站</p>
+      </template>
+      <div class="external-content">
+        <p class="text">您将要访问的链接不属于openEuler社区，请关注您的账号安全。</p>
+        <div class="content-link">
+          <div class="external-link-href" :title="externalUrl">{{ externalUrl }}</div>
+        </div>
+      </div>
       <template #footer>
-        <div class="external-dialog-actions">
-          <OButton variant="outline" @click="externalDialogVisible = false">取消</OButton>
-          <OButton color="brand" variant="solid" @click="openExternalUrl">继续访问</OButton>
+        <div class="dlg-action">
+          <OButton color="primary" variant="solid" size="large" round="pill" @click="openExternalUrl">继续前往</OButton>
+          <OButton color="primary" variant="outline" size="large" round="pill" @click="externalDialogVisible = false">取消</OButton>
         </div>
       </template>
     </ODialog>
@@ -935,8 +946,8 @@ onMounted(async () => {
 
 .dark .version-btn,
 [data-o-theme="e.dark"] .version-btn {
-  background: #242427;
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--o-color-fill2);
+  border-color: var(--o-color-control4);
   color: var(--o-color-info1);
 }
 
@@ -1782,31 +1793,55 @@ onMounted(async () => {
 }
 
 /* ===== 第三方链接跳转提示对话框 ===== */
-.external-dialog-actions {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
+:global(.external-jump-dialog) {
+  --dlg-width: min(680px, calc(100vw - var(--o-gap-8)));
 }
 
-.external-dialog-desc {
-  margin: 0 0 8px;
+.dlg-action {
+  display: flex;
+  justify-content: center;
+  gap: var(--o-gap-4);
+}
+
+.external-title,
+.external-content .text {
+  margin: 0;
+}
+
+.external-title {
+  font-size: var(--o-r-font_size-h2);
+  line-height: var(--o-r-line_height-h2);
+  font-weight: var(--o-font_weight-regular);
+  letter-spacing: 0;
+  text-align: center;
+  color: var(--o-color-info1);
+}
+
+.external-content .text {
+  font-size: var(--o-r-font_size-text2);
+  line-height: var(--o-r-line_height-text2);
+}
+
+.external-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--o-gap-5);
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-text1);
-  line-height: var(--o-r-line_height-text1);
   letter-spacing: 0;
   text-align: left;
   color: var(--o-color-info1);
 }
 
-.external-dialog-url {
-  margin: 0;
-  font-family: var(--o-font_family-code);
-  font-size: var(--o-r-font_size-tip1);
-  line-height: var(--o-r-line_height-tip1);
+.content-link {
+  min-width: 0;
+}
+
+.external-link-href {
+  font-size: var(--o-r-font_size-text2);
+  line-height: var(--o-r-line_height-text2);
   letter-spacing: 0;
-  text-align: left;
-  color: var(--o-color-info3);
+  color: var(--o-color-info2);
   word-break: break-all;
 }
 </style>
@@ -1879,7 +1914,24 @@ onMounted(async () => {
   --popup-padding: 16px 16px 8px;
 }
 
-.risk-popover-title {
+[data-o-theme='e.dark'] .risk-popover {
+  --popup-bd: 1px solid var(--o-color-control4);
+  --popup-shadow: var(--o-shadow-2);
+}
+
+/* 指向三角：18x11 圆润弧形，与设计稿 指示三角 一致 */
+.risk-popover-anchor {
+  width: 18px !important;
+  height: 11px !important;
+  /* JS 以 bottom:0 定位锚点，向下位移一个高度使三角露出卡片外 */
+  transform: translate(-50%, calc(100% - 1px)) rotate(0deg) !important;
+  background-color: var(--popup-bg-color) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  clip-path: path('M 0 0 L 18 0 C 18 5.5 13.5 8.5 9 11 C 4.5 8.5 0 5.5 0 0 Z');
+}
+
+  .risk-popover-title {
   margin: 0 0 4px;
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);

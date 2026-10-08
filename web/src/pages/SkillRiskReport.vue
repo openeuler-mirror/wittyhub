@@ -48,14 +48,15 @@ const gaugeArc = computed(() => {
 })
 
 // 分类进度条：高 / 中 / 低风险色块长度与命中项数量严格成正比（百分比保留两位小数）
-// 四个分类卡片共用同一比例映射规则；无命中项时整条显示品牌底色
+// 四个分类卡片共用同一比例映射规则；无命中项时整条显示中性底色
+// （light 下 control2-light 即原 brand-1 浅蓝，dark 下自动切为深灰，避免藏青底条）
 function barSegments(stats: AuditReportStats | null | undefined): Array<{ color: string; width: string }> {
   const high = stats?.high ?? 0
   const medium = stats?.medium ?? 0
   const low = stats?.low ?? 0
   const total = stats?.total ?? 0
   if (total <= 0) {
-    return [{ color: 'rgb(var(--o-brand-1))', width: '100.00%' }]
+    return [{ color: 'var(--o-color-control2-light)', width: '100.00%' }]
   }
   const ratio = (count: number) => `${((count / total) * 100).toFixed(2)}%`
   return [
@@ -330,10 +331,13 @@ onMounted(async () => {
   }
 }
 
+/* 与 AppHeader 的 ContentWrapper 同宽（1488px + 24px padding），
+   保证报告标题/卡片与 header logo 左缘、右侧用户图标右缘对齐 */
 .container-wide {
   position: relative;
   max-width: 1488px;
   margin: 0 auto;
+  padding: 0 24px;
 }
 
 /* ===== 面包屑 ===== */
@@ -385,8 +389,8 @@ onMounted(async () => {
   margin: 0;
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: 48px;
-  line-height: 64px;
+  font-size: 40px;
+  line-height: 56px;
   letter-spacing: 0px;
   color: var(--o-color-info1);
 }
@@ -483,7 +487,9 @@ onMounted(async () => {
 
 .gauge-track {
   fill: none;
-  stroke: rgb(var(--o-brand-1));
+  /* 底环：light 主题等同 brand-1（浅蓝）保持设计稿效果；
+     dark 主题自动切换为 control2-light（深灰），避免深藏青底环 */
+  stroke: var(--o-color-control2-light);
   stroke-width: 16;
 }
 

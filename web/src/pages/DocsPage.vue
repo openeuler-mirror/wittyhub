@@ -2,25 +2,27 @@
 /**
  * 站内文档页（使用指南）：左侧「文档 + 章节」合并目录，右侧白色正文卡片 + 上下篇翻页。
  *
- * 版式对齐设计稿「使用指南示例」（1920 画布）：
- * - 页标题 48/64 semibold、副标题 18/26（80% 黑），内容区左右边距 64px；
+ * 版式对齐设计稿「使用指南示例」：
+ * - 页标题 48/64 semibold、副标题 18/26（80% 黑）；
+ *   内容区与 AppHeader/风险评估报告页同宽（1488px + 24px padding），
+ *   左缘对齐 header logo、右缘对齐用户图标；
  * - 左栏 272px：文档行与章节行均 40px 高（8px 上下内边距 + 24px 行高），
  *   逐级缩进 21/16px，引导线 #E0E2E6；当前章节为浅蓝底（#CEDBF5，圆角 4）
  *   加左侧 2×32 蓝色指示条，当前文档与当前章节的上级为蓝色 medium 文字；
  *   含子章节的分组默认仅「当前章节所在分组」展开（设计稿形态），可手动折叠/展开；
+ *   折叠箭头置于行首（文字左侧），使用组件库 OIconChevronDown（24px 令牌），收起朝下、展开朝上；
  * - 右栏白卡：宽至 1412px、圆角 8、内边距 24/40/32，正文排版见
  *   MarkdownRenderer 的 docs 变体，正文下方 1px 分割线 + 上一篇/下一篇；
  * - 文档顺序即左栏顺序与翻页顺序，章节锚点 id 由正文渲染组件回传（doc-section-N / N-M）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { OLoading } from '@opensig/opendesign'
+import { OIcon, OIconChevronDown, OLoading } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 import MarkdownRenderer, { parseDocOutline, type OutlineItem } from '@/components/MarkdownRenderer.vue'
 import { useAppStore } from '@/stores/app'
-import heroBgLight from '@/assets/bg/docs-hero-texture.png'
+import heroBgLight from '@/assets/bg/hero-top-texture.png'
 import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
-import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
 
 const route = useRoute()
 const router = useRouter()
@@ -260,7 +262,7 @@ watch(
 
 <template>
   <div class="docs-page">
-    <!-- 顶部纹理：设计稿「使用指南示例」页头下方底纹（椭圆 + 波纹 + 左侧光带，1x 1920x183） -->
+    <!-- 顶部纹理：与贡献页面一致——同一套 hero 纹理（light/dark 双图，object-cover 绝对定位铺满） -->
     <div class="hero-texture">
       <img :src="appStore.isDark ? heroBgDark : heroBgLight" alt="" />
     </div>
@@ -275,9 +277,6 @@ watch(
           <nav class="sidebar-nav">
             <div v-for="doc in docs" :key="doc.name" class="nav-doc">
               <div class="nav-row nav-row--doc" :class="{ 'is-active': doc.name === docName }">
-                <router-link class="nav-doc-link" :to="`/docs/${doc.name}`">
-                  {{ doc.title }}
-                </router-link>
                 <button
                   type="button"
                   class="nav-toggle"
@@ -285,12 +284,15 @@ watch(
                   :aria-label="`${isDocExpanded(doc.name) ? '收起' : '展开'}${doc.title}的章节`"
                   @click="toggleDoc(doc.name)"
                 >
-                  <span
+                  <OIcon
                     class="nav-chevron"
                     :class="{ 'is-expanded': isDocExpanded(doc.name) }"
-                    v-html="chevronDownSvg"
-                  ></span>
+                    :icon="OIconChevronDown"
+                  />
                 </button>
+                <router-link class="nav-doc-link" :to="`/docs/${doc.name}`">
+                  {{ doc.title }}
+                </router-link>
               </div>
 
               <div v-show="isDocExpanded(doc.name)" class="nav-sections">
@@ -302,13 +304,6 @@ watch(
                       'is-current': isCurrentSection(doc.name, section.id),
                     }"
                   >
-                    <a
-                      class="nav-link"
-                      :href="`/docs/${doc.name}#${section.id}`"
-                      @click="handleSectionClick($event, doc.name, section.id)"
-                    >
-                      {{ section.text }}
-                    </a>
                     <button
                       v-if="section.children.length"
                       type="button"
@@ -317,12 +312,20 @@ watch(
                       :aria-label="`${isSectionExpanded(doc.name, section.id) ? '收起' : '展开'}${section.text}的小节`"
                       @click="toggleSection(doc.name, section.id)"
                     >
-                      <span
+                      <OIcon
                         class="nav-chevron"
                         :class="{ 'is-expanded': isSectionExpanded(doc.name, section.id) }"
-                        v-html="chevronDownSvg"
-                      ></span>
+                        :icon="OIconChevronDown"
+                      />
                     </button>
+                    <span v-else class="nav-toggle-spacer" aria-hidden="true"></span>
+                    <a
+                      class="nav-link"
+                      :href="`/docs/${doc.name}#${section.id}`"
+                      @click="handleSectionClick($event, doc.name, section.id)"
+                    >
+                      {{ section.text }}
+                    </a>
                   </div>
 
                   <div
@@ -429,13 +432,13 @@ $guide-color: #e0e2e6;
   background: #f4f5f7;
 }
 
-/* ===== 顶部纹理：设计稿页头下方底纹 1920x183（1x），等比例铺满宽度 ===== */
+/* ===== 顶部纹理：与贡献页面一致，hero 纹理 object-cover 绝对定位铺满（light/dark 各一张） ===== */
 .hero-texture {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  /* 设计稿底纹可见区高 183px（页头 72px 下方至 y=255） */
+  /* 可见区高 183px：覆盖页头下方至标题（h1）底边 */
   height: 183px;
   overflow: hidden;
   pointer-events: none;
@@ -443,17 +446,19 @@ $guide-color: #e0e2e6;
   img {
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
+    object-fit: cover;
   }
 }
 
-/* 设计稿：内容区左右边距 64px（1920 画布），超宽屏下整体居中 */
+/* 与 AppHeader 的 ContentWrapper 同宽（1488px + 24px padding）、与风险报告页一致：
+   左缘对齐 header logo、右缘对齐右上角用户图标，内容不超出页头宽度 */
 .docs-container {
   position: relative;
   box-sizing: border-box;
-  max-width: 1920px;
+  max-width: 1488px;
   margin: 0 auto;
-  padding: 0 64px;
+  padding: 0 24px;
 }
 
 /* ===== 页标题：48/64 semibold，距页头 48px；副标题 18/26（80% 黑） =====
@@ -590,7 +595,7 @@ $guide-color: #e0e2e6;
   border-left-color: var(--o-color-control4);
 }
 
-/* 折叠箭头：收起朝下，展开朝上；距行右 4px（设计稿） */
+/* 折叠箭头：置于行首（文字左侧），收起朝下、展开朝上；颜色 info2 → hover primary1 */
 .nav-toggle {
   display: inline-flex;
   flex-shrink: 0;
@@ -598,6 +603,7 @@ $guide-color: #e0e2e6;
   justify-content: center;
   width: 24px;
   height: 24px;
+  margin-right: var(--o-gap-2);
   padding: 0;
   border: none;
   background: transparent;
@@ -610,17 +616,21 @@ $guide-color: #e0e2e6;
   }
 }
 
+/* 无子章节的行占位，保持同组文字左缘对齐 */
+.nav-toggle-spacer {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-right: var(--o-gap-2);
+}
+
+/* 组件库图标 OIconChevronDown：尺寸用 icon 令牌，旋转过渡用组件规范时长/缓动令牌 */
 .nav-chevron {
-  display: inline-flex;
-  transition: transform 0.15s;
+  --icon-size: var(--o-icon_size-m);
+  transition: transform var(--o-duration-m2) var(--o-easing-standard);
 
   &.is-expanded {
     transform: rotate(180deg);
-  }
-
-  :deep(svg) {
-    width: 24px;
-    height: 24px;
   }
 }
 

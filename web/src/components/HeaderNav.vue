@@ -44,7 +44,7 @@ function isActive(item: NavItem): boolean {
         :class="['nav-tab', { active: isActive(item) }]"
         color="normal"
         :hover-underline="false"
-      >{{ item.label }}</OLink>
+      ><span class="nav-tab-label">{{ item.label }}</span></OLink>
     </nav>
 
     <div class="header-tool">
@@ -96,6 +96,11 @@ function isActive(item: NavItem): boolean {
     color: var(--o-color-info1);
     border-bottom-color: var(--o-color-primary1);
   }
+}
+
+.nav-tab-label {
+  display: inline-block;
+  transform: translateY(2px);
 }
 
 .header-tool {

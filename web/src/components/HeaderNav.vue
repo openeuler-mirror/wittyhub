@@ -2,7 +2,6 @@
 import { useRoute } from 'vue-router'
 import { OLink } from '@opensig/opendesign'
 import HeaderTheme from './HeaderTheme.vue'
-import HeaderLogin from './HeaderLogin.vue'
 
 const route = useRoute()
 
@@ -50,7 +49,6 @@ function isActive(item: NavItem): boolean {
 
     <div class="header-tool">
       <HeaderTheme />
-      <HeaderLogin />
     </div>
   </div>
 </template>

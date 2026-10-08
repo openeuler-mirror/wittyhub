@@ -357,7 +357,7 @@ watch(
         <div class="docs-main">
           <div class="docs-card">
             <div v-if="loading" class="state-block">
-              <OLoading v-model:visible="loading" size="medium" />
+              <OLoading :visible="true" size="medium" :mask="false" />
             </div>
 
             <div v-else-if="error" class="state-block">

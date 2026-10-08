@@ -124,6 +124,10 @@ function truncate(text: string | null, length: number): string {
   margin-right: 12px;
 }
 
+.card:hover .skill-card-title .title-text {
+  color: var(--o-color-primary1);
+}
+
 .skill-card-title .tag {
   height: 24px;
   padding-top: 3px;

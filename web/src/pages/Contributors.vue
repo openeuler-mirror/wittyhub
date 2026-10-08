@@ -640,6 +640,11 @@ onMounted(fetchContributors)
     box-shadow: 0 0 0 2px var(--o-color-primary1);
   }
 }
+
+.contributor-card:hover .contributor-name {
+  color: var(--o-color-primary1);
+}
+
 /* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */
 .card-head {
   display: flex;

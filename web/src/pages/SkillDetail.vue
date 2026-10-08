@@ -912,8 +912,8 @@ onMounted(async () => {
 
 .dark .version-btn,
 [data-o-theme="e.dark"] .version-btn {
-  background: #242427;
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--o-color-fill2);
+  border-color: var(--o-color-control4);
   color: var(--o-color-info1);
 }
 
@@ -1875,8 +1875,8 @@ onMounted(async () => {
 }
 
 [data-o-theme='e.dark'] .risk-popover {
-  --popup-bd: 1px solid rgba(255, 255, 255, 0.15);
-  --popup-shadow: 0 2px 24px rgba(255, 255, 255, 0.12);
+  --popup-bd: 1px solid var(--o-color-control4);
+  --popup-shadow: var(--o-shadow-2);
 }
 
 /* 指向三角：18x11 圆润弧形，与设计稿 指示三角 一致 */

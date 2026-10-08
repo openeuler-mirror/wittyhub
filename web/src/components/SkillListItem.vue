@@ -114,7 +114,7 @@ function truncate(text: string | null, length: number): string {
 
 .dark .tag-gray,
 [data-o-theme="e.dark"] .tag-gray {
-  background: #242427;
+  background: var(--o-color-fill2);
 }
 
 .tag-category {

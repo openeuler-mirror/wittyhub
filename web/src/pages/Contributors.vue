@@ -427,9 +427,6 @@ onMounted(fetchContributors)
   background: var(--o-color-fill2);
   padding: 40px 32px var(--o-gap-6);
   overflow: hidden;
-  @include dark {
-    background: #1a1a1c;
-  }
 }
 .flow-card-bg {
   position: absolute;
@@ -470,9 +467,6 @@ onMounted(fetchContributors)
   :deep(svg) {
     width: 24px;
     height: 24px;
-  }
-  @include dark {
-    background: #242427;
   }
 }
 .flow-step-title {
@@ -515,7 +509,7 @@ onMounted(fetchContributors)
   border-top: 1px solid hsl(0, 0%, 0%);
   margin-top: 28px;
   @include dark {
-    border-top-color: hsl(0, 0%, 100%);
+    border-top-color: var(--o-color-control1);
   }
 }
 .flow-footer {
@@ -645,10 +639,6 @@ onMounted(fetchContributors)
   &:focus-visible {
     box-shadow: 0 0 0 2px var(--o-color-primary1);
   }
-  @include dark {
-    background: #1a1a1c;
-    border: 1px solid #2a2a2c;
-  }
 }
 /* 头部行：头像 30×30 + 8px 间距 + 名称，标签右对齐（设计稿容器 162 高 30） */
 .card-head {
@@ -757,9 +747,6 @@ onMounted(fetchContributors)
   margin-top: 24px;
   padding-top: 12px;
   border-top: 1px solid var(--o-color-control4);
-  @include dark {
-    border-top-color: var(--o-color-control4);
-  }
 }
 .stat-text {
   @include font-base;

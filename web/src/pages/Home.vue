@@ -784,7 +784,7 @@ function onPaginationChange(
 
 [data-o-theme="e.dark"] .submit-banner,
 .dark .submit-banner {
-  background: #1a1a1c;
+  background: var(--o-color-fill2);
 }
 
 /* OTab button variant: 排序切换 (热门/最新) */

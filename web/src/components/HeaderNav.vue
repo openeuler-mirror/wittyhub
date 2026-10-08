@@ -18,7 +18,7 @@ const navItems: NavItem[] = [
   { label: 'Skills', to: '/', match: ['/', '/skills'] },
   { label: '贡献', to: '/contributors', match: ['/contributors'] },
   {
-    label: '文档',
+    label: '指南',
     to: '/docs/skillhub-introduction',
     match: ['/docs'],
   },

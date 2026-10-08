@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import ContentWrapper from './ContentWrapper.vue'
 import HeaderNav from './HeaderNav.vue'
@@ -23,7 +24,7 @@ const appStore = useAppStore()
         />
       </a>
       <div class="logo-divider"></div>
-      <a href="/" class="skillhub-title">SkillHub</a>
+      <RouterLink to="/" class="skillhub-title">SkillHub</RouterLink>
 
       <!-- 导航 -->
       <HeaderNav />

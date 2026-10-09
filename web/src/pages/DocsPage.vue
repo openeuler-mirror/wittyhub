@@ -468,7 +468,7 @@ $guide-color: #e0e2e6;
   padding-top: 48px;
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: var(--o-font_size-display2);
+  font-size: 40px;
   line-height: 64px;
   letter-spacing: 0px;
   color: var(--o-color-info1);

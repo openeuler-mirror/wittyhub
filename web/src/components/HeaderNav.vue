@@ -93,7 +93,7 @@ function isActive(item: NavItem): boolean {
   }
 
   &.active {
-    color: var(--o-color-info1);
+    color: var(--o-color-primary1);
     border-bottom-color: var(--o-color-primary1);
   }
 }

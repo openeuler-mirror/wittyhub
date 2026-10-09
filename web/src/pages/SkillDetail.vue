@@ -1914,24 +1914,7 @@ onMounted(async () => {
   --popup-padding: 16px 16px 8px;
 }
 
-[data-o-theme='e.dark'] .risk-popover {
-  --popup-bd: 1px solid var(--o-color-control4);
-  --popup-shadow: var(--o-shadow-2);
-}
-
-/* 指向三角：18x11 圆润弧形，与设计稿 指示三角 一致 */
-.risk-popover-anchor {
-  width: 18px !important;
-  height: 11px !important;
-  /* JS 以 bottom:0 定位锚点，向下位移一个高度使三角露出卡片外 */
-  transform: translate(-50%, calc(100% - 1px)) rotate(0deg) !important;
-  background-color: var(--popup-bg-color) !important;
-  border: none !important;
-  border-radius: 0 !important;
-  clip-path: path('M 0 0 L 18 0 C 18 5.5 13.5 8.5 9 11 C 4.5 8.5 0 5.5 0 0 Z');
-}
-
-  .risk-popover-title {
+.risk-popover-title {
   margin: 0 0 4px;
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);

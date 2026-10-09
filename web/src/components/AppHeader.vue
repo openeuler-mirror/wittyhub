@@ -107,13 +107,6 @@ const appStore = useAppStore()
   flex-shrink: 0;
   margin-right: var(--o-gap-7);
 
-  @include respond-to('laptop') {
-    margin-right: 28px;
-  }
-  @include respond-to('pad_h') {
-    margin-right: var(--o-gap-2);
-  }
-
   @include hover {
     color: var(--o-color-primary1);
   }

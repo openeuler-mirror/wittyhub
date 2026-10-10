@@ -513,12 +513,15 @@ async def get_contributor_skills(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort_by: Annotated[str, Query(pattern="^(updated_at|download_count)$")] = "download_count",
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """获取 contributor（source + author）名下全部可见 skills 的聚合视图。
 
     platform/description/repo_url 取自 contributors 表（扫描时写入），
     skill 列表 + total_downloads 从 skills 表实时查询。
+    keyword 按 name/description/tags 过滤（服务端分页），total 随之变化；
+    skill_count / total_downloads 保持全量口径不随搜索变化。
     """
     contributor_repo = ContributorRepository(db)
     contributor = await contributor_repo.get(source, author)
@@ -526,10 +529,12 @@ async def get_contributor_skills(
         raise HTTPException(status_code=404, detail="Contributor not found")
 
     skill_repo = SkillRepository(db)
-    skills, total, total_downloads, _ = await skill_repo.get_contributor_skills(
-        source, author, skip=skip, limit=limit, sort_by=sort_by
+    skills, total, total_downloads, _, skill_count = (
+        await skill_repo.get_contributor_skills(
+            source, author, skip=skip, limit=limit, sort_by=sort_by, keyword=keyword
+        )
     )
-    if not total:
+    if not skill_count:
         raise HTTPException(status_code=404, detail="Contributor has no visible skills")
 
     return ContributorSkillsResponse(
@@ -540,7 +545,7 @@ async def get_contributor_skills(
         description=contributor.description,
         git_profile=contributor.git_profile,
         website=contributor.website,
-        skill_count=total,
+        skill_count=skill_count,
         total_downloads=total_downloads,
         skills=[skill_to_response(s) for s in skills],
         total=total,

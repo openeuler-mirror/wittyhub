@@ -125,6 +125,33 @@ class SkillRepoRepository:
             raise ValueError(f"Skill repo not found: {repository_id}")
         return repository
 
+    async def reconcile_skill_nums(self, commit: bool = True) -> int:
+        """按 skills 表实际行数重算全部 skill_repos.skill_num，返回修正行数。
+
+        口径与扫描写入的 ``unique_skill_count`` 一致（仓库下 skill 行数）。
+        仅更新当前值不等于实际值的行，天然幂等；用于扫描落库后的
+        统计自愈（手工删数据、历史漂移等）。
+        """
+        skill_count = (
+            select(func.count(Skill.id))
+            .where(Skill.skill_repo_id == SkillRepoModel.id)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(SkillRepoModel)
+            .values(skill_num=skill_count)
+            .where(
+                or_(
+                    SkillRepoModel.skill_num.is_(None),
+                    SkillRepoModel.skill_num != skill_count,
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if commit:
+            await self.session.commit()
+        return int(result.rowcount or 0)
+
     async def delete_skill_repository(self, repository_id: str | uuid.UUID) -> None:
         """删除仓库及其级联数据。
 
@@ -743,12 +770,15 @@ class SkillRepository:
         skip: int = 0,
         limit: int = 20,
         sort_by: str = "download_count",
-    ) -> tuple[List[Skill], int, int, str | None]:
+        keyword: str | None = None,
+    ) -> tuple[List[Skill], int, int, str | None, int]:
         """查询 contributor（source + author）下的全部可见 skills 及聚合统计。
 
         Returns:
-            (skills, total, total_downloads, platform)：
-            total 为 0 表示该 contributor 名下没有可见 skill（路由层转 404）。
+            (skills, total, total_downloads, platform, skill_count)：
+            total 受 keyword 过滤（分页用）；skill_count / total_downloads 始终
+            为全量口径（hero 统计卡展示，不随搜索变化）。skill_count 为 0
+            表示该 contributor 名下没有可见 skill（路由层转 404）。
         """
         base_filter = and_(
             Skill.source == source,
@@ -763,12 +793,31 @@ class SkillRepository:
                 func.min(Skill.platform),
             ).where(base_filter)
         )
-        total, total_downloads, platform = stats_result.one()
+        skill_count, total_downloads, platform = stats_result.one()
 
-        if not total:
-            return [], 0, 0, None
+        if not skill_count:
+            return [], 0, 0, None, 0
 
-        query = select(Skill).where(base_filter)
+        total = int(skill_count)
+        query_filter: Any = base_filter
+        if keyword and keyword.strip():
+            kw = f"%{keyword.strip()}%"
+            query_filter = and_(
+                base_filter,
+                or_(
+                    Skill.name.ilike(kw),
+                    Skill.description.ilike(kw),
+                    func.array_to_string(Skill.tags, " ").ilike(kw),
+                ),
+            )
+            total = int(
+                (await self.session.execute(
+                    select(func.count(Skill.id)).where(query_filter)
+                )).scalar()
+                or 0
+            )
+
+        query = select(Skill).where(query_filter)
         if sort_by == "download_count":
             order_by = [desc(Skill.download_count), desc(Skill.updated_at), desc(Skill.created_at)]
         else:
@@ -777,7 +826,7 @@ class SkillRepository:
 
         result = await self.session.execute(query)
         skills = list(result.scalars().all())
-        return skills, total, int(total_downloads), platform
+        return skills, total, int(total_downloads), platform, int(skill_count)
 
     async def update(self, skill_id: str, update_data: dict[str, Any]) -> Skill | None:
         existing = await self.get_by_skill_id(skill_id)
@@ -1097,6 +1146,38 @@ class ContributorRepository:
         )
         return int(result.scalar() or 0)
 
+    async def reconcile_skill_counts(self, commit: bool = True) -> int:
+        """按 skills 表可见口径重算全部 contributors.skill_count，返回修正行数。
+
+        可见性规则与 ``count_skills`` / ``get_contributor_skills`` 一致
+        （risk_score 非空），与扫描 upsert 时的聚合口径相同，不会在
+        扫描与自愈之间来回翻转。仅更新当前值不等于聚合值的行，
+        天然幂等；用于扫描落库后的统计自愈（手工删数据、历史漂移等）。
+        """
+        visible_count = (
+            select(func.count(Skill.id))
+            .where(
+                Skill.source == Contributor.source,
+                Skill.author == Contributor.author,
+                Skill.risk_score.is_not(None),
+            )
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(Contributor)
+            .values(skill_count=visible_count)
+            .where(
+                or_(
+                    Contributor.skill_count.is_(None),
+                    Contributor.skill_count != visible_count,
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if commit:
+            await self.session.commit()
+        return int(result.rowcount or 0)
+
     async def list(
         self,
         *,
@@ -1117,11 +1198,16 @@ class ContributorRepository:
         reflect the full search scope).
 
         ``grand_total`` is the full-scope count under the current keyword only
-        (ignoring ``platform``); used by the "全部" tab so its count stays
+        (ignoring ``platform``); used for the "全部" tab so its count stays
         stable across platform switches.
+
+        Contributors with ``skill_count`` = 0 (no visible skill under their
+        name, e.g. after low-value cleanup or audit-pending skills) are
+        excluded from rows and all counts — they carry no browsable content.
         """
-        base_filter: list[Any] = []
-        count_filter: list[Any] = []
+        visible = Contributor.skill_count > 0
+        base_filter: list[Any] = [visible]
+        count_filter: list[Any] = [visible]
         if platform:
             base_filter.append(Contributor.platform == platform)
         if keyword:

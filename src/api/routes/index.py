@@ -24,6 +24,8 @@ async def search(
     security_level: Annotated[str | None, Query(max_length=500)] = None,
     mode: str = Query("hybrid", pattern="^(text|semantic|hybrid)$"),
     scope: str = Query("summary", pattern="^(summary|full)$"),
+    sort_by: Annotated[str, Query(pattern="^(relevance|updated_at|download_count)$")] = "relevance",
+    sort_period: Annotated[str | None, Query(pattern="^(week|month)$")] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     tag_list = tags.split(",") if tags else None
@@ -68,6 +70,8 @@ async def search(
         scope=scope,
         translated_query=translated_query,
         translated_embedding=translated_embedding,
+        sort_by=sort_by,
+        sort_period=sort_period,
     )
 
     return results

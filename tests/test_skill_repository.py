@@ -21,6 +21,16 @@ def _git(repository: Path, *args: str, env: dict[str, str] | None = None) -> str
     return result.stdout.strip()
 
 
+# is_low_value_skill_content 会过滤正文 <100 字符的 SKILL.md，
+# 所有扫描类测试夹具统一复用这段合法正文。
+VALID_SKILL_BODY = (
+    "# Skill\n\n## Overview\n"
+    "This skill guides the user through a common developer workflow.\n"
+    "It covers prerequisites, step-by-step instructions, and examples\n"
+    "that can be applied directly to real projects without extra setup."
+)
+
+
 class TestSkillRepositoryUnit:
     def test_models_package_exports_skill_repo_types(self):
         from src.models import SkillRepoModel, SkillRepoRepository
@@ -72,6 +82,100 @@ class TestSkillRepositoryUnit:
         explicit_statement = session.execute.await_args_list[1].args[0]
         explicit_sql = str(explicit_statement.compile(dialect=postgresql.dialect()))
         assert "updated_at=" in explicit_sql
+
+    @pytest.mark.asyncio
+    async def test_store_skills_updates_existing_skill_and_updated_at(self):
+        from sqlalchemy.dialects import postgresql
+
+        from src.models.repository import SkillRepository
+
+        repo_id = uuid.uuid4()
+        skill_id = "github:acme/example/example-skill"
+        existing = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            commit_id="old-commit",
+            tree_hash="old-tree",
+            download_count=12,
+        )
+        scanned = SimpleNamespace(
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            name="example-skill",
+            description="Updated description",
+            version=None,
+            commit_id="new-commit",
+            tree_hash="new-tree",
+            author="acme",
+            source="github",
+            source_url="https://github.com/acme/example",
+            repo_url="https://github.com/acme/example",
+            category="Development",
+            tags=["example"],
+            platform="personal",
+            extra_metadata={},
+            content="# Updated",
+            risk_score=10,
+            rating=None,
+        )
+        existing_result = MagicMock()
+        existing_result.scalars.return_value.all.return_value = [existing]
+        versions_result = MagicMock()
+        versions_result.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        session.execute.side_effect = [existing_result, MagicMock(), versions_result]
+
+        await SkillRepository(session).store_skills_and_versions(
+            repo_id,
+            [scanned],
+            [],
+            commit=False,
+        )
+
+        update_statement = session.execute.await_args_list[1].args[0]
+        compiled = update_statement.compile(dialect=postgresql.dialect())
+        assert "UPDATE skills SET" in str(compiled)
+        assert "updated_at=" in str(compiled)
+        assert compiled.params["download_count"] == 12
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_skips_unchanged_existing_skill(self):
+        from src.models.repository import SkillRepository
+
+        repo_id = uuid.uuid4()
+        skill_id = "github:acme/example/example-skill"
+        existing = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            commit_id="old-commit",
+            tree_hash="same-tree",
+            download_count=12,
+        )
+        scanned = SimpleNamespace(
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            commit_id="new-repo-commit",
+            tree_hash="same-tree",
+        )
+        existing_result = MagicMock()
+        existing_result.scalars.return_value.all.return_value = [existing]
+        versions_result = MagicMock()
+        versions_result.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        session.execute.side_effect = [existing_result, versions_result]
+
+        await SkillRepository(session).store_skills_and_versions(
+            repo_id,
+            [scanned],
+            [],
+            commit=False,
+        )
+
+        assert session.execute.await_count == 2
+        session.add.assert_not_called()
 
     def test_list_with_skill_id_prefix_filters_by_repo(self):
         from sqlalchemy import select
@@ -239,6 +343,20 @@ class TestSkillRepositoryUnit:
             )
         )
 
+        assert request.platform == "community"
+
+    def test_single_url_discover_normalizes_atomgit_url(self):
+        from skillcrawler.main import _build_single_url_discover_request
+
+        request = _build_single_url_discover_request(
+            SimpleNamespace(
+                url="https://atomgit.com/openeuler/mcp-servers.git",
+                branch=None,
+                platform=None,
+            )
+        )
+
+        assert request.url == "https://gitcode.com/openeuler/mcp-servers"
         assert request.platform == "community"
 
     def test_single_url_discover_explicit_platform_wins(self):
@@ -436,7 +554,7 @@ repositories:
         skill_dir = repository / "skills" / "a"
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
-        skill_file.write_text("# Skill A\n", encoding="utf-8")
+        skill_file.write_text(f"{VALID_SKILL_BODY}\n", encoding="utf-8")
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill a")
         skill_dir_tree_hash = _git(repository, "rev-parse", "HEAD:skills/a")
@@ -491,7 +609,7 @@ repositories:
         tagged_dir = repository / "skill"
         tagged_dir.mkdir(parents=True)
         (tagged_dir / "SKILL.md").write_text(
-            "---\nname: tagged-skill\n---\n# Tagged Skill\n", encoding="utf-8",
+            f"---\nname: tagged-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add tagged skill")
@@ -507,7 +625,7 @@ repositories:
         head_dir = repository / "skills" / "skill-1"
         head_dir.mkdir(parents=True)
         (head_dir / "SKILL.md").write_text(
-            "---\nname: head-skill\n---\n# Head Skill\n", encoding="utf-8",
+            f"---\nname: head-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add head skill")
@@ -569,7 +687,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: dup-skill\n---\n# Dup Skill\n", encoding="utf-8",
+            f"---\nname: dup-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -632,7 +750,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: stable-skill\n---\n# Stable Skill\n", encoding="utf-8",
+            f"---\nname: stable-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -711,7 +829,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: versioned-skill\nversion: 1.2.3\n---\n# V1\n",
+            f"---\nname: versioned-skill\nversion: 1.2.3\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -720,7 +838,7 @@ repositories:
         _git(repository, "tag", "v1")
 
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: versioned-skill\n---\n# V2\n", encoding="utf-8",
+            f"---\nname: versioned-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "drop metadata version")
@@ -785,7 +903,7 @@ repositories:
         skill1_dir = repository / "skills" / "skill-1"
         skill1_dir.mkdir(parents=True)
         (skill1_dir / "SKILL.md").write_text(
-            "---\nname: plain-skill\n---\n# Plain\n", encoding="utf-8",
+            f"---\nname: plain-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill-1")
@@ -796,7 +914,7 @@ repositories:
         skill3_dir = repository / "skills" / "skill-3"
         skill3_dir.mkdir(parents=True)
         (skill3_dir / "SKILL.md").write_text(
-            "---\nname: self-versioned-skill\n---\n# V2 content\n",
+            f"---\nname: self-versioned-skill\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -806,7 +924,7 @@ repositories:
 
         # commit 3 (HEAD): skill-3 声明 version: 1.0.1
         (skill3_dir / "SKILL.md").write_text(
-            "---\nname: self-versioned-skill\nversion: 1.0.1\n---\n# V3 content\n",
+            f"---\nname: self-versioned-skill\nversion: 1.0.1\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -883,7 +1001,7 @@ repositories:
             "---\n"
             "name: my-skill\n"
             "category: Engineering and Compilation\n"
-            "---\n# My Skill\n",
+            f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -939,7 +1057,7 @@ repositories:
             "---\n"
             "name: my-skill\n"
             "category: Some Random Category\n"
-            "---\n# My Skill\n",
+            f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -989,7 +1107,9 @@ repositories:
         skill_dir = repository / "skills" / "production-skill"
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
-        skill_file.write_text("---\nname: example\n---\n# Example\n", encoding="utf-8")
+        skill_file.write_text(
+            f"---\nname: example\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+        )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
         skill_commit = _git(repository, "rev-parse", "HEAD")
@@ -1627,6 +1747,43 @@ repositories:
         assert response.name == "test-skill"
 
 
+class TestReconcileSkillStatistics:
+    """扫描落库后的统计自愈：contributors.skill_count / skill_repos.skill_num。"""
+
+    def _make_manager(self, repo_repository, contributor_repository):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        return SkillManager(MagicMock(), repo_repository, contributor_repository)
+
+    async def test_reconcile_calls_both_repositories(self):
+        contributor_repo = AsyncMock()
+        contributor_repo.reconcile_skill_counts.return_value = 2
+        repo_repo = AsyncMock()
+        repo_repo.reconcile_skill_nums.return_value = 1
+        manager = self._make_manager(repo_repo, contributor_repo)
+
+        await manager._reconcile_skill_statistics()
+
+        contributor_repo.reconcile_skill_counts.assert_awaited_once()
+        repo_repo.reconcile_skill_nums.assert_awaited_once()
+
+    async def test_reconcile_skips_contributors_when_repository_missing(self):
+        repo_repo = AsyncMock()
+        manager = self._make_manager(repo_repo, None)
+
+        await manager._reconcile_skill_statistics()
+
+        repo_repo.reconcile_skill_nums.assert_awaited_once()
+
+    async def test_reconcile_swallows_errors(self):
+        repo_repo = AsyncMock()
+        repo_repo.reconcile_skill_nums.side_effect = RuntimeError("boom")
+        manager = self._make_manager(repo_repo, None)
+
+        # 不应抛异常：扫描结果已提交，统计自愈失败只告警
+        await manager._reconcile_skill_statistics()
+
+
 class TestExtractDeclaredVersion:
     """frontmatter version 声明位置兼容：顶层 version 与 metadata.version 嵌套。"""
 
@@ -2023,6 +2180,7 @@ class TestConfig:
             settings = get_settings()
             assert settings is not None
             assert "postgresql" in settings.postgres.url
+            assert settings.postgres.sync_url.startswith("postgresql+psycopg2://")
 
 
 class TestAPIRoutes:

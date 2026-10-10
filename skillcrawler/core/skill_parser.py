@@ -252,18 +252,42 @@ def derive_repository_skill_name(
     return skill_file.stem
 
 
+# 扫描时需要跳过的目录规则：
+# - 单层目录直接写目录名，匹配路径中任意一级目录（'docs' 匹配 'a/docs/SKILL.md'）
+# - 多层目录用 '/' 连接，匹配路径中任意位置的连续片段
+#   （'community/sig/demo' 匹配 'community/sig/demo/xxx/SKILL.md'）
+SKILL_SKIP_PATH_RULES: tuple[str, ...] = (
+    'template', 'templates', 'example', 'examples',
+    'demo', 'demos', 'test', 'tests',
+    'fixture', 'fixtures', 'docs', 'doc',
+    'archive', 'archives', 'legacy',
+)
+# strip 首尾 '/'，容忍 'a/b/' 这类带尾斜杠的写法
+_SKIP_RULE_PARTS: tuple[tuple[str, ...], ...] = tuple(
+    rule.strip('/').lower().split('/') for rule in SKILL_SKIP_PATH_RULES
+)
+
+
 def should_skip_relative_path(relative_path: str) -> bool:
-    relative_path = relative_path.lower()
-    path_parts = relative_path.split('/')
-    return any(
-        part in {
-            'template', 'templates', 'example', 'examples',
-            'demo', 'demos', 'test', 'tests',
-            'fixture', 'fixtures', 'docs', 'doc',
-            'archive', 'archives', 'legacy',
-        }
-        for part in path_parts[:-1]
-    )
+    directory_parts = relative_path.lower().split('/')[:-1]
+    for rule_parts in _SKIP_RULE_PARTS:
+        rule_length = len(rule_parts)
+        if any(
+            directory_parts[index:index + rule_length] == rule_parts
+            for index in range(len(directory_parts) - rule_length + 1)
+        ):
+            return True
+    return False
+
+
+# 无效 skill 内容判定（扫描期内容门禁）：
+# - 空洞内容：正文长度低于阈值，多为占位文件或测试桩
+MIN_SKILL_CONTENT_LENGTH = 100
+
+def is_low_value_skill_content(content: str) -> bool:
+    """扫描时跳过内容无效的 skill：指针文件或正文过短。"""
+    text = content.strip()
+    return len(text) < MIN_SKILL_CONTENT_LENGTH
 
 
 def normalize_git_clone_url(url: str | None) -> str:

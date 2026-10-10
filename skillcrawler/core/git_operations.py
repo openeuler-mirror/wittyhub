@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from skillcrawler.core.skill_parser import (
+    parse_skill_frontmatter_text,
+    should_skip_relative_path,
+)
 from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -87,7 +91,7 @@ class GitOperations:
             ['git', '-C', str(clone_dir), 'remote', 'set-url', 'origin', clone_url]
         )
 
-        target_branch = branch or self._get_cloned_repo_branch(clone_dir)
+        target_branch = branch or self.get_cloned_repo_branch(clone_dir)
         is_shallow = self.is_shallow_repository(clone_dir)
         if target_branch:
             fetch_command = [
@@ -144,9 +148,6 @@ class GitOperations:
         return is_shallow.strip().lower() == 'true'
 
     def get_cloned_repo_branch(self, clone_dir: Path) -> str | None:
-        return self._get_cloned_repo_branch(clone_dir)
-
-    def _get_cloned_repo_branch(self, clone_dir: Path) -> str | None:
         # Prefer the checked-out branch when the repo is not detached.
         try:
             branch = self._run_git_command(
@@ -186,7 +187,7 @@ class GitOperations:
 
         return None
 
-    def list_skill_paths_for_ref(self, repo_root: Path, ref: str, should_skip_relative_path) -> list[str]:
+    def list_skill_paths_for_ref(self, repo_root: Path, ref: str) -> list[str]:
         try:
             output = self._run_git_command(
                 ['git', '-C', str(repo_root), 'ls-tree', '-r', '--name-only', ref]
@@ -210,7 +211,6 @@ class GitOperations:
         repo_root: Path,
         ref: str,
         relative_path: str,
-        parse_fn,
     ) -> tuple[dict[str, object], str] | None:
         try:
             text = self._run_git_command(
@@ -222,7 +222,7 @@ class GitOperations:
                 repo_root, ref, relative_path, exc,
             )
             return None
-        return parse_fn(text)
+        return parse_skill_frontmatter_text(text)
 
     def get_skill_tree_hashes(
         self,

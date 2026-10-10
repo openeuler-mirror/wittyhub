@@ -21,6 +21,16 @@ def _git(repository: Path, *args: str, env: dict[str, str] | None = None) -> str
     return result.stdout.strip()
 
 
+# is_low_value_skill_content 会过滤正文 <100 字符的 SKILL.md，
+# 所有扫描类测试夹具统一复用这段合法正文。
+VALID_SKILL_BODY = (
+    "# Skill\n\n## Overview\n"
+    "This skill guides the user through a common developer workflow.\n"
+    "It covers prerequisites, step-by-step instructions, and examples\n"
+    "that can be applied directly to real projects without extra setup."
+)
+
+
 class TestSkillRepositoryUnit:
     def test_models_package_exports_skill_repo_types(self):
         from src.models import SkillRepoModel, SkillRepoRepository
@@ -544,7 +554,7 @@ repositories:
         skill_dir = repository / "skills" / "a"
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
-        skill_file.write_text("# Skill A\n", encoding="utf-8")
+        skill_file.write_text(f"{VALID_SKILL_BODY}\n", encoding="utf-8")
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill a")
         skill_dir_tree_hash = _git(repository, "rev-parse", "HEAD:skills/a")
@@ -599,7 +609,7 @@ repositories:
         tagged_dir = repository / "skill"
         tagged_dir.mkdir(parents=True)
         (tagged_dir / "SKILL.md").write_text(
-            "---\nname: tagged-skill\n---\n# Tagged Skill\n", encoding="utf-8",
+            f"---\nname: tagged-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add tagged skill")
@@ -615,7 +625,7 @@ repositories:
         head_dir = repository / "skills" / "skill-1"
         head_dir.mkdir(parents=True)
         (head_dir / "SKILL.md").write_text(
-            "---\nname: head-skill\n---\n# Head Skill\n", encoding="utf-8",
+            f"---\nname: head-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add head skill")
@@ -677,7 +687,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: dup-skill\n---\n# Dup Skill\n", encoding="utf-8",
+            f"---\nname: dup-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -740,7 +750,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: stable-skill\n---\n# Stable Skill\n", encoding="utf-8",
+            f"---\nname: stable-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -819,7 +829,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: versioned-skill\nversion: 1.2.3\n---\n# V1\n",
+            f"---\nname: versioned-skill\nversion: 1.2.3\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -828,7 +838,7 @@ repositories:
         _git(repository, "tag", "v1")
 
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: versioned-skill\n---\n# V2\n", encoding="utf-8",
+            f"---\nname: versioned-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "drop metadata version")
@@ -893,7 +903,7 @@ repositories:
         skill1_dir = repository / "skills" / "skill-1"
         skill1_dir.mkdir(parents=True)
         (skill1_dir / "SKILL.md").write_text(
-            "---\nname: plain-skill\n---\n# Plain\n", encoding="utf-8",
+            f"---\nname: plain-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill-1")
@@ -904,7 +914,7 @@ repositories:
         skill3_dir = repository / "skills" / "skill-3"
         skill3_dir.mkdir(parents=True)
         (skill3_dir / "SKILL.md").write_text(
-            "---\nname: self-versioned-skill\n---\n# V2 content\n",
+            f"---\nname: self-versioned-skill\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -914,7 +924,7 @@ repositories:
 
         # commit 3 (HEAD): skill-3 声明 version: 1.0.1
         (skill3_dir / "SKILL.md").write_text(
-            "---\nname: self-versioned-skill\nversion: 1.0.1\n---\n# V3 content\n",
+            f"---\nname: self-versioned-skill\nversion: 1.0.1\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -991,7 +1001,7 @@ repositories:
             "---\n"
             "name: my-skill\n"
             "category: Engineering and Compilation\n"
-            "---\n# My Skill\n",
+            f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -1047,7 +1057,7 @@ repositories:
             "---\n"
             "name: my-skill\n"
             "category: Some Random Category\n"
-            "---\n# My Skill\n",
+            f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -1097,7 +1107,9 @@ repositories:
         skill_dir = repository / "skills" / "production-skill"
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
-        skill_file.write_text("---\nname: example\n---\n# Example\n", encoding="utf-8")
+        skill_file.write_text(
+            f"---\nname: example\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+        )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
         skill_commit = _git(repository, "rev-parse", "HEAD")

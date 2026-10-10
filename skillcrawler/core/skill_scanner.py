@@ -20,6 +20,7 @@ from skillcrawler.core.skill_parser import (
     derive_repository_skill_name,
     derive_skill_source,
     extract_declared_version,
+    is_low_value_skill_content,
 )
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import SkillRepository
@@ -205,6 +206,12 @@ class SkillScanner:
             )
             if metadata_content is None:
                 continue
+            if is_low_value_skill_content(metadata_content[1]):
+                _logger.debug(
+                    'Skipped low-value skill content: skill_id=%s ref=HEAD',
+                    skill_id,
+                )
+                continue
             input_elapsed = time.perf_counter() - scan_started_at
             tree_hash = tree_hashes.get(relative_path)
             skill = await self._build_skill_record(
@@ -315,6 +322,12 @@ class SkillScanner:
                     repo_root, ref, relative_path,
                 )
                 if metadata_content is None:
+                    continue
+                if is_low_value_skill_content(metadata_content[1]):
+                    _logger.debug(
+                        'Skipped low-value skill content: path=%s ref=%s',
+                        relative_path, ref,
+                    )
                     continue
                 input_elapsed = time.perf_counter() - scan_started_at
                 tree_hash = tree_hashes.get(relative_path)

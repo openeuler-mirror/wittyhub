@@ -51,18 +51,6 @@ const contributorRepoLink = computed(() => contributor.value?.git_profile?.trim(
 // 官网：catalog 注入的官网地址（community 的 SIG 页面 / 企业官网 / 个人网站）
 const contributorWebsite = computed(() => contributor.value?.website?.trim() || '')
 
-// 搜索框：前端过滤当前页（name / description / tags）
-const filteredSkills = computed(() => {
-  const q = searchInput.value.trim().toLowerCase()
-  if (!q) return skills.value
-  return skills.value.filter(
-    s =>
-      s.name.toLowerCase().includes(q) ||
-      (s.description || '').toLowerCase().includes(q) ||
-      (s.tags || []).some(t => t.toLowerCase().includes(q))
-  )
-})
-
 // 下载量格式化：超过一万显示 xxx.xw，与首页一致
 function formatDownloads(n?: number): string {
   if (n == null) return '0'
@@ -85,7 +73,8 @@ async function fetchContributorSkills() {
       source,
       author,
       skip: (page.value - 1) * pageSize.value,
-      limit: pageSize.value
+      limit: pageSize.value,
+      keyword: searchInput.value.trim() || undefined
     })
     contributor.value = res
     skills.value = res.skills || []
@@ -120,6 +109,16 @@ watch(
     }
   }
 )
+
+// 搜索：300ms 防抖后走服务端过滤（跨页匹配），分页 total 随搜索结果动态变化
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchInput, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    fetchContributorSkills()
+  }, 300)
+})
 </script>
 
 <template>
@@ -236,7 +235,7 @@ watch(
       </div>
 
       <!-- 空态 -->
-      <div v-else-if="filteredSkills.length === 0" class="empty-state">
+      <div v-else-if="skills.length === 0" class="empty-state">
         <div class="empty-state-svg" v-html="emptyStateSvg"></div>
         <p class="empty-state-text">没有匹配的结果</p>
       </div>
@@ -244,7 +243,7 @@ watch(
       <!-- 卡片网格 -->
       <div v-else class="skills-grid">
         <SkillCard
-          v-for="skill in filteredSkills"
+          v-for="skill in skills"
           :key="skill.id"
           :skill="skill"
         />

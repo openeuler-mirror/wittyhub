@@ -770,12 +770,15 @@ class SkillRepository:
         skip: int = 0,
         limit: int = 20,
         sort_by: str = "download_count",
-    ) -> tuple[List[Skill], int, int, str | None]:
+        keyword: str | None = None,
+    ) -> tuple[List[Skill], int, int, str | None, int]:
         """查询 contributor（source + author）下的全部可见 skills 及聚合统计。
 
         Returns:
-            (skills, total, total_downloads, platform)：
-            total 为 0 表示该 contributor 名下没有可见 skill（路由层转 404）。
+            (skills, total, total_downloads, platform, skill_count)：
+            total 受 keyword 过滤（分页用）；skill_count / total_downloads 始终
+            为全量口径（hero 统计卡展示，不随搜索变化）。skill_count 为 0
+            表示该 contributor 名下没有可见 skill（路由层转 404）。
         """
         base_filter = and_(
             Skill.source == source,
@@ -790,12 +793,31 @@ class SkillRepository:
                 func.min(Skill.platform),
             ).where(base_filter)
         )
-        total, total_downloads, platform = stats_result.one()
+        skill_count, total_downloads, platform = stats_result.one()
 
-        if not total:
-            return [], 0, 0, None
+        if not skill_count:
+            return [], 0, 0, None, 0
 
-        query = select(Skill).where(base_filter)
+        total = int(skill_count)
+        query_filter: Any = base_filter
+        if keyword and keyword.strip():
+            kw = f"%{keyword.strip()}%"
+            query_filter = and_(
+                base_filter,
+                or_(
+                    Skill.name.ilike(kw),
+                    Skill.description.ilike(kw),
+                    func.array_to_string(Skill.tags, " ").ilike(kw),
+                ),
+            )
+            total = int(
+                (await self.session.execute(
+                    select(func.count(Skill.id)).where(query_filter)
+                )).scalar()
+                or 0
+            )
+
+        query = select(Skill).where(query_filter)
         if sort_by == "download_count":
             order_by = [desc(Skill.download_count), desc(Skill.updated_at), desc(Skill.created_at)]
         else:
@@ -804,7 +826,7 @@ class SkillRepository:
 
         result = await self.session.execute(query)
         skills = list(result.scalars().all())
-        return skills, total, int(total_downloads), platform
+        return skills, total, int(total_downloads), platform, int(skill_count)
 
     async def update(self, skill_id: str, update_data: dict[str, Any]) -> Skill | None:
         existing = await self.get_by_skill_id(skill_id)

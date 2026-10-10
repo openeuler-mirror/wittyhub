@@ -78,6 +78,7 @@ export const api = {
     skip?: number
     limit?: number
     sort_by?: 'updated_at' | 'download_count'
+    keyword?: string
   }): Promise<ContributorSkillsResponse> {
     const { source, author, ...query } = params
     const { data } = await client.get(

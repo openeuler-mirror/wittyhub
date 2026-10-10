@@ -213,7 +213,7 @@ watch(
     <!-- ========== 技能列表区域 ========== -->
     <section v-if="contributor" class="container-wide list-section">
       <div class="list-header-row">
-        <h2 class="section-title">贡献的技能</h2>
+        <h2 class="section-title">贡献的Skill</h2>
         <OInput
           v-model="searchInput"
           placeholder="搜索Skill"

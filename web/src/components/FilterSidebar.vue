@@ -49,7 +49,8 @@ function toggleArrayItem(arr: string[], item: string): string[] {
 
 function selectCategory(name: string) {
   const next = toggleArrayItem(skillStore.filter.category, name)
-  oaReport('filter_change', { module: 'filter', dim: 'category', value: next.join(',') })
+    // 上报本次点击的单个分类（而非整个选中数组），便于按分类维度聚合统计
+  oaReport('filter_change', { module: 'filter', dim: 'category', value: name })
   skillStore.setFilter('category', next)
   skillStore.fetchSkills()
 }

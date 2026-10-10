@@ -3,7 +3,7 @@
  * 站内文档页（使用指南）：左侧「文档 + 章节」合并目录，右侧白色正文卡片 + 上下篇翻页。
  *
  * 版式对齐设计稿「使用指南示例」：
- * - 页标题 40/56 semibold、副标题 18/26（60% 黑，与贡献页副标题一致）；
+ * - 页标题 40/64 semibold、副标题 18/26（60% 黑，与贡献页副标题一致）；
  *   内容区与 AppHeader/风险评估报告页同宽（1488px + 24px padding），
  *   左缘对齐 header logo、右缘对齐用户图标；
  * - 左栏 272px：目录使用组件库 OMenu（arrowPosition=left，含 OSubMenu/OMenuItem），
@@ -585,15 +585,14 @@ $guide-color: #e0e2e6;
   padding: 0 24px;
 }
 
-/* ===== 页标题：40/56 semibold，距页头 48px；副标题 18/26（80% 黑） =====
-   行高用令牌（首页 hero 标题同样写法） */
+/* ===== 页标题：40px / 64px 行高 semibold，距页头 48px；副标题 18/26（60% 黑） ===== */
 .page-title {
   margin: 0;
   padding-top: 48px;
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-semibold);
-  font-size: var(--o-font_size-display3);
-  line-height: var(--o-line_height-display3);
+  font-size: 40px;
+  line-height: 64px;
   letter-spacing: 0px;
   color: var(--o-color-info1);
 }

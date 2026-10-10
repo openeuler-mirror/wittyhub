@@ -1176,11 +1176,16 @@ class ContributorRepository:
         reflect the full search scope).
 
         ``grand_total`` is the full-scope count under the current keyword only
-        (ignoring ``platform``); used by the "全部" tab so its count stays
+        (ignoring ``platform``); used for the "全部" tab so its count stays
         stable across platform switches.
+
+        Contributors with ``skill_count`` = 0 (no visible skill under their
+        name, e.g. after low-value cleanup or audit-pending skills) are
+        excluded from rows and all counts — they carry no browsable content.
         """
-        base_filter: list[Any] = []
-        count_filter: list[Any] = []
+        visible = Contributor.skill_count > 0
+        base_filter: list[Any] = [visible]
+        count_filter: list[Any] = [visible]
         if platform:
             base_filter.append(Contributor.platform == platform)
         if keyword:

@@ -61,10 +61,10 @@ const showHotResultCount = computed(
 onMounted(async () => {
   loadSearchHistory()
   document.addEventListener('mousedown', onDocumentMouseDown)
-  if (searchQuery.value) {
-    searchInput.value = searchQuery.value
-    skillStore.setFilter('keyword', searchQuery.value)
-  }
+  // 无条件按当前路由同步搜索词：store 跨页面存活，无 q 时必须清掉残留
+  // keyword，否则切走再切回 Skills 仍显示上次搜索结果
+  searchInput.value = searchQuery.value
+  skillStore.setFilter('keyword', searchQuery.value)
 
   if (route.params.category) {
     skillStore.setFilter('category', route.params.category as string)
@@ -78,11 +78,11 @@ onMounted(async () => {
 })
 
 watch(() => route.query.q, (newQ) => {
-  if (newQ !== undefined) {
-    searchInput.value = newQ as string
-    skillStore.setFilter('keyword', newQ as string)
-    skillStore.fetchSkills()
-  }
+  // / 与 /skills/search 复用同一 Home 实例，路由切换不触发重挂载；
+  // 无 q 的导航（回到首页）同样要清空搜索词并刷新列表
+  searchInput.value = (newQ as string) || ''
+  skillStore.setFilter('keyword', (newQ as string) || '')
+  skillStore.fetchSkills()
 })
 
 // 卡片网格引用，用于行内标题对齐

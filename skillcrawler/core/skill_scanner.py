@@ -20,8 +20,6 @@ from skillcrawler.core.skill_parser import (
     derive_repository_skill_name,
     derive_skill_source,
     extract_declared_version,
-    parse_skill_frontmatter_text,
-    should_skip_relative_path,
 )
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import SkillRepository
@@ -112,9 +110,7 @@ class SkillScanner:
 
         discovery_started_at = time.perf_counter()
         if skill_paths is None:
-            skill_paths = self.git_ops.list_skill_paths_for_ref(
-                repo_root, 'HEAD', should_skip_relative_path,
-            )
+            skill_paths = self.git_ops.list_skill_paths_for_ref(repo_root, 'HEAD')
         _logger.debug(
             'Skill file discovery timing: repo=%s files=%d elapsed=%.3fs',
             getattr(repo, 'repo_name', None) or repo.url,
@@ -193,7 +189,6 @@ class SkillScanner:
         )
         for relative_path in skill_paths:
             scan_started_at = time.perf_counter()
-            virtual_skill_file = repo_root / relative_path
             skill_id = build_skill_id(
                 repo.source, extract_owner_repo(repo.url), relative_path,
             )
@@ -206,7 +201,7 @@ class SkillScanner:
                 continue
             seen_skill_ids.add(skill_id)
             metadata_content = self.git_ops.load_skill_frontmatter_from_git_ref(
-                repo_root, 'HEAD', relative_path, parse_skill_frontmatter_text,
+                repo_root, 'HEAD', relative_path,
             )
             if metadata_content is None:
                 continue
@@ -214,7 +209,7 @@ class SkillScanner:
             tree_hash = tree_hashes.get(relative_path)
             skill = await self._build_skill_record(
                 repo=repo,
-                skill_file=virtual_skill_file,
+                repo_root=repo_root,
                 relative_path=relative_path,
                 metadata_content=metadata_content,
                 ref=None,
@@ -243,7 +238,7 @@ class SkillScanner:
             if declared_version:
                 version_record = await self._build_skill_record(
                     repo=repo,
-                    skill_file=virtual_skill_file,
+                    repo_root=repo_root,
                     relative_path=relative_path,
                     metadata_content=metadata_content,
                     ref=None,
@@ -301,7 +296,7 @@ class SkillScanner:
             # renamed, removed, or that never existed at HEAD, so HEAD's path
             # set cannot be reused as the universe of tag paths.
             current_tag_skill_paths = self.git_ops.list_skill_paths_for_ref(
-                repo_root, ref, should_skip_relative_path,
+                repo_root, ref,
             )
             tree_hashes = self.git_ops.get_skill_tree_hashes(
                 repo_root, current_tag_skill_paths, ref=ref,
@@ -316,9 +311,8 @@ class SkillScanner:
             )
             for relative_path in current_tag_skill_paths:
                 scan_started_at = time.perf_counter()
-                virtual_skill_file = repo_root / relative_path
                 metadata_content = self.git_ops.load_skill_frontmatter_from_git_ref(
-                    repo_root, ref, relative_path, parse_skill_frontmatter_text,
+                    repo_root, ref, relative_path,
                 )
                 if metadata_content is None:
                     continue
@@ -372,7 +366,7 @@ class SkillScanner:
                     continue
                 skill = await self._build_skill_record(
                     repo=repo,
-                    skill_file=virtual_skill_file,
+                    repo_root=repo_root,
                     relative_path=relative_path,
                     metadata_content=metadata_content,
                     ref=ref,
@@ -417,7 +411,7 @@ class SkillScanner:
     async def _build_skill_record(
         self,
         repo: SkillRepoModel,
-        skill_file: Path,
+        repo_root: Path,
         relative_path: str,
         metadata_content: tuple[dict[str, object], str],
         ref: str | None,
@@ -437,6 +431,7 @@ class SkillScanner:
         security_cache: dict[str, SecurityResolution] | None = None,
     ) -> Skill | SkillVersion:
         prepare_started_at = time.perf_counter()
+        skill_file = repo_root / relative_path
         metadata, content = metadata_content
         merged_metadata = dict(metadata)
         if repository_latest_tags and 'repository_latest_tags' not in merged_metadata:

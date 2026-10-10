@@ -24,7 +24,6 @@ from skillcrawler.core.skill_parser import (
     derive_skill_source,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
-    should_skip_relative_path,
 )
 from skillcrawler.core.skill_scanner import SkillScanner
 from src.utils.skill_id import extract_owner_repo
@@ -152,9 +151,7 @@ class SkillManager:
 
     def _list_skill_paths(self, clone_dir: Path) -> list[str]:
         """List the scannable SKILL.md paths at HEAD for a cloned repo."""
-        return self._git_ops.list_skill_paths_for_ref(
-            clone_dir, 'HEAD', should_skip_relative_path,
-        )
+        return self._git_ops.list_skill_paths_for_ref(clone_dir, 'HEAD')
 
     async def discover_configured_skill_repository(
         self,

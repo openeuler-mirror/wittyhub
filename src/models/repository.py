@@ -125,6 +125,33 @@ class SkillRepoRepository:
             raise ValueError(f"Skill repo not found: {repository_id}")
         return repository
 
+    async def reconcile_skill_nums(self, commit: bool = True) -> int:
+        """按 skills 表实际行数重算全部 skill_repos.skill_num，返回修正行数。
+
+        口径与扫描写入的 ``unique_skill_count`` 一致（仓库下 skill 行数）。
+        仅更新当前值不等于实际值的行，天然幂等；用于扫描落库后的
+        统计自愈（手工删数据、历史漂移等）。
+        """
+        skill_count = (
+            select(func.count(Skill.id))
+            .where(Skill.skill_repo_id == SkillRepoModel.id)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(SkillRepoModel)
+            .values(skill_num=skill_count)
+            .where(
+                or_(
+                    SkillRepoModel.skill_num.is_(None),
+                    SkillRepoModel.skill_num != skill_count,
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if commit:
+            await self.session.commit()
+        return int(result.rowcount or 0)
+
     async def delete_skill_repository(self, repository_id: str | uuid.UUID) -> None:
         """删除仓库及其级联数据。
 
@@ -1096,6 +1123,38 @@ class ContributorRepository:
             )
         )
         return int(result.scalar() or 0)
+
+    async def reconcile_skill_counts(self, commit: bool = True) -> int:
+        """按 skills 表可见口径重算全部 contributors.skill_count，返回修正行数。
+
+        可见性规则与 ``count_skills`` / ``get_contributor_skills`` 一致
+        （risk_score 非空），与扫描 upsert 时的聚合口径相同，不会在
+        扫描与自愈之间来回翻转。仅更新当前值不等于聚合值的行，
+        天然幂等；用于扫描落库后的统计自愈（手工删数据、历史漂移等）。
+        """
+        visible_count = (
+            select(func.count(Skill.id))
+            .where(
+                Skill.source == Contributor.source,
+                Skill.author == Contributor.author,
+                Skill.risk_score.is_not(None),
+            )
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(Contributor)
+            .values(skill_count=visible_count)
+            .where(
+                or_(
+                    Contributor.skill_count.is_(None),
+                    Contributor.skill_count != visible_count,
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if commit:
+            await self.session.commit()
+        return int(result.rowcount or 0)
 
     async def list(
         self,

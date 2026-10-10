@@ -1747,6 +1747,43 @@ repositories:
         assert response.name == "test-skill"
 
 
+class TestReconcileSkillStatistics:
+    """扫描落库后的统计自愈：contributors.skill_count / skill_repos.skill_num。"""
+
+    def _make_manager(self, repo_repository, contributor_repository):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        return SkillManager(MagicMock(), repo_repository, contributor_repository)
+
+    async def test_reconcile_calls_both_repositories(self):
+        contributor_repo = AsyncMock()
+        contributor_repo.reconcile_skill_counts.return_value = 2
+        repo_repo = AsyncMock()
+        repo_repo.reconcile_skill_nums.return_value = 1
+        manager = self._make_manager(repo_repo, contributor_repo)
+
+        await manager._reconcile_skill_statistics()
+
+        contributor_repo.reconcile_skill_counts.assert_awaited_once()
+        repo_repo.reconcile_skill_nums.assert_awaited_once()
+
+    async def test_reconcile_skips_contributors_when_repository_missing(self):
+        repo_repo = AsyncMock()
+        manager = self._make_manager(repo_repo, None)
+
+        await manager._reconcile_skill_statistics()
+
+        repo_repo.reconcile_skill_nums.assert_awaited_once()
+
+    async def test_reconcile_swallows_errors(self):
+        repo_repo = AsyncMock()
+        repo_repo.reconcile_skill_nums.side_effect = RuntimeError("boom")
+        manager = self._make_manager(repo_repo, None)
+
+        # 不应抛异常：扫描结果已提交，统计自愈失败只告警
+        await manager._reconcile_skill_statistics()
+
+
 class TestExtractDeclaredVersion:
     """frontmatter version 声明位置兼容：顶层 version 与 metadata.version 嵌套。"""
 

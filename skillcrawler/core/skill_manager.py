@@ -323,13 +323,42 @@ class SkillManager:
                 website=profile.get('website'),
                 commit=False,
             )
-        return await self.skill_repo_repository.update_skill_repository(
+        repository = await self.skill_repo_repository.update_skill_repository(
             repo.id,
             repository_commit_id=repository_commit_id,
             skill_discover_status=SkillDiscoverStatus.DONE,
             skill_num=unique_skill_count,
             author=author,
         )
+        await self._reconcile_skill_statistics()
+        return repository
+
+    async def _reconcile_skill_statistics(self) -> None:
+        """扫描落库后按 skills 表实际数据自愈统计值。
+
+        修正三类漂移：skill 被删除后 contributors.skill_count /
+        skill_repos.skill_num 的残留、多作者仓库只刷新单一 author 的
+        contributors 行、以及手工直改 skills 表造成的偏差。统计口径
+        与扫描写入一致（contributors 走 risk_score 非空的可见口径，
+        skill_repos 走仓库下 skill 行数），因此不会与扫描互相翻转。
+        失败仅告警，不影响已提交的扫描结果。
+        """
+        try:
+            corrected_contributors = 0
+            if self.contributor_repository is not None:
+                corrected_contributors = (
+                    await self.contributor_repository.reconcile_skill_counts()
+                )
+            corrected_repos = await self.skill_repo_repository.reconcile_skill_nums()
+            if corrected_contributors or corrected_repos:
+                _logger.info(
+                    'Discover: statistics reconciled after scan: '
+                    'contributors=%d, skill_repos=%d',
+                    corrected_contributors,
+                    corrected_repos,
+                )
+        except Exception as exc:
+            _logger.warning('Failed to reconcile skill statistics after scan: %s', exc)
 
     def _contributor_profile(self, platform: str | None, author: str) -> dict[str, Any]:
         """Lookup catalog profile fields (name/description/git_profile) for a contributor.

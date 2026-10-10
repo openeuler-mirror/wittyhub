@@ -3,21 +3,25 @@
  * 站内文档页（使用指南）：左侧「文档 + 章节」合并目录，右侧白色正文卡片 + 上下篇翻页。
  *
  * 版式对齐设计稿「使用指南示例」：
- * - 页标题 48/64 semibold、副标题 18/26（80% 黑）；
+ * - 页标题 40/64 semibold、副标题 18/26（60% 黑，与贡献页副标题一致）；
  *   内容区与 AppHeader/风险评估报告页同宽（1488px + 24px padding），
  *   左缘对齐 header logo、右缘对齐用户图标；
- * - 左栏 272px：文档行与章节行均 40px 高（8px 上下内边距 + 24px 行高），
- *   逐级缩进 21/16px，引导线 #E0E2E6；当前章节为浅蓝底（#CEDBF5，圆角 4）
- *   加左侧 2×32 蓝色指示条，当前文档与当前章节的上级为蓝色 medium 文字；
+ * - 左栏 272px：目录使用组件库 OMenu（arrowPosition=left，含 OSubMenu/OMenuItem），
+ *   逐级缩进、引导线（#E0E2E6）、展开动画、hover 底色（control2-light）与
+ *   选中路径高亮均由组件规范提供；行高/字号沿用设计稿（14px 文字、40px 行），
+ *   当前章节为浅蓝底 + 左侧 2×32 蓝色指示条，当前文档与当前章节的上级为蓝色文字；
  *   含子章节的分组默认仅「当前章节所在分组」展开（设计稿形态），可手动折叠/展开；
- *   折叠箭头置于行首（文字左侧），使用组件库 OIconChevronDown（24px 令牌），收起朝下、展开朝上；
+ *   折叠箭头置于行首（文字左侧），收起朝下、展开朝上；箭头点击只切换展开/收起；
+ *   分组行（文档行、含子章节的章节行）点击文字：跳转与"展开/收起切换"同时发生
+ *   （展开→合并、合并→展开；与 openEuler 文档站目录行为一致）；
+ *   目录项为原生 <a>（/docs/{doc}#{section}），左键交给路由、Cmd/Ctrl/中键可新标签打开；
  * - 右栏白卡：宽至 1412px、圆角 8、内边距 24/40/32，正文排版见
  *   MarkdownRenderer 的 docs 变体，正文下方 1px 分割线 + 上一篇/下一篇；
  * - 文档顺序即左栏顺序与翻页顺序，章节锚点 id 由正文渲染组件回传（doc-section-N / N-M）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { OIcon, OIconChevronDown, OLoading } from '@opensig/opendesign'
+import { OLoading, OMenu, OMenuItem, OSubMenu } from '@opensig/opendesign'
 import { oaReport } from '@opendesign-plus/plugins/analytics'
 import MarkdownRenderer, { parseDocOutline, type OutlineItem } from '@/components/MarkdownRenderer.vue'
 import { useAppStore } from '@/stores/app'
@@ -57,11 +61,8 @@ const outline = ref<OutlineItem[]>([])
 /** 滚动联动到的章节 id（当前章节） */
 const activeSectionId = ref('')
 
-/** 文档行折叠态：默认仅当前文档展开、其余收起；手动切换后以手动状态为准 */
-const collapsedDocs = ref<Record<string, boolean>>({})
-
-/** 含子章节的章节行折叠态（key = `${doc}::${sectionId}`，章节 id 在各文档间重复，必须带文档名） */
-const collapsedSections = ref<Record<string, boolean>>({})
+/** 手动展开/收起的目录项（key = `doc:${name}` 或 `${doc}::${sectionId}`；未记录时按默认规则） */
+const manualExpanded = ref<Record<string, boolean>>({})
 
 /** 路由参数只允许字母/数字/连字符，避免路径穿越 */
 const docName = computed(() => String(route.params.doc || '').replace(/[^a-zA-Z0-9-]/g, ''))
@@ -92,67 +93,132 @@ const activeIds = computed(() => {
 })
 
 /**
- * 是否处于高亮路径中。
- * 章节锚点 id（doc-section-N / N-M）在各文档间是重复的，必须同时比对文档名，
- * 否则其他文档的同名章节会被误高亮。
+ * OMenu 目录项的 value/key。
+ * 章节锚点 id（doc-section-N / N-M）在各文档间是重复的，必须带上文档名，
+ * 否则其他文档的同名章节会被误判为高亮/选中。
  */
-function isActiveSection(doc: string, sectionId: string) {
-  return doc === docName.value && activeIds.value.has(sectionId)
+function docKey(doc: string) {
+  return `doc:${doc}`
 }
 
-/** 是否为滚动联动到的当前章节（同样需比对文档名，避免 id 跨文档重复误判） */
-function isCurrentSection(doc: string, sectionId: string) {
-  return doc === docName.value && activeSectionId.value === sectionId
-}
-
-/**
- * 点击章节链接：统一交给路由处理（带 hash 的导航由 router.scrollBehavior 滚动到锚点，
- * 避免浏览器原生 hash 跳转被 scrollBehavior 拉回页面顶部）。
- * - 当前文档：同路由带 hash 跳转，锚点元素已存在，直接定位；
- * - 其他文档：跳转到目标文档，正文异步渲染完成后由 scrollToHash 定位；
- * - Cmd/Ctrl/中键等保持浏览器默认行为（新标签打开 href）。
- */
-function handleSectionClick(e: MouseEvent, doc: string, sectionId: string) {
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
-  e.preventDefault()
-  const hash = `#${sectionId}`
-  if (doc === docName.value) router.push({ hash })
-  else router.push({ path: `/docs/${doc}`, hash })
-}
-
-/**
- * 文档分组是否展开：
- * - 手动切换过：以手动状态为准；
- * - 否则仅当前文档展开，其余文档收起（避免不相关文档目录全部铺开）。
- */
-function isDocExpanded(name: string) {
-  const manual = collapsedDocs.value[name]
-  if (manual !== undefined) return !manual
-  return name === docName.value
-}
-
-function toggleDoc(name: string) {
-  collapsedDocs.value[name] = isDocExpanded(name)
-}
-
-/** 章节折叠态的存储 key：章节 id 在各文档间是重复的，必须带上文档名 */
 function sectionKey(doc: string, sectionId: string) {
   return `${doc}::${sectionId}`
 }
 
+/** OMenu 选中值：滚动联动到的当前章节；尚未联动到章节时回退到当前文档行 */
+const menuActiveValue = computed(() =>
+  docName.value && activeSectionId.value
+    ? sectionKey(docName.value, activeSectionId.value)
+    : docKey(docName.value)
+)
+
+/** 默认展开项：当前文档 + 当前章节所在分组（设计稿形态：当前分组展开、其余收起） */
+const defaultExpandedKeys = computed(() => {
+  const keys = new Set<string>()
+  if (!docName.value) return keys
+  keys.add(docKey(docName.value))
+  activeIds.value.forEach((id) => keys.add(sectionKey(docName.value, id)))
+  return keys
+})
+
+/** OMenu 展开数组：默认展开项叠加手动展开/收起结果（手动优先） */
+const menuExpanded = computed(() => {
+  const keys = new Set(defaultExpandedKeys.value)
+  for (const [key, open] of Object.entries(manualExpanded.value)) {
+    if (open) keys.add(key)
+    else keys.delete(key)
+  }
+  return [...keys]
+})
+
 /**
- * 章节分组是否展开：
- * - 手动切换过：以手动状态为准；
- * - 否则仅「当前章节所在分组」展开（设计稿形态：当前分组展开、其余收起）。
+ * 同步展开数组：与默认态（当前文档 + 当前章节所在分组）一致的项清除手动记录，
+ * 保证滚动联动的默认规则仍生效；不一致的项记录为手动状态。
+ * 供 OMenu 的 expanded-change（点箭头）与点击分组行文字的切换共用。
  */
-function isSectionExpanded(doc: string, sectionId: string) {
-  const manual = collapsedSections.value[sectionKey(doc, sectionId)]
-  if (manual !== undefined) return !manual
-  return isActiveSection(doc, sectionId)
+function syncExpandedKeys(values: string[]) {
+  const next = new Set(values)
+  const manual: Record<string, boolean> = {}
+  const keys = new Set([...next, ...defaultExpandedKeys.value])
+  for (const key of keys) {
+    if (next.has(key) !== defaultExpandedKeys.value.has(key)) manual[key] = next.has(key)
+  }
+  manualExpanded.value = manual
 }
 
-function toggleSection(doc: string, sectionId: string) {
-  collapsedSections.value[sectionKey(doc, sectionId)] = isSectionExpanded(doc, sectionId)
+/**
+ * 切换指定目录项的展开/收起（点击分组行文字时执行）。
+ * 基于当前生效的展开数组计算，与跳转在同一次点击内同步完成，互不覆盖。
+ */
+function toggleMenuItem(key: string) {
+  const keys = new Set(menuExpanded.value)
+  if (keys.has(key)) keys.delete(key)
+  else keys.add(key)
+  syncExpandedKeys([...keys])
+}
+
+/**
+ * 点击章节链接（叶子行）：统一交给路由处理（带 hash 的导航由 router.scrollBehavior 滚动到锚点，
+ * 避免浏览器原生 hash 跳转被 scrollBehavior 拉回页面顶部）。
+ * - 当前文档：同路由带 hash 跳转，锚点元素已存在，直接定位并立即高亮点击项；
+ * - 其他文档：跳转到目标文档，正文渲染完成后由 scrollToHash 定位、refreshActiveSection 恢复高亮；
+ * - 点击后锁定该章节高亮，避免"滚到底"等联动把高亮覆盖到其他目录项（用户再滚动时解除）；
+ * - Cmd/Ctrl/中键等保持浏览器默认行为（新标签打开 href）。
+ */
+function handleSectionClick(e: MouseEvent, doc: string, sectionId: string) {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+    e.stopPropagation()
+    return
+  }
+  e.preventDefault()
+  lockedSectionId = sectionId
+  lockedDocName = doc
+  const hash = `#${sectionId}`
+  if (doc === docName.value) {
+    activeSectionId.value = sectionId
+    router.push({ hash })
+  } else {
+    router.push({ path: `/docs/${doc}`, hash })
+  }
+}
+
+/**
+ * 点击文档标题：跳转到该文档（当前文档会清掉 hash、滚回文档顶部），
+ * 同时切换该文档下级目录的展开/收起（展开→合并、合并→展开）—— 跳转与切换同时发生。
+ * 跳转目标是文档顶部，解除章节点击锁定，交回滚动联动；
+ * 阻止冒泡：切换由 toggleMenuItem 统一执行，避免组件原生切换再叠加一次（两次切换等于没切）。
+ * Cmd/Ctrl/中键等保持浏览器默认行为（新标签打开 href），同样阻止冒泡。
+ */
+function handleDocClick(e: MouseEvent, doc: string) {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+    e.stopPropagation()
+    return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  clearSectionLock()
+  toggleMenuItem(docKey(doc))
+  router.push(`/docs/${doc}`)
+}
+
+/** 点击含子章节的分组行：跳转到该章节，同时切换其下级目录的展开/收起（跳转与切换同时发生） */
+function handleGroupSectionClick(e: MouseEvent, doc: string, sectionId: string) {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+    e.stopPropagation()
+    return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  toggleMenuItem(sectionKey(doc, sectionId))
+  lockedSectionId = sectionId
+  lockedDocName = doc
+  const hash = `#${sectionId}`
+  if (doc === docName.value) {
+    activeSectionId.value = sectionId
+    router.push({ hash })
+  } else {
+    router.push({ path: `/docs/${doc}`, hash })
+  }
 }
 
 /** 左栏目录：读取每篇文档，取 H1 作标题、h2/h3 作章节大纲 */
@@ -197,16 +263,51 @@ async function loadDoc() {
   }
 }
 
+/**
+ * 点击目录项后锁定的章节 id 及其所属文档。
+ * 点击底部区域的目录项时，页面可能已经到底、无法把该标题滚到判定线以上，
+ * 若继续按滚动位置联动（含"到底定位最后一项"）会把高亮错误地落到最后一个目录项，
+ * 因此在用户再次主动滚动前，保持点击项高亮。
+ */
+let lockedSectionId = ''
+let lockedDocName = ''
+
+/** 解除点击锁定（用户重新滚动、或导航到目标文档之外时） */
+function clearSectionLock() {
+  lockedSectionId = ''
+  lockedDocName = ''
+}
+
 /** 滚动联动：取最后一个已越过吸顶导航下沿的 h2/h3 作为当前章节 */
 let ticking = false
 
 function measureActiveSection() {
   ticking = false
+  // 点击目录项后保持点击项高亮（含跨文档跳转），用户重新滚动时解除
+  if (lockedSectionId) return
   if (!outline.value.length) return
   const headings = Array.from(
     document.querySelectorAll<HTMLElement>('.docs-card .markdown-body h2[id], .docs-card .markdown-body h3[id]')
   )
   if (!headings.length) return
+
+  /*
+   * 页面滚到底时，最后一个标题可能永远越不过判定线（页面高度不足、浏览器缩放/小屏时尤其明显），
+   * 导致目录停在倒数第二个章节。此时直接定位到最后一个章节，保证与正文位置一致。
+   * 取两种 scrollHeight 的最大值并留 2px 容差，兼容各浏览器与缩放产生的亚像素误差。
+   */
+  const scrollHeight = Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight
+  )
+  const atBottom =
+    scrollHeight > window.innerHeight + 1 &&
+    window.innerHeight + window.scrollY >= scrollHeight - 2
+  if (atBottom) {
+    activeSectionId.value = headings[headings.length - 1].id
+    return
+  }
+
   // 吸顶导航 72px + 24px 间距，与正文 scroll-margin-top 保持一致
   const threshold = 97
   let current = headings[0].id
@@ -215,6 +316,33 @@ function measureActiveSection() {
     else break
   }
   activeSectionId.value = current
+}
+
+/**
+ * 刷新当前章节高亮（大纲就绪、切换文档等时机调用）：
+ * 点击锁定期间恢复点击项高亮，否则按滚动位置联动。
+ */
+function refreshActiveSection() {
+  ticking = false
+  if (lockedSectionId) {
+    activeSectionId.value = lockedSectionId
+    return
+  }
+  measureActiveSection()
+}
+
+/** 用户主动滚动（滚轮/触摸/键盘）时解除点击锁定，恢复滚动联动与"到底高亮最后一项" */
+function unlockActiveSection() {
+  if (!lockedSectionId) return
+  clearSectionLock()
+  onScroll()
+}
+
+/** 会触发页面滚动的按键 */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
+
+function onScrollKeydown(e: KeyboardEvent) {
+  if (SCROLL_KEYS.has(e.key)) unlockActiveSection()
 }
 
 function onScroll() {
@@ -234,27 +362,45 @@ onMounted(() => {
   loadDocs()
   loadDoc()
   window.addEventListener('scroll', onScroll, { passive: true })
+  // 窗口尺寸/缩放变化后重新计算高亮位置，避免停留在旧章节
+  window.addEventListener('resize', onScroll, { passive: true })
+  // 用户主动滚动时解除点击锁定（这些事件只来自用户操作，程序滚动不会触发）
+  window.addEventListener('wheel', unlockActiveSection, { passive: true })
+  window.addEventListener('touchmove', unlockActiveSection, { passive: true })
+  window.addEventListener('keydown', onScrollKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', onScroll)
+  window.removeEventListener('resize', onScroll)
+  window.removeEventListener('wheel', unlockActiveSection)
+  window.removeEventListener('touchmove', unlockActiveSection)
+  window.removeEventListener('keydown', onScrollKeydown)
 })
 
 // 章节大纲就绪（正文渲染完成）后刷新联动位置，并按需定位到 hash 指向的章节
 watch(outline, async () => {
   await nextTick()
-  measureActiveSection()
+  refreshActiveSection()
   scrollToHash()
 })
 
-// 切换文档时重置文档行折叠态：默认仅当前文档展开（不保留上一次的手动展开，避免目录越点越乱）
+// 切换文档时清理其他文档的手动展开记录（避免目录越点越乱），
+// 但保留本次目标文档的记录——点击分组行触发的展开/收起必须在跳转后仍然生效
 watch(
   () => route.params.doc,
   async () => {
-    collapsedDocs.value = {}
+    const doc = docName.value
+    // 锁定目标与本次导航的文档不一致（如浏览器后退/前进）时解除锁定，交回滚动联动
+    if (lockedSectionId && lockedDocName !== doc) clearSectionLock()
+    manualExpanded.value = Object.fromEntries(
+      Object.entries(manualExpanded.value).filter(
+        ([key]) => key === docKey(doc) || key.startsWith(`${doc}::`)
+      )
+    )
     await loadDoc()
     await nextTick()
-    measureActiveSection()
+    refreshActiveSection()
     scrollToHash()
   }
 )
@@ -274,86 +420,64 @@ watch(
       <div class="docs-layout">
         <!-- ========== 左：文档 + 章节目录 ========== -->
         <aside class="docs-sidebar">
-          <nav class="sidebar-nav">
-            <div v-for="doc in docs" :key="doc.name" class="nav-doc">
-              <div class="nav-row nav-row--doc" :class="{ 'is-active': doc.name === docName }">
-                <button
-                  type="button"
-                  class="nav-toggle"
-                  :aria-expanded="isDocExpanded(doc.name)"
-                  :aria-label="`${isDocExpanded(doc.name) ? '收起' : '展开'}${doc.title}的章节`"
-                  @click="toggleDoc(doc.name)"
+          <OMenu
+            class="docs-menu"
+            arrow-position="left"
+            :model-value="menuActiveValue"
+            :expanded="menuExpanded"
+            @expanded-change="syncExpandedKeys"
+          >
+            <OSubMenu v-for="doc in docs" :key="doc.name" :value="docKey(doc.name)">
+              <template #title>
+                <a
+                  class="menu-link"
+                  :href="`/docs/${doc.name}`"
+                  @click="handleDocClick($event, doc.name)"
                 >
-                  <OIcon
-                    class="nav-chevron"
-                    :class="{ 'is-expanded': isDocExpanded(doc.name) }"
-                    :icon="OIconChevronDown"
-                  />
-                </button>
-                <router-link class="nav-doc-link" :to="`/docs/${doc.name}`">
                   {{ doc.title }}
-                </router-link>
-              </div>
+                </a>
+              </template>
 
-              <div v-show="isDocExpanded(doc.name)" class="nav-sections">
-                <div v-for="section in doc.outline" :key="section.id" class="nav-section">
-                  <div
-                    class="nav-row nav-row--section"
-                    :class="{
-                      'is-active': isActiveSection(doc.name, section.id),
-                      'is-current': isCurrentSection(doc.name, section.id),
-                    }"
-                  >
-                    <button
-                      v-if="section.children.length"
-                      type="button"
-                      class="nav-toggle"
-                      :aria-expanded="isSectionExpanded(doc.name, section.id)"
-                      :aria-label="`${isSectionExpanded(doc.name, section.id) ? '收起' : '展开'}${section.text}的小节`"
-                      @click="toggleSection(doc.name, section.id)"
-                    >
-                      <OIcon
-                        class="nav-chevron"
-                        :class="{ 'is-expanded': isSectionExpanded(doc.name, section.id) }"
-                        :icon="OIconChevronDown"
-                      />
-                    </button>
-                    <span v-else class="nav-toggle-spacer" aria-hidden="true"></span>
+              <template v-for="section in doc.outline" :key="section.id">
+                <!-- 含小节的章节：二级分组（可折叠），点击标题跳转到该章节并展开下级目录 -->
+                <OSubMenu v-if="section.children.length" :value="sectionKey(doc.name, section.id)">
+                  <template #title>
                     <a
-                      class="nav-link"
+                      class="menu-link"
                       :href="`/docs/${doc.name}#${section.id}`"
-                      @click="handleSectionClick($event, doc.name, section.id)"
+                      @click="handleGroupSectionClick($event, doc.name, section.id)"
                     >
                       {{ section.text }}
                     </a>
-                  </div>
-
-                  <div
-                    v-if="section.children.length && isSectionExpanded(doc.name, section.id)"
-                    class="nav-subs"
+                  </template>
+                  <OMenuItem
+                    v-for="child in section.children"
+                    :key="child.id"
+                    :value="sectionKey(doc.name, child.id)"
                   >
-                    <div
-                      v-for="child in section.children"
-                      :key="child.id"
-                      class="nav-row nav-row--sub"
-                      :class="{
-                        'is-active': isActiveSection(doc.name, child.id),
-                        'is-current': isCurrentSection(doc.name, child.id),
-                      }"
+                    <a
+                      class="menu-link"
+                      :href="`/docs/${doc.name}#${child.id}`"
+                      @click="handleSectionClick($event, doc.name, child.id)"
                     >
-                      <a
-                        class="nav-link"
-                        :href="`/docs/${doc.name}#${child.id}`"
-                        @click="handleSectionClick($event, doc.name, child.id)"
-                      >
-                        {{ child.text }}
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </nav>
+                      {{ child.text }}
+                    </a>
+                  </OMenuItem>
+                </OSubMenu>
+
+                <!-- 无小节的章节：叶子项 -->
+                <OMenuItem v-else :value="sectionKey(doc.name, section.id)">
+                  <a
+                    class="menu-link"
+                    :href="`/docs/${doc.name}#${section.id}`"
+                    @click="handleSectionClick($event, doc.name, section.id)"
+                  >
+                    {{ section.text }}
+                  </a>
+                </OMenuItem>
+              </template>
+            </OSubMenu>
+          </OMenu>
         </aside>
 
         <!-- ========== 右：正文卡片 ========== -->
@@ -461,8 +585,7 @@ $guide-color: #e0e2e6;
   padding: 0 24px;
 }
 
-/* ===== 页标题：48/64 semibold，距页头 48px；副标题 18/26（80% 黑） =====
-   行高用设计稿定值（首页 hero 标题同样写法），避免 var() 行高在当前构建下不生效 */
+/* ===== 页标题：40px / 64px 行高 semibold，距页头 48px；副标题 18/26（60% 黑） ===== */
 .page-title {
   margin: 0;
   padding-top: 48px;
@@ -481,7 +604,8 @@ $guide-color: #e0e2e6;
   font-size: var(--o-font_size-text2);
   line-height: 26px;
   letter-spacing: 0px;
-  color: var(--o-color-info2);
+  /* 与贡献页副标题（.hero-subtitle，info3）保持一致 */
+  color: var(--o-color-info3);
 }
 
 /* ===== 左栏 272px + 右栏白卡（设计稿：栏间距 32px、与标题区间距 72px） ===== */
@@ -509,59 +633,55 @@ $guide-color: #e0e2e6;
   }
 }
 
-/* ===== 目录行：统一 8px 上下内边距 + 24px 行高（40px），文字距行左 4px ===== */
-.nav-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-  min-height: 40px;
-  padding: 8px 4px;
-  border-radius: 8px;
-  transition: background-color 0.15s;
+/* ===== 左侧目录（OpenDesign OMenu，arrowPosition=left）：
+   层级缩进、引导线、展开动画、hover 底色与选中路径高亮均由组件规范提供；
+   行高/字号沿用设计稿（14px 文字、40px 行），hover 底色用组件令牌 control2-light ===== */
+.docs-menu {
+  --menu-width: 100%;
+  --menu-bg-color: transparent;
+  --menu-item-padding-v: 8px;
+  --menu-padding-h: 8px;
+  --menu-text-size: var(--o-font_size-text1);
+  --menu-text-height: var(--o_line_height-text1);
+  /* 引导线：浅色用设计稿定值（深色见下方令牌覆盖） */
+  --menu-indicator-bg-color: #{$guide-color};
 
-  @include hover {
-    background: var(--o-color-fill1);
+  /* medium 档在 ≤1680px 会把一级项文字压到 tip1，这里按设计稿保持 text1 */
+  :deep(.o-sub-menu[data-level='0'] > .o-sub-menu-title),
+  :deep(.o-menu-item[data-level='0']) {
+    --menu-text-size: var(--o-font_size-text1);
+    --menu-text-height: var(--o_line_height-text1);
   }
-}
 
-.nav-doc-link,
-.nav-link {
-  flex: 1;
-  min-width: 0;
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-font_size-text1);
-  line-height: var(--o_line_height-text1);
-  letter-spacing: 0px;
-  color: var(--o-color-info2);
-  text-decoration: none;
-  transition: color 0.15s;
-
-  @include hover {
-    color: var(--o-color-primary1);
+  /* 目录行：设计稿 40px 行高 */
+  :deep(.o-sub-menu-title),
+  :deep(.o-menu-item) {
+    position: relative;
+    min-height: 40px;
   }
-}
 
-/* 当前文档 / 当前章节路径：蓝色 medium（设计稿） */
-.nav-row.is-active {
-  .nav-doc-link,
-  .nav-link {
-    font-weight: var(--o-font_weight-medium);
-    color: var(--o-color-primary1);
+  /* 行内容区撑满行宽、允许自然换行（组件默认内容自适应宽且 2 行截断，与设计稿不符） */
+  :deep(.o-sub-menu-title-content),
+  :deep(.o-menu-item-content) {
+    flex: 1;
+    margin-right: 0;
+    display: block;
+    overflow: visible;
+    word-break: break-word;
   }
-}
 
-/* 滚动到的当前章节：浅蓝底 + 左侧 2×32 蓝色指示条（设计稿） */
-.nav-row.is-current {
-  border-radius: 4px;
-  background: var(--o-color-control3-light);
+  /* 当前章节为二级分组（含子项）时同样给浅蓝底（组件默认仅叶节点有底色） */
+  :deep(.o-sub-menu-selected > .o-sub-menu-title) {
+    background-color: var(--menu-bg-color-selected);
+  }
 
-  &::before {
+  /* 当前章节：左侧 2×32 蓝色指示条（设计稿） */
+  :deep(.o-menu-item-selected)::before,
+  :deep(.o-sub-menu-selected > .o-sub-menu-title)::before {
     content: '';
     position: absolute;
-    left: -5px;
     top: 50%;
+    left: 0;
     transform: translateY(-50%);
     width: 2px;
     height: 32px;
@@ -570,18 +690,12 @@ $guide-color: #e0e2e6;
   }
 }
 
-/* 章节（h2）：左缩进 21px，引导线位于 x=80（设计稿：行左 16px） */
-.nav-sections {
-  margin-left: 16px;
-  padding-left: 4px;
-  border-left: 1px solid $guide-color;
-}
-
-/* 子章节（h3）：再缩进 16px，引导线位于 x=97（设计稿：行左 101） */
-.nav-subs {
-  margin-left: 12px;
-  padding-left: 3px;
-  border-left: 1px solid $guide-color;
+/* 目录链接：保留原生 <a> 语义（支持新标签打开），占满行内容区宽度；
+   行高、hover/选中底色由目录行负责 */
+.menu-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
 }
 
 /* 深色模式下页面底色交回站点（设计稿仅提供浅色参考） */
@@ -590,48 +704,8 @@ $guide-color: #e0e2e6;
 }
 
 /* 深色模式下引导线改用令牌（设计稿浅色值在深色底上过亮） */
-[data-o-theme='e.dark'] .nav-sections,
-[data-o-theme='e.dark'] .nav-subs {
-  border-left-color: var(--o-color-control4);
-}
-
-/* 折叠箭头：置于行首（文字左侧），收起朝下、展开朝上；颜色 info2 → hover primary1 */
-.nav-toggle {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-right: var(--o-gap-2);
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--o-color-info2);
-  cursor: pointer;
-  transition: color 0.15s;
-
-  @include hover {
-    color: var(--o-color-primary1);
-  }
-}
-
-/* 无子章节的行占位，保持同组文字左缘对齐 */
-.nav-toggle-spacer {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  margin-right: var(--o-gap-2);
-}
-
-/* 组件库图标 OIconChevronDown：尺寸用 icon 令牌，旋转过渡用组件规范时长/缓动令牌 */
-.nav-chevron {
-  --icon-size: var(--o-icon_size-m);
-  transition: transform var(--o-duration-m2) var(--o-easing-standard);
-
-  &.is-expanded {
-    transform: rotate(180deg);
-  }
+[data-o-theme='e.dark'] .docs-menu {
+  --menu-indicator-bg-color: var(--o-color-control4);
 }
 
 /* ===== 正文卡片：白色、圆角 8、内边距 24/40/32，宽至 1412px（设计稿） ===== */

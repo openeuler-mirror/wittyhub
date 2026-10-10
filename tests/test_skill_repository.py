@@ -73,6 +73,100 @@ class TestSkillRepositoryUnit:
         explicit_sql = str(explicit_statement.compile(dialect=postgresql.dialect()))
         assert "updated_at=" in explicit_sql
 
+    @pytest.mark.asyncio
+    async def test_store_skills_updates_existing_skill_and_updated_at(self):
+        from sqlalchemy.dialects import postgresql
+
+        from src.models.repository import SkillRepository
+
+        repo_id = uuid.uuid4()
+        skill_id = "github:acme/example/example-skill"
+        existing = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            commit_id="old-commit",
+            tree_hash="old-tree",
+            download_count=12,
+        )
+        scanned = SimpleNamespace(
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            name="example-skill",
+            description="Updated description",
+            version=None,
+            commit_id="new-commit",
+            tree_hash="new-tree",
+            author="acme",
+            source="github",
+            source_url="https://github.com/acme/example",
+            repo_url="https://github.com/acme/example",
+            category="Development",
+            tags=["example"],
+            platform="personal",
+            extra_metadata={},
+            content="# Updated",
+            risk_score=10,
+            rating=None,
+        )
+        existing_result = MagicMock()
+        existing_result.scalars.return_value.all.return_value = [existing]
+        versions_result = MagicMock()
+        versions_result.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        session.execute.side_effect = [existing_result, MagicMock(), versions_result]
+
+        await SkillRepository(session).store_skills_and_versions(
+            repo_id,
+            [scanned],
+            [],
+            commit=False,
+        )
+
+        update_statement = session.execute.await_args_list[1].args[0]
+        compiled = update_statement.compile(dialect=postgresql.dialect())
+        assert "UPDATE skills SET" in str(compiled)
+        assert "updated_at=" in str(compiled)
+        assert compiled.params["download_count"] == 12
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_skips_unchanged_existing_skill(self):
+        from src.models.repository import SkillRepository
+
+        repo_id = uuid.uuid4()
+        skill_id = "github:acme/example/example-skill"
+        existing = SimpleNamespace(
+            id=uuid.uuid4(),
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            commit_id="old-commit",
+            tree_hash="same-tree",
+            download_count=12,
+        )
+        scanned = SimpleNamespace(
+            skill_repo_id=repo_id,
+            skill_id=skill_id,
+            commit_id="new-repo-commit",
+            tree_hash="same-tree",
+        )
+        existing_result = MagicMock()
+        existing_result.scalars.return_value.all.return_value = [existing]
+        versions_result = MagicMock()
+        versions_result.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        session.execute.side_effect = [existing_result, versions_result]
+
+        await SkillRepository(session).store_skills_and_versions(
+            repo_id,
+            [scanned],
+            [],
+            commit=False,
+        )
+
+        assert session.execute.await_count == 2
+        session.add.assert_not_called()
+
     def test_list_with_skill_id_prefix_filters_by_repo(self):
         from sqlalchemy import select
         from sqlalchemy.dialects import postgresql
@@ -239,6 +333,20 @@ class TestSkillRepositoryUnit:
             )
         )
 
+        assert request.platform == "community"
+
+    def test_single_url_discover_normalizes_atomgit_url(self):
+        from skillcrawler.main import _build_single_url_discover_request
+
+        request = _build_single_url_discover_request(
+            SimpleNamespace(
+                url="https://atomgit.com/openeuler/mcp-servers.git",
+                branch=None,
+                platform=None,
+            )
+        )
+
+        assert request.url == "https://gitcode.com/openeuler/mcp-servers"
         assert request.platform == "community"
 
     def test_single_url_discover_explicit_platform_wins(self):
@@ -2023,6 +2131,7 @@ class TestConfig:
             settings = get_settings()
             assert settings is not None
             assert "postgresql" in settings.postgres.url
+            assert settings.postgres.sync_url.startswith("postgresql+psycopg2://")
 
 
 class TestAPIRoutes:

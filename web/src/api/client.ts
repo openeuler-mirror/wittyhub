@@ -109,6 +109,8 @@ export const api = {
     security_level?: string
     mode?: 'text' | 'semantic' | 'hybrid'
     scope?: 'summary' | 'full'
+    sort_by?: 'relevance' | 'updated_at' | 'download_count'
+    sort_period?: 'week' | 'month'
   } = {}): Promise<SearchResponse> {
     const { data } = await client.get('/index/search', { params })
     return data

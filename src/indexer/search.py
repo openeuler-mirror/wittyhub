@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 import re
 
 from sqlalchemy import desc, func, literal_column, select, text, or_
@@ -6,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
 from src.api.services.categories import category_label
-from src.models.orm import Skill
+from src.models.orm import DownloadHistory, Skill
+
+
+# Hybrid search ranks a stable, bounded candidate pool so total and pagination
+# do not change as the caller moves between pages.
+HYBRID_CANDIDATE_LIMIT = 200
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
@@ -156,23 +162,38 @@ class SearchService:
         embedding: list[float] | None = None,
         mode: str = "hybrid",
         scope: str = "summary",
+        translated_query: str | None = None,
+        translated_embedding: list[float] | None = None,
+        sort_by: str = "relevance",
+        sort_period: str | None = None,
     ) -> dict[str, Any]:
+        # 显式排序（热门/最新）时先取无分页候选集，再统一排序分页；
+        # 默认 relevance 保持各模式现有相关度排序与分页行为不变。
+        has_sort = sort_by in ("updated_at", "download_count")
+
         if embedding and mode == "semantic":
-            return await self._vector_search(
+            vector_results = await self._vector_search(
                 embedding=embedding,
-                limit=limit,
-                offset=offset,
+                limit=HYBRID_CANDIDATE_LIMIT if has_sort else limit,
+                offset=0 if has_sort else offset,
                 category=category,
                 platform=platform,
                 tags=tags,
                 security_level=security_level,
             )
+            if not has_sort:
+                return vector_results
+            return await self._sorted_search_response(
+                vector_results.get("results", []),
+                query=query, mode="semantic", offset=offset, limit=limit,
+                sort_by=sort_by, sort_period=sort_period,
+            )
 
         is_hybrid = bool(embedding and mode == "hybrid")
         text_results = await self._text_search(
             query=query,
-            limit=limit * 2 if is_hybrid else limit,
-            offset=0 if is_hybrid else offset,
+            limit=HYBRID_CANDIDATE_LIMIT if (is_hybrid or has_sort) else limit,
+            offset=0 if (is_hybrid or has_sort) else offset,
             category=category,
             platform=platform,
             tags=tags,
@@ -183,35 +204,51 @@ class SearchService:
         if is_hybrid:
             vector_results = await self._vector_search(
                 embedding=embedding,
-                limit=limit * 2,
+                limit=HYBRID_CANDIDATE_LIMIT,
                 offset=0,
                 category=category,
                 platform=platform,
                 tags=tags,
                 security_level=security_level,
             )
-            combined = reciprocal_rank_fusion(
-                text_results.get("results", []),
-                vector_results.get("results", []),
-            )
+            ranked_lists = [text_results.get("results", []), vector_results.get("results", [])]
+            if translated_query:
+                translated_text = await self._text_search(
+                    query=translated_query, limit=HYBRID_CANDIDATE_LIMIT,
+                    category=category, platform=platform, tags=tags,
+                    scope=scope, security_level=security_level,
+                )
+                ranked_lists.append(translated_text.get("results", []))
+            if translated_embedding:
+                translated_vector = await self._vector_search(
+                    embedding=translated_embedding, limit=HYBRID_CANDIDATE_LIMIT,
+                    offset=0, category=category, platform=platform, tags=tags,
+                    security_level=security_level,
+                )
+                ranked_lists.append(translated_vector.get("results", []))
+            combined = reciprocal_rank_fusion(*ranked_lists)
             deduped = self._dedupe_skill_results(combined)
+            if has_sort:
+                return await self._sorted_search_response(
+                    deduped,
+                    query=query, mode="hybrid", offset=offset, limit=limit,
+                    sort_by=sort_by, sort_period=sort_period,
+                )
             return {
                 "results": deduped[offset:offset + limit],
-                "total": text_results["total"],
+                "total": len(deduped),
                 "query": query,
                 "skip": offset,
                 "limit": limit,
                 "mode": "hybrid",
             }
-        elif embedding and mode == "semantic":
-            return await self._vector_search(
-                embedding=embedding,
-                limit=limit,
-                offset=offset,
-                category=category,
-                platform=platform,
-                tags=tags,
-                security_level=security_level,
+        elif has_sort:
+            # 纯文本模式 + 显式排序：候选集为无分页取回的相关度 Top N
+            deduped = self._dedupe_skill_results(text_results["results"])
+            return await self._sorted_search_response(
+                deduped,
+                query=query, mode="text", offset=offset, limit=limit,
+                sort_by=sort_by, sort_period=sort_period,
             )
         else:
             # _text_search 已在 SQL 层完成 limit/offset 分页（见上方 limit/offset 传参），
@@ -225,6 +262,104 @@ class SearchService:
                 "limit": limit,
                 "mode": "text",
             }
+
+    async def _sorted_search_response(
+        self,
+        candidates: list[dict[str, Any]],
+        *,
+        query: str,
+        mode: str,
+        offset: int,
+        limit: int,
+        sort_by: str,
+        sort_period: str | None,
+    ) -> dict[str, Any]:
+        """在搜索候选集内应用显式排序，语义与列表端点一致。
+
+        - 热门-本周/本月：inner join download_history 周期聚合，仅保留周期内
+          有下载的结果并按周期下载量排序（total 同口径）；结果附 period_downloads。
+        - 其他排序：直接按候选字段排序，total 为候选总数。
+        """
+        if sort_period in ("week", "month"):
+            ordered, total = await self._order_candidates_by_period(candidates, sort_period)
+        else:
+            ordered = self._sort_candidates(candidates, sort_by)
+            total = len(ordered)
+        return {
+            "results": ordered[offset:offset + limit],
+            "total": total,
+            "query": query,
+            "skip": offset,
+            "limit": limit,
+            "mode": mode,
+        }
+
+    @staticmethod
+    def _sort_candidates(
+        candidates: list[dict[str, Any]], sort_by: str
+    ) -> list[dict[str, Any]]:
+        if sort_by == "download_count":
+            return sorted(
+                candidates,
+                key=lambda c: (
+                    c.get("download_count") or 0,
+                    c.get("updated_at") or "",
+                    c.get("created_at") or "",
+                ),
+                reverse=True,
+            )
+        return sorted(
+            candidates,
+            key=lambda c: (c.get("updated_at") or "", c.get("created_at") or ""),
+            reverse=True,
+        )
+
+    async def _order_candidates_by_period(
+        self, candidates: list[dict[str, Any]], sort_period: str
+    ) -> tuple[list[dict[str, Any]], int]:
+        # cutoff 口径与 SkillRepository.list 一致（UTC 周一 00:00 / 月初 00:00）
+        now = datetime.now(timezone.utc)
+        if sort_period == "week":
+            cutoff = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            cutoff = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        dl_subquery = (
+            select(
+                DownloadHistory.resource_id,
+                func.count(DownloadHistory.id).label("period_downloads"),
+            )
+            .where(DownloadHistory.resource_type == "skill")
+            .where(DownloadHistory.downloaded_at >= cutoff)
+            .group_by(DownloadHistory.resource_id)
+            .subquery()
+        )
+        id_list = [c["id"] for c in candidates]
+        if not id_list:
+            return [], 0
+
+        rows = (
+            await self.session.execute(
+                select(Skill.id, dl_subquery.c.period_downloads)
+                .join(dl_subquery, Skill.id == dl_subquery.c.resource_id)
+                .where(Skill.id.in_(id_list))
+                .order_by(
+                    desc(dl_subquery.c.period_downloads),
+                    desc(Skill.updated_at),
+                    desc(Skill.created_at),
+                )
+            )
+        ).all()
+
+        by_id = {c["id"]: c for c in candidates}
+        ordered: list[dict[str, Any]] = []
+        for skill_id, period_downloads in rows:
+            item = dict(by_id.get(str(skill_id), {}))
+            if not item:
+                continue
+            item["period_downloads"] = int(period_downloads or 0)
+            ordered.append(item)
+        return ordered, len(ordered)
 
     async def _text_search(
         self,
@@ -413,8 +548,9 @@ class SearchService:
 
         results = []
         for row in rows:
-            similarity = 1 / (1 + float(row.distance)) if row.distance else None
-            if similarity and similarity < min_similarity:
+            distance = float(row.distance)
+            similarity = 1 / (1 + distance)
+            if similarity < min_similarity:
                 continue
             results.append({
                 "id": str(row.id),
@@ -434,7 +570,7 @@ class SearchService:
                 "rating": row.rating,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "distance": float(row.distance) if row.distance else None,
+                "distance": distance,
                 "similarity": similarity,
             })
 

@@ -1,50 +1,32 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSkillStore } from '@/stores/skill'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const skillStore = useSkillStore()
 
 const platformLabel: Record<string, string> = {
-  openeuler: '社区SIG',
+  community: '社区SIG',
   enterprise: '企业组织',
   personal: '个人'
 }
 
-const platformKeys = ['openeuler', 'enterprise', 'personal']
+const platformKeys = ['community', 'enterprise', 'personal']
 
 const providers = computed(() => {
-  const platformCounts: Record<string, number> = {}
-  for (const p of skillStore.stats?.platforms ?? []) {
-    platformCounts[p.name] = p.count
-  }
   return platformKeys.map(key => ({
     name: platformLabel[key],
-    value: key,
-    count: platformCounts[key] ?? 0
+    value: key
   }))
 })
 
-const providerTotal = computed(() => providers.value.reduce((s, p) => s + p.count, 0))
-
 const allCategories = computed(() => skillStore.categories)
-const categoryTotal = computed(() => allCategories.value.reduce((s, c) => s + c.count, 0))
 
 const ALL_SECURITY_LEVELS = ['安全', '低风险', '中风险', '高风险']
 
 const securityLevels = computed(() => {
-  const levelCounts: Record<string, number> = {}
-  for (const l of skillStore.stats?.security_levels ?? []) {
-    if (l.name !== '未检测') {
-      levelCounts[l.name] = l.count
-    }
-  }
-  return ALL_SECURITY_LEVELS.map(name => ({
-    name,
-    count: levelCounts[name] ?? 0
-  }))
+  return ALL_SECURITY_LEVELS.map(name => ({ name }))
 })
-
-const securityLevelTotal = computed(() => securityLevels.value.reduce((s, l) => s + l.count, 0))
 
 function selectProviderAll() {
   skillStore.setFilter('provider', [])
@@ -66,7 +48,10 @@ function toggleArrayItem(arr: string[], item: string): string[] {
 }
 
 function selectCategory(name: string) {
-  skillStore.setFilter('category', toggleArrayItem(skillStore.filter.category, name))
+  const next = toggleArrayItem(skillStore.filter.category, name)
+    // 上报本次点击的单个分类（而非整个选中数组），便于按分类维度聚合统计
+  oaReport('filter_change', { module: 'filter', dim: 'category', value: name })
+  skillStore.setFilter('category', next)
   skillStore.fetchSkills()
 }
 
@@ -74,6 +59,7 @@ function selectProvider(name: string) {
   const current = skillStore.filter.provider
   // 单选语义：再次点击已选中的项保持选中不变
   if (current.length === 1 && current[0] === name) return
+  oaReport('filter_change', { module: 'filter', dim: 'provider', value: name })
   skillStore.setFilter('provider', [name])
   skillStore.fetchSkills()
 }
@@ -82,11 +68,13 @@ function selectSecurityLevel(name: string) {
   const current = skillStore.filter.securityLevel
   // 单选语义：再次点击已选中的项保持选中不变
   if (current.length === 1 && current[0] === name) return
+  oaReport('filter_change', { module: 'filter', dim: 'security_level', value: name })
   skillStore.setFilter('securityLevel', [name])
   skillStore.fetchSkills()
 }
 
 function clearFilters() {
+  oaReport('filter_clear', { module: 'filter' })
   skillStore.resetFilter()
   skillStore.fetchSkills()
 }
@@ -113,7 +101,6 @@ const hasActiveFilter = computed(() => {
               </span>
               全部
             </span>
-            <span class="filter-count">{{ providerTotal }}</span>
           </div>
           <div
             v-for="p in providers"
@@ -127,7 +114,6 @@ const hasActiveFilter = computed(() => {
               </span>
               {{ p.name }}
             </span>
-            <span class="filter-count">{{ p.count }}</span>
           </div>
         </div>
       </div>
@@ -148,7 +134,6 @@ const hasActiveFilter = computed(() => {
               </span>
               全部
             </span>
-            <span class="filter-count">{{ categoryTotal }}</span>
           </div>
           <div
             v-for="cat in allCategories"
@@ -165,7 +150,6 @@ const hasActiveFilter = computed(() => {
               </span>
               {{ cat.label || cat.name }}
             </span>
-            <span class="filter-count">{{ cat.count }}</span>
           </div>
         </div>
       </div>
@@ -183,7 +167,6 @@ const hasActiveFilter = computed(() => {
               </span>
               全部
             </span>
-            <span class="filter-count">{{ securityLevelTotal }}</span>
           </div>
           <div
             v-for="level in securityLevels"
@@ -197,7 +180,6 @@ const hasActiveFilter = computed(() => {
               </span>
               {{ level.name }}
             </span>
-            <span class="filter-count">{{ level.count }}</span>
           </div>
         </div>
       </div>
@@ -228,17 +210,17 @@ const hasActiveFilter = computed(() => {
 
 [data-o-theme="e.dark"] .filter-radio,
 .dark .filter-radio {
-  background-color: #242427;
+  background-color: var(--o-color-fill2);
 }
 
 [data-o-theme="e.dark"] .filter-radio-active::after,
 .dark .filter-radio-active::after {
-  background: #242427;
+  background: var(--o-color-fill2);
 }
 
 [data-o-theme="e.dark"] .filter-checkbox,
 .dark .filter-checkbox {
-  background-color: #242427;
+  background-color: var(--o-color-fill2);
 }
 
 .filter-item-label {
@@ -262,13 +244,9 @@ const hasActiveFilter = computed(() => {
 .filter-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 8px 12px;
   border-radius: var(--o-radius-s);
   cursor: pointer;
-  font-size: var(--o-r-font_size-tip1);
-  line-height: var(--o-r-line_height-tip1);
-  color: var(--o-color-info1);
   transition: all var(--o-duration-s) var(--o-easing-standard);
   user-select: none;
 }
@@ -285,11 +263,10 @@ const hasActiveFilter = computed(() => {
 
 [data-o-theme="e.dark"] .filter-item:hover,
 .dark .filter-item:hover {
-  background: #2B2B2F;
+  background: var(--o-color-fill3);
 }
 
 .filter-item-active {
-  color: var(--o-color-primary1);
   font-weight: var(--o-font_weight-medium);
   background-color: #CEDBF5;
   border-radius: var(--o-radius-s);
@@ -303,15 +280,6 @@ const hasActiveFilter = computed(() => {
 [data-o-theme="e.dark"] .filter-item-active,
 .dark .filter-item-active {
   background-color: #353539;
-}
-
-.filter-count {
-  font-size: var(--o-r-font_size-tip2);
-  color: var(--o-color-info3);
-}
-
-.filter-item-active .filter-count {
-  color: var(--o-color-primary1);
 }
 
 .filter-radio {

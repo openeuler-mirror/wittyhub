@@ -19,13 +19,15 @@ async def require_admin_token(
             detail="Admin API authentication is not configured",
         )
 
-    if (
-        credentials is None
-        or credentials.scheme.lower() != "bearer"
-        or not secrets.compare_digest(credentials.credentials, expected_token)
-    ):
+    if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
+            detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not secrets.compare_digest(credentials.credentials, expected_token):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid authentication credentials",
         )

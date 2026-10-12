@@ -11,7 +11,8 @@ from urllib.parse import unquote, urlparse
 import aiofiles
 
 from src.core.config import get_settings
-from src.models.orm import Skill, SkillRepoModel
+from src.models.orm import Skill, SkillRepoModel, SkillVersion
+from src.utils.skill_id import slugify_identifier
 
 settings = get_settings()
 MAX_STORAGE_READ_BYTES = 20 * 1024 * 1024
@@ -44,7 +45,7 @@ class DownloadManager:
     async def create_skill_archive(
         self,
         *,
-        skill: Skill,
+        skill: Skill | SkillVersion,
         repository: SkillRepoModel,
     ) -> SkillArchive:
         repository_path = self._validate_repository_path(repository.local_path)
@@ -52,6 +53,8 @@ class DownloadManager:
             skill_id=skill.skill_id,
             source=repository.source,
             repository_url=repository.url,
+            source_url=skill.source_url,
+            refs=[skill.commit_id, skill.version, repository.branch, 'HEAD', 'master', 'main'],
         )
         commit_id = self._validate_commit_id(skill.commit_id)
 
@@ -85,17 +88,34 @@ class DownloadManager:
         skill_id: str,
         source: str,
         repository_url: str | None,
+        source_url: str,
+        refs: list[str],
     ) -> str:
         owner_repo = DownloadManager._extract_owner_repo(repository_url)
-        prefix = f"{source}/{owner_repo}/"
+        prefix = f"{source}:{owner_repo}/"
         if not skill_id.startswith(prefix):
             raise SkillArchiveConflictError(f"Skill ID does not belong to repository: {skill_id}")
 
-        relative_path = skill_id.removeprefix(prefix).rstrip("/")
-        path = PurePosixPath(relative_path)
-        if not relative_path or path.is_absolute() or ".." in path.parts:
-            raise SkillArchiveConflictError("Invalid Skill repository path")
-        return path.as_posix()
+        # skill_id only carries the skill name now, so the repository-relative
+        # directory is recovered from the browse URL.  The ref follows /blob/
+        # and may itself contain slashes, so match against known refs instead
+        # of blindly splitting on '/'.
+        for ref in dict.fromkeys(ref for ref in refs if ref):
+            marker = f"/blob/{ref}/"
+            if marker not in source_url:
+                continue
+            file_path = source_url.split(marker, 1)[1].rstrip("/")
+            if not file_path.endswith("SKILL.md"):
+                continue
+            relative_path = file_path.removesuffix("SKILL.md").rstrip("/")
+            path = PurePosixPath(relative_path)
+            if not relative_path or path.is_absolute() or ".." in path.parts:
+                raise SkillArchiveConflictError("Invalid Skill repository path")
+            return path.as_posix()
+
+        raise SkillArchiveNotFoundError(
+            "Skill relative path cannot be resolved from source URL"
+        )
 
     @staticmethod
     def _extract_owner_repo(repository_url: str | None) -> str:
@@ -117,17 +137,11 @@ class DownloadManager:
         if len(segments) < 2:
             raise SkillArchiveConflictError("Invalid Skill repository URL")
 
-        owner = DownloadManager._slugify_identifier(segments[-2])
-        repository_name = DownloadManager._slugify_identifier(segments[-1])
+        owner = slugify_identifier(segments[-2])
+        repository_name = slugify_identifier(segments[-1])
         if not owner or not repository_name:
             raise SkillArchiveConflictError("Invalid Skill repository URL")
         return f"{owner}/{repository_name}"
-
-    @staticmethod
-    def _slugify_identifier(value: str) -> str:
-        normalized = re.sub(r"[^a-z0-9._-]+", "-", value.strip().lower())
-        normalized = re.sub(r"-{2,}", "-", normalized)
-        return normalized.strip("-")
 
     @staticmethod
     def _validate_repository_path(local_path: str | None) -> Path:
@@ -221,7 +235,7 @@ class DownloadManager:
         cleaned = re.sub(r"[^0-9A-Za-z._-]+", "-", value).strip(".-_")
         return cleaned or "skill"
 
-    def _build_archive_filename(self, skill: Skill) -> str:
+    def _build_archive_filename(self, skill: Skill | SkillVersion) -> str:
         name = self._sanitize_filename(skill.name)
         if skill.version:
             version = self._sanitize_filename(skill.version)

@@ -109,7 +109,11 @@ class SecurityService:
             "details": merged_details,
         }
 
-        await self.audit_repo.create(audit_data)
+        # 使用 upsert_by_resource 保证幂等：同一 (resource_type, resource_id)
+        # 只保留一条记录。并发触发同一 skill 审计时，后续请求会更新已有记录
+        # 而非新建，避免重复入库。同时重置 skillspector_collected 标志，
+        # 让后台收集器重新拉取 Jenkins 结果。
+        await self.audit_repo.upsert_by_resource("skill", skill.id, audit_data)
         await self.skill_repo.update(skill_id, {"risk_score": risk_score})
 
         await self.session.commit()
@@ -129,6 +133,93 @@ class SecurityService:
             "scanners": scanner_names,
         }
 
+    async def audit_external(
+        self,
+        git_url: str,
+        ref: str = "main",
+        skill_path: str = "",
+        scanners: list[str] | None = None,
+        async_mode: bool = False,
+    ) -> dict[str, Any]:
+        """Run a one-off security audit for a git URL that is NOT registered.
+
+        Used by the openEuler-skills PR gate to audit proposed content
+        (a skill repository or a single SKILL.md) before it is merged and
+        registered.  Nothing is persisted to the database.
+
+        Returns a dict with ``git_url``, ``ref``, ``skill_path``,
+        ``risk_level``, ``risk_score``, ``risk_signals`` and ``details``.
+        """
+        if scanners is None:
+            scanners = []
+            if self.detector.has_skillspector:
+                scanners.append("skillspector")
+
+        all_signals: list[RiskSignal] = []
+        merged_details: dict[str, Any] = {}
+        scanner_names: list[str] = []
+        skillspector_score: int | None = None
+        sp_report: Any = None
+
+        # --- Skillspector ---
+        if "skillspector" in scanners:
+            if async_mode:
+                build_number = await self.detector.trigger_skillspector(
+                    git_url, version=ref, skill_path=skill_path,
+                )
+                merged_details["skillspector_build_number"] = build_number
+                merged_details["skillspector_async"] = True
+                scanner_names.append("skillspector")
+            else:
+                sp_report = await self.detector.detect_skillspector(
+                    git_url, version=ref, skill_path=skill_path,
+                )
+                if sp_report.risk_level != "unknown" or sp_report.risk_signals:
+                    all_signals.extend(sp_report.risk_signals)
+                    merged_details.update(sp_report.details)
+                    scanner_names.append("skillspector")
+                    if sp_report.details.get("skillspector_score") is not None:
+                        skillspector_score = sp_report.details["skillspector_score"]
+
+        # --- Calculate risk level & score ---
+        if async_mode:
+            risk_level = "unknown"
+            risk_score = None
+        elif scanner_names:
+            if sp_report is not None and sp_report.risk_level != "unknown":
+                risk_level = sp_report.risk_level
+            else:
+                risk_level = self.detector._calculate_risk_level(all_signals)
+            risk_score = (
+                skillspector_score
+                if skillspector_score is not None
+                else self._calculate_risk_score(risk_level)
+            )
+        else:
+            risk_level = "unknown"
+            risk_score = None
+
+        merged_details["scanners"] = scanner_names
+
+        return {
+            "git_url": git_url,
+            "ref": ref,
+            "skill_path": skill_path,
+            "risk_level": risk_level,
+            "risk_score": risk_score,
+            "risk_signals": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "severity": s.severity,
+                    "data": s.data,
+                }
+                for s in all_signals
+            ],
+            "details": merged_details,
+        }
+
 
     def _calculate_risk_score(self, risk_level: str) -> int | None:
         """Map risk_level to SkillSpector-compatible risk score (0-100, higher = riskier)."""
@@ -141,3 +232,18 @@ class SecurityService:
             "low": 10,
         }
         return score_map.get(risk_level)
+
+    async def get_external_result(self, build_number: int) -> dict[str, Any]:
+        """Query the result of a previously-triggered one-off audit-by-URL scan.
+
+        The PR gate triggers a scan with ``async_mode=True`` and polls this
+        until the Jenkins build finishes.  Nothing is persisted.
+        """
+        return await self.detector.get_external_result(build_number)
+
+    async def get_external_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report (report.md) for a one-off audit-by-URL scan.
+
+        Served to PR reviewers via the ``/audit-by-url/report`` download link.
+        """
+        return await self.detector.fetch_external_report_md(build_number)

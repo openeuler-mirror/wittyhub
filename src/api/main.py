@@ -28,7 +28,7 @@ def configure_logging() -> None:
         root_handler = logging.StreamHandler(sys.stdout)
         root_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s %(levelname)s %(name)s %(message)s"
+                "%(asctime)s %(levelname)s %(message)s"
             )
         )
         root_logger.addHandler(root_handler)
@@ -47,6 +47,14 @@ def configure_logging() -> None:
         registered_logger.setLevel(level)
         for handler in registered_logger.handlers:
             handler.setLevel(level)
+
+    # 压制 SQLAlchemy 池连接/归还及引擎的 DEBUG 日志
+    for noisy_parent in ("sqlalchemy.pool", "sqlalchemy.engine", "sqlalchemy.orm"):
+        logging.getLogger(noisy_parent).setLevel(logging.WARNING)
+        # 重置子 logger 为 NOTSET，使其继承父级的 WARNING，不打印DEBUG信息
+        for name, logger in logging.Logger.manager.loggerDict.items():
+            if name.startswith(noisy_parent + ".") and isinstance(logger, logging.Logger):
+                logger.setLevel(logging.NOTSET)
 
     structlog.configure(
         processors=[
@@ -72,10 +80,24 @@ async def lifespan(app: FastAPI):
 
         collector = await start_skillspector_collector()
 
+    discover_scheduler = None
+    if settings.discover_scheduler.enabled:
+        from src.api.services.discover_scheduler import start_discover_scheduler
+
+        discover_scheduler = await start_discover_scheduler()
+
     yield
 
+    if discover_scheduler is not None:
+        await discover_scheduler.stop()
     if collector is not None:
         await collector.stop()
+    from src.ai.embedding import close_embedding_service
+
+    await close_embedding_service()
+    from src.ai.translation import close_translation_service
+
+    await close_translation_service()
     logger.info("wittyhub shutting down")
 
 

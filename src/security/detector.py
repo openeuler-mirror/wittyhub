@@ -21,7 +21,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
+
+
+class _SecurityDetectorLogAdapter(logging.LoggerAdapter):
+    """给本模块所有日志消息统一加 "SecurityDetector: " 前缀。"""
+
+    def process(self, msg: Any, kwargs: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        return f"SecurityDetector: {msg}", kwargs
+
+
+logger: logging.LoggerAdapter[None] = _SecurityDetectorLogAdapter(
+    logging.getLogger(__name__), {}
+)
 
 ALLOWED_GIT_HOSTS = frozenset({
     "github.com",
@@ -30,6 +41,7 @@ ALLOWED_GIT_HOSTS = frozenset({
     "gitea.io",
     "gitee.com",
     "gitcode.com",
+    "atomgit.com",
     "codeberg.org",
     "git.sr.ht",
 })
@@ -183,7 +195,7 @@ def _log_skillspector_final_result(
 def _log_collector_event(event: str, **fields: Any) -> None:
     """Write one structured trace entry for an async collector decision."""
     payload = {"event": event, **fields}
-    logger.debug(
+    logger.info(
         "Skillspector collector: %s",
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str),
     )
@@ -211,7 +223,7 @@ class SkillspectorClient:
         jenkins_url: str,
         user: str = "",
         token: str = "",
-        timeout: float = 150.0,
+        timeout: float = 600.0,
         poll_interval: float = 1.0,
     ):
         self.base_url = jenkins_url.rstrip("/")
@@ -234,18 +246,26 @@ class SkillspectorClient:
         ref: str = "main",
         skill_path: str = "",
         scanners: str = "skillspector",
-    ) -> dict[str, Any]:
-        """Convenience: trigger a build, wait for it, and return the report."""
+    ) -> tuple[dict[str, Any], str | None]:
+        """Convenience: trigger a build, wait for it, and return the report.
+
+        Returns a ``(report, report_md)`` tuple.  ``report_md`` is the raw
+        Markdown report artifact (or *None* if unavailable).  A build may
+        finish with a non-SUCCESS status (e.g. skillspector reports a critical
+        finding and the pipeline exits non-zero) while still producing
+        report.json.  We therefore treat the report artifact as the source of
+        truth and only error out when it cannot be fetched.
+        """
         build_number = self.trigger_scan(git_url, ref, skill_path, scanners)
         if build_number is None:
-            return {"error": "Failed to trigger Jenkins build"}
+            return {"error": "Failed to trigger Jenkins build"}, None
         status = self.wait_for_build(build_number)
-        if status != "SUCCESS":
-            return {"error": f"Build {build_number} ended with status {status}"}
+        if status is None:
+            return {"error": f"Build {build_number} did not finish within the timeout"}, None
         report = self.fetch_report(build_number)
         if report is None:
-            return {"error": f"Failed to fetch report for build {build_number}"}
-        return report
+            return {"error": f"Failed to fetch report for build {build_number} (status {status})"}, None
+        return report, self.fetch_report_md(build_number)
 
     # ------------------------------------------------------------------
     # Low-level Jenkins API
@@ -394,6 +414,29 @@ class SkillspectorClient:
         report, _ = self.fetch_report_with_status(build_number)
         return report
 
+    def fetch_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report artifact (report.md) from a completed build."""
+        url = (
+            f"{self.base_url}{self.JOB_PATH}/{build_number}"
+            "/artifact/reports/skillspector/report.md"
+        )
+        with httpx.Client(timeout=30.0) as client:
+            try:
+                resp = client.get(url, auth=self.auth)
+            except httpx.RequestError as exc:
+                logger.error("Failed to fetch report.md: %s", exc)
+                return None
+
+        if resp.status_code != 200:
+            logger.warning(
+                "Report.md fetch failed: build_number=%s status_code=%s url=%s",
+                build_number,
+                resp.status_code,
+                url,
+            )
+            return None
+        return resp.text
+
     def fetch_report_with_status(
         self, build_number: int,
     ) -> tuple[dict[str, Any] | None, int | None]:
@@ -539,6 +582,35 @@ def _record_unavailable_report_attempt(
     return updated, exhausted
 
 
+MAX_DETAILS_BYTES = 1024 * 1024  # details 估算大小阈值（1MB），超过才截断
+SNIPPET_MAX_CHARS = 500          # 截断后单条 code_snippet 上限
+
+
+def _maybe_compress_details(details: dict[str, Any]) -> dict[str, Any]:
+    """details 估算大小超过阈值时才截断 code_snippet，小报告保持原样。
+
+    估算使用与 PG JSONB 存储同量级的序列化大小（不做 TOAST 压缩的精确模拟，
+    仅用于阈值决策）。小报告（≤1MB）完全原样保留，不影响前端完整展示；只对
+    异常大的记录瘦身，把触发面控制在极小范围。
+    """
+    if len(json.dumps(details, ensure_ascii=False).encode("utf-8")) <= MAX_DETAILS_BYTES:
+        return details
+
+    report = details.get("skillspector_report")
+    if not isinstance(report, dict):
+        return details
+    for issue in report.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        snippet = issue.get("code_snippet")
+        if isinstance(snippet, str) and len(snippet) > SNIPPET_MAX_CHARS:
+            issue["code_snippet"] = snippet[:SNIPPET_MAX_CHARS] + (
+                f"\n... [truncated, original {len(snippet)} chars]"
+            )
+            issue["truncated"] = True
+    return details
+
+
 class SkillspectorCollector:
     """Polls Jenkins for completed async scans and updates DB records."""
 
@@ -585,23 +657,46 @@ class SkillspectorCollector:
                 pending_count=len(pending),
                 batch_limit=100,
             )
-            for audit in pending:
-                audit_id = audit.id
-                build_number = (audit.details or {}).get("skillspector_build_number")
+            # Snapshot every scalar field before the loop. A failed item rolls
+            # back the session, which expires all ORM instances; reading
+            # ``audit.details`` on the next item after the rollback would then
+            # attempt async lazy loading outside a greenlet (MissingGreenlet)
+            # and break failure isolation for the whole batch.
+            snapshots = [
+                (
+                    audit.id,
+                    audit.resource_type,
+                    audit.resource_id,
+                    dict(audit.details or {}),
+                    list(audit.risk_signals or []),
+                )
+                for audit in pending
+            ]
+            for audit_id, resource_type, resource_id, details, risk_signals in snapshots:
+                build_number = details.get("skillspector_build_number")
                 if build_number is None:
                     _log_collector_event(
                         "item_skipped",
                         audit_id=audit_id,
-                        resource_id=audit.resource_id,
+                        resource_id=resource_id,
                         reason="missing_build_number",
                         next_action="leave_pending",
                     )
                     continue
                 try:
-                    if await self._collect_one(session, audit, build_number):
+                    if await self._collect_one(
+                        session,
+                        audit_id=audit_id,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        details=details,
+                        risk_signals=risk_signals,
+                        build_number=build_number,
+                    ):
                         processed += 1
                 except Exception:
-                    # Roll back to keep session usable for subsequent pending audits
+                    # Roll back to keep the session usable for subsequent pending
+                    # audits; the snapshot values keep them readable.
                     await session.rollback()
                     logger.exception(
                         "Failed to collect result for audit %s (build #%s)",
@@ -643,21 +738,34 @@ class SkillspectorCollector:
         return list(result.scalars().all())
 
     async def _collect_one(
-        self, session: AsyncSession, audit: Any, build_number: int,
+        self,
+        session: AsyncSession,
+        *,
+        audit_id: Any,
+        resource_type: str,
+        resource_id: str,
+        details: dict[str, Any],
+        risk_signals: list[Any],
+        build_number: int,
     ) -> bool:
-        """Collect a single Jenkins result.  Returns True if collected."""
+        """Collect a single Jenkins result.  Returns True if collected.
+
+        Works on plain snapshot values (never the ORM instance) so that a
+        session rollback triggered by a previous failure cannot expire the
+        attributes this method still needs.
+        """
         from src.models.orm import SecurityAudit, Skill, SkillVersion
 
         logger.debug(
             "Collecting Skillspector result: audit_id=%s build_number=%s",
-            audit.id,
+            audit_id,
             build_number,
         )
         _log_collector_event(
             "item_started",
-            audit_id=audit.id,
-            resource_id=audit.resource_id,
-            resource_type=audit.resource_type,
+            audit_id=audit_id,
+            resource_id=resource_id,
+            resource_type=resource_type,
             build_number=build_number,
         )
 
@@ -667,8 +775,8 @@ class SkillspectorCollector:
         if status in (None, "BUILDING"):
             _log_collector_event(
                 "item_deferred",
-                audit_id=audit.id,
-                resource_id=audit.resource_id,
+                audit_id=audit_id,
+                resource_id=resource_id,
                 build_number=build_number,
                 jenkins_status=status or "STATUS_UNAVAILABLE",
                 action="retry_next_poll",
@@ -678,8 +786,8 @@ class SkillspectorCollector:
 
         _log_collector_event(
             "status_resolved",
-            audit_id=audit.id,
-            resource_id=audit.resource_id,
+            audit_id=audit_id,
+            resource_id=resource_id,
             build_number=build_number,
             jenkins_status=status,
             action="collect_terminal_result",
@@ -693,19 +801,19 @@ class SkillspectorCollector:
 
         # These terminal states normally cannot produce a complete report.
         if status in {"ABORTED", "NOT_BUILT", "NOT_FOUND"}:
-            details = dict(audit.details or {})
-            details["skillspector_collected"] = True
-            details["skillspector_status"] = status
+            updated_details = dict(details)
+            updated_details["skillspector_collected"] = True
+            updated_details["skillspector_status"] = status
             await session.execute(
                 update(SecurityAudit)
-                .where(SecurityAudit.id == audit.id)
-                .values(details=details)
+                .where(SecurityAudit.id == audit_id)
+                .values(details=updated_details)
             )
             await session.commit()
             _log_collector_event(
                 "item_persisted",
-                audit_id=audit.id,
-                resource_id=audit.resource_id,
+                audit_id=audit_id,
+                resource_id=resource_id,
                 build_number=build_number,
                 outcome="completed_without_report",
                 writes={
@@ -718,7 +826,7 @@ class SkillspectorCollector:
                 next_action="stop_collecting",
             )
             _log_skillspector_final_result(
-                audit_id=audit.id,
+                audit_id=audit_id,
                 build_number=build_number,
                 status=status,
                 outcome="completed_without_report",
@@ -734,19 +842,19 @@ class SkillspectorCollector:
             build_number,
         )
         if report is None:
-            details, exhausted = _record_unavailable_report_attempt(
-                audit.details,
+            updated_details, exhausted = _record_unavailable_report_attempt(
+                details,
                 status,
                 terminal=report_status == 404,
             )
             await session.execute(
                 update(SecurityAudit)
-                .where(SecurityAudit.id == audit.id)
-                .values(details=details)
+                .where(SecurityAudit.id == audit_id)
+                .values(details=updated_details)
             )
             await session.commit()
 
-            attempts = details["skillspector_report_fetch_attempts"]
+            attempts = updated_details["skillspector_report_fetch_attempts"]
             if exhausted:
                 logger.error(
                     "Build #%d ended with %s but report is unavailable after %d attempts; "
@@ -756,7 +864,7 @@ class SkillspectorCollector:
                     attempts,
                 )
                 _log_skillspector_final_result(
-                    audit_id=audit.id,
+                    audit_id=audit_id,
                     build_number=build_number,
                     status=status,
                     outcome="completed_without_report",
@@ -764,8 +872,8 @@ class SkillspectorCollector:
                 )
                 _log_collector_event(
                     "item_persisted",
-                    audit_id=audit.id,
-                    resource_id=audit.resource_id,
+                    audit_id=audit_id,
+                    resource_id=resource_id,
                     build_number=build_number,
                     outcome="completed_without_report",
                     report_http_status=report_status,
@@ -784,8 +892,8 @@ class SkillspectorCollector:
 
             _log_collector_event(
                 "item_deferred",
-                audit_id=audit.id,
-                resource_id=audit.resource_id,
+                audit_id=audit_id,
+                resource_id=resource_id,
                 build_number=build_number,
                 jenkins_status=status,
                 report_http_status=report_status,
@@ -812,44 +920,46 @@ class SkillspectorCollector:
         risk_level_map = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
         risk_level = risk_level_map.get(severity, "low")
 
-        details = dict(audit.details or {})
+        details = dict(details)
         details["skillspector_collected"] = True
         details["skillspector_status"] = status
         details["skillspector_score"] = score
         details["skillspector_version"] = report.get("metadata", {}).get("skillspector_version")
         details["recommendation"] = report.get("risk_assessment", {}).get("recommendation")
         details["skillspector_report"] = report
+        # 仅当 details 估算大小超过阈值时才截断超长 code_snippet，小报告完整保留
+        _maybe_compress_details(details)
 
-        merged_signals = list(audit.risk_signals or []) + [s.__dict__ for s in signals]
+        merged_signals = list(risk_signals) + [s.__dict__ for s in signals]
 
         await session.execute(
             update(SecurityAudit)
-            .where(SecurityAudit.id == audit.id)
+            .where(SecurityAudit.id == audit_id)
             .values(risk_level=risk_level, risk_signals=merged_signals, details=details)
         )
 
         score_write_target = None
         if score is not None:
-            skill = await session.get(Skill, audit.resource_id)
+            skill = await session.get(Skill, resource_id)
             if skill is not None:
                 skill.risk_score = score
                 score_write_target = "skills.risk_score"
             else:
-                skill_version = await session.get(SkillVersion, audit.resource_id)
+                skill_version = await session.get(SkillVersion, resource_id)
                 if skill_version is not None:
                     skill_version.risk_score = score
                     score_write_target = "skill_versions.risk_score"
                 else:
                     logger.warning(
                         "Security audit resource not found: resource_id=%s",
-                        audit.resource_id,
+                        resource_id,
                     )
 
         await session.commit()
         _log_collector_event(
             "item_persisted",
-            audit_id=audit.id,
-            resource_id=audit.resource_id,
+            audit_id=audit_id,
+            resource_id=resource_id,
             build_number=build_number,
             outcome="report_collected",
             writes={
@@ -872,7 +982,7 @@ class SkillspectorCollector:
             next_action="stop_collecting",
         )
         _log_skillspector_final_result(
-            audit_id=audit.id,
+            audit_id=audit_id,
             build_number=build_number,
             status=status,
             outcome="report_collected",
@@ -904,6 +1014,7 @@ class SecurityDetector:
                 jenkins_url=settings.security.skillspector_jenkins_url,
                 user=settings.security.skillspector_jenkins_user,
                 token=settings.security.skillspector_jenkins_token,
+                timeout=settings.security.skillspector_timeout,
             )
             if not self._skillspector_client.enabled:
                 logger.warning("skillspector enabled but no credentials configured")
@@ -1008,7 +1119,7 @@ class SecurityDetector:
         ref = version if version else "main"
 
         try:
-            report = await asyncio.to_thread(
+            report, report_md = await asyncio.to_thread(
                 self._skillspector_client.run_scan,
                 git_url=source_url,
                 ref=ref,
@@ -1041,19 +1152,149 @@ class SecurityDetector:
         risk_level_map = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
         risk_level = risk_level_map.get(severity, "unknown")
 
+        details: dict[str, Any] = {
+            "source": "skillspector",
+            "skillspector_version": report.get("metadata", {}).get("skillspector_version"),
+            "skillspector_score": score,
+            "recommendation": report.get("risk_assessment", {}).get("recommendation"),
+            "skillspector_report": report,
+        }
+        if report_md:
+            details["skillspector_report_md"] = report_md
+        # 仅当 details 估算大小超过阈值时才截断超长 code_snippet，小报告完整保留
+        _maybe_compress_details(details)
+
         return SecurityReport(
             resource_type="skill",
             resource_id=source_url,
             risk_level=risk_level,
             risk_signals=risk_signals,
-            details={
-                "source": "skillspector",
-                "skillspector_version": report.get("metadata", {}).get("skillspector_version"),
-                "skillspector_score": score,
-                "recommendation": report.get("risk_assessment", {}).get("recommendation"),
-                "skillspector_report": report,
-            },
+            details=details,
         )
+
+    async def fetch_external_report_md(self, build_number: int) -> str | None:
+        """Fetch the Markdown report (report.md) for a one-off scan build.
+
+        Used by the ``audit-by-url/report`` endpoint so PR reviewers can
+        download the full report for a single skill scan.
+        """
+        if not self.has_skillspector:
+            return None
+        try:
+            return await asyncio.to_thread(
+                self._skillspector_client.fetch_report_md, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector report.md fetch failed: %s", exc)
+            return None
+
+    async def get_external_result(
+        self, build_number: int
+    ) -> dict[str, Any]:
+        """Poll a previously-triggered one-off Skillspector scan (async mode).
+
+        Used by the ``audit-by-url`` result endpoint: the PR gate triggers a
+        scan with ``async_mode=True`` and polls this method until the Jenkins
+        build finishes, then collects report.json / report.md without
+        persisting anything to the database.
+
+        Returns a dict with a ``status`` field:
+        * ``"pending"``   - build still running or status unavailable
+        * ``"done"``      - report collected, includes risk_level/score/signals
+        * ``"error"``     - build not found or report could not be fetched
+        """
+        if not self.has_skillspector:
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "error": "Skillspector not configured",
+            }
+
+        try:
+            status = await asyncio.to_thread(
+                self._skillspector_client.get_build_status, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector status fetch failed: %s", exc)
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "error": str(exc)[:200],
+            }
+
+        if status in (None, "BUILDING"):
+            return {
+                "status": "pending",
+                "build_number": build_number,
+                "jenkins_status": status or "BUILDING",
+            }
+        if status == "NOT_FOUND":
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "jenkins_status": status,
+                "error": f"Build {build_number} not found",
+            }
+
+        try:
+            report = await asyncio.to_thread(
+                self._skillspector_client.fetch_report, build_number
+            )
+            report_md = await asyncio.to_thread(
+                self._skillspector_client.fetch_report_md, build_number
+            )
+        except Exception as exc:
+            logger.error("Skillspector report fetch failed: %s", exc)
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "jenkins_status": status,
+                "error": str(exc)[:200],
+            }
+
+        if report is None:
+            return {
+                "status": "error",
+                "build_number": build_number,
+                "jenkins_status": status,
+                "error": f"Failed to fetch report for build {build_number}",
+            }
+
+        risk_signals = SkillspectorClient.report_to_risk_signals(report)
+        severity = report.get("risk_assessment", {}).get("severity", "UNKNOWN").upper()
+        score = report.get("risk_assessment", {}).get("score")
+        risk_level_map = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
+        risk_level = risk_level_map.get(severity, "unknown")
+
+        details: dict[str, Any] = {
+            "source": "skillspector",
+            "skillspector_build_number": build_number,
+            "skillspector_version": report.get("metadata", {}).get("skillspector_version"),
+            "skillspector_score": score,
+            "recommendation": report.get("risk_assessment", {}).get("recommendation"),
+            "skillspector_report": report,
+        }
+        if report_md:
+            details["skillspector_report_md"] = report_md
+
+        return {
+            "status": "done",
+            "build_number": build_number,
+            "jenkins_status": status,
+            "risk_level": risk_level,
+            "risk_score": score,
+            "risk_signals": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "severity": s.severity,
+                    "data": s.data,
+                }
+                for s in risk_signals
+            ],
+            "details": details,
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1073,6 +1314,7 @@ async def start_skillspector_collector() -> SkillspectorCollector | None:
         jenkins_url=settings.security.skillspector_jenkins_url,
         user=settings.security.skillspector_jenkins_user,
         token=settings.security.skillspector_jenkins_token,
+        timeout=settings.security.skillspector_timeout,
     )
     if not client.enabled:
         logger.warning("Skillspector enabled but no credentials — collector skipped")

@@ -23,8 +23,8 @@ WittyHub 是一个去中心化的 Agent/Skill 检索与下载平台。平台本�
 | 去中心化 | 内容在外部仓库，本地仅存索引，降低审查与存储成本 |
 | 单库多能力 | PostgreSQL 同时承担关系存储、全文检索（tsvector）、向量检索（pgvector） |
 | 搜索可降级 | Embedding 服务不可用时自动回退到全文搜索 |
-| 多源下载适配 | 统一 DownloadManager 抽象，按 source 生成各平台下载 URL |
-| 安全优先 | 入库触发 Socket.dev + 静态规则检测，输出风险评分 |
+| 多源下载适配 | DownloadManager 基于 skillcrawler 本地克隆 `git archive` 打包，缓存复用 |
+| 安全优先 | 入库触发 Jenkins SkillSpector（NVIDIA）深度扫描，输出风险评分 |
 
 ### 1.3 技术栈
 
@@ -57,7 +57,7 @@ graph LR
     subgraph 外部系统
         GH[GitHub / GitCode / Gitee]
         EMB[Embedding 服务]
-        SOC[Socket.dev]
+        SOC[SkillSpector]
     end
 
     WU --> SYS
@@ -92,7 +92,7 @@ graph LR
 | UC-10 | 触发向量重索引 | System Admin, CLI User | 已实现 | P1 |
 | UC-11 | 查看系统统计 | System Admin | 已实现 | P1 |
 | UC-12 | 多版本历史查询 | CLI User, Web User | 已实现 | P1 |
-| UC-13 | 爬虫自动发现 | System Admin | 待开发 | P1 |
+| UC-13 | 爬虫自动发现 | System Admin | 已实现 | P1 |
 
 ---
 
@@ -117,8 +117,8 @@ graph TB
     subgraph 领域服务层 Domain Services
         SRCH[SearchService<br/>全文 + 向量 + RRF]
         EMBS[EmbeddingService<br/>BGE 编码]
-        DLM[DownloadManager<br/>多源 URL 适配]
-        SEC[SecurityService<br/>Socket.dev + 静态分析]
+        DLM[DownloadManager<br/>git archive 打包]
+        SEC[SecurityService<br/>Jenkins SkillSpector]
     end
 
     subgraph 数据访问层 Data Access
@@ -315,7 +315,6 @@ RRF_score(d) = Σ  1 / (k + rank_i(d))     , k = 60
 |----------|------|------|
 | 全量重索引 | `POST /api/v1/index/reindex` | 遍历 skills，批量生成 embedding 并更新 |
 | 单条重索引 | `POST /api/v1/index/reindex/{skill_id}` | 针对单个 Skill 更新向量 |
-| CLI 触发 | `wittyhub reindex` | 调用全量重索引 API |
 
 #### 4.1.8 降级策略
 
@@ -366,16 +365,17 @@ def upgrade() -> None:
 
 ---
 
-### 4.2 多源下载方案
+### 4.2 Skill 下载方案
 
 #### 4.2.1 问题陈述
 
 | 挑战 | 描述 |
 |------|------|
-| 多平台差异 | GitHub 提供 archive.zip，GitCode/Gitee 目录结构不同 |
-| 去中心化 | 平台不托管 Skill 内容，只返回外部下载链接 |
-| 版本锁定 | 需支持 branch / tag / commit_id 三种版本粒度 |
-| CLI 安装 | 需从 ZIP 中定位 `skills/{skill-name}/` 子目录并解压到本地 |
+| 内容分发 | Skill 内容托管在外部仓库，平台基于 skillcrawler 维护的本地克隆直接打包分发 ZIP，不回源外部平台 |
+| 版本锁定 | latest（HEAD）与 Tag 版本两种粒度，Tag 版本通过 `?version=` 参数从 `skill_versions` 表定位 |
+| 路径恢复 | `skill_id` 只携带 Skill 名，需从 `source_url` 的 `/blob/{ref}/` 标记恢复仓库内相对路径 |
+| 打包校验 | 需校验 commit 对象与 Skill 目录在本地克隆中可用，避免打包出空档/坏档 |
+| 重复打包 | 相同 `(skill_id, commit_id, relative_path)` 的 ZIP 缓存复用 |
 
 #### 4.2.2 下载架构
 
@@ -383,60 +383,62 @@ def upgrade() -> None:
 graph LR
     subgraph 客户端
         WEB[Web 详情页]
-        CLI[CLI install]
+        CLI[CLI]
     end
 
     subgraph WittyHub API
-        DL[GET /skills/id/download]
+        DL["GET /skills/{skill_id}/download"]
         DM[DownloadManager]
     end
 
-    subgraph 外部仓库
-        GH[GitHub archive.zip]
-        GC[GitCode archive/tree]
-        GT[Gitee archive/tree]
+    subgraph 本地存储
+        REPO["skill-repositories/&lt;repo&gt;<br/>(skillcrawler 克隆)"]
+        CACHE["download-cache/*.zip"]
     end
 
     WEB --> DL
     CLI --> DL
     DL --> DM
-    DM -->|source=github| GH
-    DM -->|source=gitcode| GC
-    DM -->|source=gitee| GT
+    DM -->|"git archive {commit}:{path}"| REPO
+    DM -->|缓存命中| CACHE
+    DM -->|FileResponse application/zip| WEB
 ```
 
-#### 4.2.3 URL 格式化规则
+#### 4.2.3 归档构建规则
 
-| 来源 | 条件 | 生成 URL 格式 |
-|------|------|---------------|
-| GitHub | 有 commit_id | `https://github.com/{owner}/{repo}/archive/{commit_id}.zip` |
-| GitHub | 有 version (branch) | `https://github.com/{owner}/{repo}/archive/refs/heads/{version}.zip` |
-| GitCode | 有 commit_id | `https://gitcode.com/{owner}/{repo}/archive/{commit_id}.zip` |
-| GitCode | 有 skill_id | `https://gitcode.com/{owner}/{repo}/tree/{version}/skills/{skill_name}` |
-| Gitee | 同 GitCode 规则 | `https://gitee.com/{owner}/{repo}/...` |
+核心实现：`src/storage/downloader.py` → `DownloadManager.create_skill_archive()`
 
-核心实现：`src/storage/downloader.py` → `DownloadManager.get_download_url()`
+1. 校验 `skill_id` 前缀 `source:owner/repo/` 与仓库归属一致
+2. 从 `source_url` 的 `/blob/{ref}/.../SKILL.md` 标记恢复 Skill 相对路径，ref 依次尝试
+   `commit_id`、`version`、`branch`、`HEAD`、`master`、`main`
+3. `git cat-file -e` 校验 `{commit_id}^{commit}` 与 `{commit_id}:{relative_path}/SKILL.md`
+   对象存在，缺失时返回 404
+4. `git archive --format=zip --prefix={skill_name}/ {commit_id}:{relative_path}` 打包，
+   ZIP 根目录即 Skill 名
+5. 缓存 key = `sha256(skill_id:commit_id:relative_path)`，缓存目录
+   `<storage.local_path>/download-cache/`；命中且非空直接复用
+6. 下载文件名：`{name}-{version}.zip`（Tag 版本）或 `{name}.zip`（latest）
 
 #### 4.2.4 下载流程（API 侧）
 
-1. 根据 `skill_id` 查询索引记录，获取 `source`、`source_url`、`version`、`commit_id`
-2. `DownloadManager` 按 source 格式化下载 URL
-3. 写入 `download_history`（IP、User-Agent）
+1. 根据 `skill_id`（可选 `version` 查询参数）查询 Skill 或 SkillVersion 及其仓库记录
+2. `DownloadManager` 从本地仓库克隆构建或复用 ZIP
+3. 写入 `download_history`（resource_type、IP、User-Agent）
 4. `download_count` 自增
-5. 返回 `{ download_url }` 给客户端
+5. `FileResponse` 返回 `application/zip` 文件流
+
+错误码：404 Skill/版本不存在或 Git 对象缺失；409 仓库元数据缺失或本地克隆不可用；
+500 打包失败。
 
 #### 4.2.5 CLI 安装流程（客户端侧）
 
-CLI `install` 命令在客户端完成实际下载与解压，平台不参与文件传输：
+CLI 下载 ZIP 后在客户端完成解压安装：
 
 ```
-1. 调用 API 获取 download_url 和 skill 元数据
-2. 下载 archive.zip（urllib）
-3. 解析 ZIP，定位 skills/{skill-name}/ 目录
-   - 精确匹配 skill 文件夹名
-   - 模糊匹配（去连字符/下划线后比较）
-4. 解压到 ~/.agents/skills/{skill_relative_path}/
-5. 若目录已存在则先删除再安装
+1. 调用 API GET /skills/{skill_id}/download 下载 ZIP
+2. 解压 ZIP，根目录即 {skill-name}/（含 SKILL.md）
+3. 安装到 agent 的 skills 目录（~/.agents/skills/{skill-name}/）
+4. 若目录已存在则先删除再安装
 ```
 
 本地目录结构：
@@ -450,9 +452,11 @@ CLI `install` 命令在客户端完成实际下载与解压，平台不参与文
     └── ...
 ```
 
-#### 4.2.6 中国区优化
+#### 4.2.6 多源与中国区优化
 
-GitCode / Gitee 作为国内镜像，DownloadManager 针对其 URL 模式单独适配；GitHub 请求可配置 `github_token` 提高 rate limit。
+多源支持统一收敛在 skillcrawler 爬取阶段：GitHub / GitCode / Gitee 仓库均以
+`git clone` 方式落地到本地 `skill-repositories/`，下载侧无需感知平台差异。
+GitHub 爬取可配置 `github_token` 提高 rate limit。
 
 ---
 
@@ -619,24 +623,21 @@ sequenceDiagram
     participant API as Skills Router
     participant DM as DownloadManager
     participant PG as PostgreSQL
-    participant GH as GitHub
+    participant REPO as 本地仓库克隆
 
-    User->>CLI: wittyhub install owner/repo/skill-name
+    User->>CLI: wittyhub add <skill_id>
 
     CLI->>API: GET /skills/{skill_id}/download
     API->>PG: 查询 skill 记录
-    PG-->>API: source, source_url, version, commit_id
-    API->>DM: get_download_url(source, ...)
-    DM-->>API: https://github.com/.../archive/....zip
+    PG-->>API: source, source_url, version, commit_id, skill_repo
+    API->>DM: create_skill_archive(skill, repository)
+    DM->>REPO: git archive {commit_id}:{relative_path}
+    DM-->>API: Skill ZIP（缓存复用）
     API->>PG: 记录 download_history, increment download_count
-    API-->>CLI: {download_url}
+    API-->>CLI: application/zip 文件流
 
-    CLI->>CLI: GET /skills/{skill_id} (获取元数据)
-    CLI->>GH: 下载 archive.zip
-    GH-->>CLI: ZIP 二进制
-
-    CLI->>CLI: 解析 ZIP，定位 skills/{name}/
-    CLI->>CLI: 解压到 ~/.agents/skills/{name}/
+    CLI->>CLI: 解压 ZIP（根目录即 {skill-name}/）
+    CLI->>CLI: 安装到 ~/.agents/skills/{name}/
     CLI-->>User: Successfully installed!
 ```
 
@@ -677,7 +678,7 @@ sequenceDiagram
     actor Importer as 导入脚本/Admin
     participant API as Skills Router
     participant SEC as SecurityService
-    participant SOC as Socket.dev
+    participant SOC as SkillSpector
     participant REPO as SkillRepository
     participant PG as PostgreSQL
 
@@ -687,7 +688,7 @@ sequenceDiagram
         API-->>Importer: 409 Conflict
     else 新 Skill
         API->>SEC: audit_skill(skill_id, source, ...)
-        SEC->>SOC: 供应链安全检测
+        SEC->>SOC: 提交 Jenkins Job + 轮询结果
         SOC-->>SEC: risk_signals, risk_level
         SEC-->>API: risk_score
         API->>REPO: create(skill_dict)
@@ -736,32 +737,32 @@ GET /api/v1/index/search?q={query}&mode=hybrid&category=&tags=&skip=0&limit=20
 
 **目标**：一键将远程 Skill 安装到本地 Agent 技能目录。
 
-**前置条件**：Skill 已索引；用户网络可访问外部仓库。
+**前置条件**：Skill 已索引；平台本地有 skillcrawler 维护的仓库克隆。
 
 **主成功场景**：
 
 | 步骤 | 动作 |
 |------|------|
-| 1 | CLI 调用 download API 获取 ZIP 下载链接 |
-| 2 | CLI 调用 get API 获取 skill 元数据（version 等） |
-| 3 | 下载 archive.zip |
-| 4 | 在 ZIP 中定位 `skills/{skill-name}/` 目录 |
-| 5 | 解压到 `~/.agents/skills/{path}/` |
-| 6 | 输出安装路径 |
+| 1 | CLI 调用 `GET /skills/{skill_id}/download` 下载 ZIP（`?version=` 指定 Tag 版本） |
+| 2 | API 从本地仓库克隆 `git archive` 打包（或命中缓存），返回 `application/zip` |
+| 3 | CLI 解压 ZIP（根目录即 `{skill-name}/`） |
+| 4 | 安装到 `~/.agents/skills/{name}/` |
+| 5 | 输出安装路径 |
 
 **异常场景**：
 
 | 条件 | 行为 |
 |------|------|
-| ZIP 中找不到 skill 目录 | 列出可用 skills 子目录，提示手动下载 |
-| 下载超时/失败 | 输出 download_url 供手动下载 |
+| Skill 或版本不存在 | API 返回 404 |
+| 仓库元数据或本地克隆缺失 | API 返回 409 |
+| 打包失败 | API 返回 500 |
 | 目标目录已存在 | 先删除再安装 |
 
 **命令**：
 
 ```bash
-wittyhub install vercel-labs/skills/find-skills
-wittyhub install anthropics/skills/frontend-design --target ./my-skills
+wittyhub add vercel-labs/agent-skills
+wittyhub add anthropics/skills
 ```
 
 ---
@@ -783,8 +784,6 @@ wittyhub install anthropics/skills/frontend-design --target ./my-skills
 **命令**：
 
 ```bash
-wittyhub reindex
-# 或
 curl -X POST http://localhost:8081/api/v1/index/reindex
 ```
 
@@ -818,7 +817,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 │  │                              /opt/wittyhub                         │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
-│  External: GitHub / GitCode / Gitee / Socket.dev                         │
+│  External: GitHub / GitCode / Gitee / SkillSpector                       │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -847,7 +846,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 - [ ] `GET /api/v1/index/search?q=测试&mode=hybrid` 返回结果
 - [ ] Web 首页 `http://localhost:8080` 可访问
 - [ ] PostgreSQL 扩展：`vector`, `pg_trgm`, `unaccent`, `zhcfg`
-- [ ] `wittyhub search "调试"` 与 `wittyhub install <id>` 正常
+- [ ] `wittyhub add vercel-labs/agent-skills --list` 正常列出 Skills
 
 ---
 
@@ -859,36 +858,46 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 |------|------|------|
 | GET | `/api/v1/index/search` | 搜索（mode: text/semantic/hybrid） |
 | POST | `/api/v1/index/reindex` | 全量向量重索引 |
-| GET | `/api/v1/skills/{skill_id}/download` | 获取下载链接 |
-| GET | `/api/v1/skills/{skill_id}/audit` | 安全审计报告 |
+| GET | `/api/v1/skills/{skill_id}/download` | 下载 Skill ZIP（`?version=` 指定 Tag 版本） |
+| GET | `/api/v1/skills/{skill_id}/audit` | 安全审计结果 |
+| GET | `/api/v1/skills/versions/{skill_id}` | 版本历史列表 |
 | GET | `/api/v1/health` | 健康检查 |
 
-### 8.2 CLI 命令
+### 8.2 CLI 命令（`wittyhub` npm 包）
 
 | 命令 | 说明 |
 |------|------|
-| `search` | 调用混合搜索 API |
-| `install` | 下载 ZIP 并解压到本地 |
-| `download` | 仅获取下载 URL |
-| `audit` | 查看安全审计 |
-| `reindex` | 触发向量重索引 |
+| `add <source>` | 从 git 仓库/URL/本地路径安装 Skills |
+| `use <pkg>@<skill>` | 免安装直接使用某个 Skill |
+| `list` (`ls`) | 列出已安装的 Skills |
+| `update [skills...]` | 更新已安装的 Skill 到最新版本 |
+| `get <source> --skill <skill>` | 查看 Skill 详情 |
+| `audit <source> --skill <skill>` | 显示 Skill 安全审计结果 |
+| `init [name]` | 创建新的 SKILL.md 模板 |
 
 ### 8.3 SkillCrawler 命令
 
 | 命令 | 说明 |
 |------|------|
-| `query` | 查询技能仓库 |
-| `create` | 创建技能仓库记录 |
-| `update` | 更新技能仓库 |
-| `delete` | 删除技能仓库 |
+| `discover` | 扫描配置仓库，发现 Skill、计算 tree hash、触发安全审计 |
+| `query` | 查询技能仓库状态 |
+| `delete` | 删除技能仓库记录 |
+| `popularity` | 更新仓库 stars/forks/watchers 等热度指标 |
 
 ---
 
-## 9. 待实现功能
+## 9. 后续扩展规划
+
+### 9.1 已落地
+
+| 优先级 | 功能 | 说明 | 状态 |
+|--------|------|------|------|
+| P1 | 爬虫自动发现 | skillcrawler discover 扫描 GitHub/GitCode/Gitee，自动入库 | 已实现 |
+
+### 9.2 待实现
 
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
-| P1 | 爬虫自动发现 | 定时扫描 GitHub/GitCode/Gitee，自动入库 |
 | P2 | 标签页浏览 | `/tags` 端点 + 前端标签页 |
 | P2 | 开发者页 | 按 author 聚合 Skill 列表 |
 | P3 | CLI 离线索引 | 本地缓存索引，无网络时搜索 |
@@ -901,12 +910,14 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 
 | 术语 | 说明 |
 |------|------|
-| skill_id | Skill 唯一标识，格式 `owner/repo/skill-name` |
+| skill_id | Skill 唯一标识，格式 `source:owner/repo/skill-name` |
+| tree_hash | Skill 目录的 Git tree hash，用于版本去重和安全审计结果复用 |
 | tsvector | PostgreSQL 全文搜索向量类型 |
 | pgvector | PostgreSQL 向量相似度扩展 |
 | RRF | Reciprocal Rank Fusion，多路排序融合算法 |
 | zhcfg | 中英文混合全文搜索配置 |
 | BGE | BAAI General Embedding，中文语义向量模型 |
+| SkillSpector | NVIDIA 开源的 Agent Skills 供应链安全扫描器，通过 Jenkins Job 执行 |
 
 ### B. 关键源码索引
 
@@ -915,7 +926,7 @@ curl -X POST http://localhost:8081/api/v1/index/reindex
 | 混合搜索 + RRF | `src/indexer/search.py` |
 | Embedding 编码 | `src/ai/embedding.py` |
 | 搜索 API + 重索引 | `src/api/routes/index.py` |
-| 下载 URL 格式化 | `src/storage/downloader.py` |
+| 下载 ZIP 打包 | `src/storage/downloader.py` |
 | 数据访问层 | `src/models/repository.py` |
 | ORM 模型 | `src/models/orm.py` |
 | 技能爬取 | `skillcrawler/main.py` |

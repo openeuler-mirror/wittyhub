@@ -6,13 +6,20 @@ WittyHub 的爬取阶段已经将 Skill 所属 Git 仓库克隆到本地，并�
 
 | 数据 | 来源 | 用途 |
 |------|------|------|
-| `skills.skill_id` | Skill 索引记录 | 解析 Skill 在仓库中的相对路径 |
+| `skills.skill_id` | Skill 索引记录 | 标识 Skill（格式 `{source}:{owner}/{repo}/{skill_name}`） |
 | `skills.commit_id` | Skill 索引记录 | 锁定下载内容对应的 Git 提交 |
+| `skills.source_url` | Skill 索引记录 | 从浏览 URL 反推 Skill 在仓库中的相对路径 |
+| `skills.version` | Skill 索引记录 | 作为 ref 候选项参与路径解析 |
 | `skills.name` | Skill 索引记录 | 生成 ZIP 内根目录名和下载文件名 |
-| `skills.version` | Skill 索引记录 | 生成下载文件名 |
 | `skills.skill_repo_id` | Skill 索引记录 | 关联所属仓库 |
-| `skill_repos.url` | 仓库记录 | 解析 `source/owner/repo` 前缀 |
-| `skill_repos.source` | 仓库记录 | 解析 `skill_id` 前缀 |
+| `skill_versions.commit_id` | Skill 版本记录 | 指定版本下载时锁定 Git 提交 |
+| `skill_versions.source_url` | Skill 版本记录 | 指定版本下载时反推仓库相对路径 |
+| `skill_versions.version` | Skill 版本记录 | 指定版本下载时的版本标识 |
+| `skill_versions.name` | Skill 版本记录 | 指定版本下载时生成 ZIP 文件名 |
+| `skill_versions.skill_repo_id` | Skill 版本记录 | 关联所属仓库 |
+| `skill_repos.url` | 仓库记录 | 解析 `owner/repo`，校验 `skill_id` 前缀 |
+| `skill_repos.source` | 仓库记录 | 校验 `skill_id` 前缀 |
+| `skill_repos.branch` | 仓库记录 | 作为 ref 候选项参与路径解析 |
 | `skill_repos.local_path` | 仓库记录 | 定位本地 Git 仓库绝对路径 |
 
 `storage.local_path` 是后端和爬虫共享的运行时数据根目录。当前配置为：
@@ -32,21 +39,27 @@ WittyHub 的爬取阶段已经将 Skill 所属 Git 仓库克隆到本地，并�
 
 下载接口不再返回远端仓库 URL，而是由后端从本地 Git 仓库导出单个 Skill 目录，生成 ZIP 后直接返回给前端。
 
+支持通过 `version` 查询参数下载历史版本。不传 `version` 时从 `skills` 表取最新版本；传入 `version` 时从 `skill_versions` 表查找对应版本记录，使用该版本的 `commit_id` 打包。
+
 ---
 
 ## 2. 总体流程
 
 ```mermaid
 flowchart TD
-    A["前端点击下载 ZIP"] --> B["GET /api/v1/skills/{skill_id}/download"]
-    B --> C["按 skill_id 查询 Skill，并预加载关联的 skill_repo"]
-    C --> D["校验 skill_repo.local_path 对应的本地 Git 仓库"]
-    D --> E["从 skill_id 解析 Skill 相对路径"]
-    E --> F["校验 commit_id"]
-    F --> I["校验 commit 下存在 Skill/SKILL.md"]
-    I --> J{"ZIP 缓存是否存在"}
-    J -->|存在| K["复用缓存 ZIP"]
-    J -->|不存在| L["git archive 生成 ZIP"]
+    A["前端点击下载 ZIP"] --> B["GET /api/v1/skills/{skill_id}/download?version=v1.0.0"]
+    B --> C{"version 参数是否存在"}
+    C -->|否| C1["按 skill_id 查询 skills 表（最新版本）"]
+    C -->|是| C2["按 skill_id + version 查询 skill_versions 表"]
+    C1 --> D["预加载关联的 skill_repo"]
+    C2 --> D
+    D --> E["校验 skill_repo.local_path 对应的本地 Git 仓库"]
+    E --> F["从 source_url 解析 Skill 相对路径"]
+    F --> G["校验 commit_id"]
+    G --> H["校验 commit 下存在 Skill/SKILL.md"]
+    H --> I{"ZIP 缓存是否存在"}
+    I -->|存在| J["复用缓存 ZIP"]
+    I -->|不存在| K["git archive 生成 ZIP"]
     L --> M["写入缓存目录"]
     K --> N["记录 download_history"]
     M --> N
@@ -59,9 +72,9 @@ flowchart TD
 
 | 模块 | 职责 |
 |------|------|
-| `src/api/routes/skills.py` | 下载接口，返回 `FileResponse` |
-| `src/models/repository.py` | 查询 Skill 并预加载所属 SkillRepo |
-| `src/storage/downloader.py` | 解析路径、校验 Git 对象、生成或复用 ZIP |
+| `src/api/routes/skills.py` | 下载接口，返回 `FileResponse`，支持 `version` 查询参数 |
+| `src/models/repository.py` | 查询 Skill/SkillVersion 并预加载所属 SkillRepo |
+| `src/storage/downloader.py` | 解析路径、校验 Git 对象、生成或复用 ZIP（兼容 Skill 和 SkillVersion） |
 | `web/src/api/client.ts` | 以 `responseType: 'blob'` 请求下载 |
 | `web/src/pages/SkillDetail.vue` | 下载按钮、下载状态、浏览器保存文件 |
 
@@ -71,13 +84,16 @@ flowchart TD
 
 ### 3.1 解析 Skill 相对路径
 
-下载接口拿到 `skill_id` 后，不直接使用 Skill 名称猜目录，而是根据仓库信息解析完整相对路径。
+`skill_id` 的格式为 `{source}:{owner}/{repo}/{skill_name}`，其中 `skill_name` 是 SKILL.md 所在目录的名称。`skill_id` **不再编码完整仓库相对路径**，因此下载时需要从 `source_url`（Git 平台浏览 URL）反向解析出 Skill 在仓库中的相对目录。
 
 示例：
 
 ```text
 skill.skill_id:
-gitcode/openeuler/opendesign-components/packages/skills/clean-code
+gitcode:openeuler/opendesign-components/clean-code
+
+skill.source_url:
+https://gitcode.com/openeuler/opendesign-components/blob/master/packages/skills/clean-code/SKILL.md
 
 skill_repo.source:
 gitcode
@@ -86,23 +102,17 @@ skill_repo.url:
 https://gitcode.com/openeuler/opendesign-components
 ```
 
-从 `skill_repo.url` 解析出：
+解析步骤（[downloader.py `resolve_skill_relative_path`](file:///home/wjh/polymind/wittyhub/src/storage/downloader.py#L85-L118)）：
+
+1. 从 `skill_repo.url` 提取 `owner/repo`（如 `openeuler/opendesign-components`）
+2. 拼出前缀 `gitcode:openeuler/opendesign-components/`，校验 `skill_id` 以此前缀开头
+3. 遍历 ref 候选列表 `[commit_id, version, branch, 'HEAD', 'master', 'main']`，在 `source_url` 中查找 `/blob/{ref}/` 标记
+4. 截取标记之后的文件路径，去掉末尾 `SKILL.md`，得到相对目录
 
 ```text
-owner/repo:
-openeuler/opendesign-components
-```
-
-拼出 Skill ID 前缀：
-
-```text
-gitcode/openeuler/opendesign-components/
-```
-
-从 `skill.skill_id` 去掉该前缀：
-
-```text
-packages/skills/clean-code
+source_url 中找到 /blob/master/ 标记
+截取: packages/skills/clean-code/SKILL.md
+去掉 SKILL.md: packages/skills/clean-code
 ```
 
 这个结果就是 Skill 在仓库中的相对目录。
@@ -300,7 +310,8 @@ os.replace(temporary_path, archive_path)
 请求：
 
 ```http
-GET /api/v1/skills/{skill_id}/download
+GET /api/v1/skills/{skill_id}/download                  # 最新版本
+GET /api/v1/skills/{skill_id}/download?version=v1.0.0   # 指定版本
 ```
 
 成功响应：
@@ -322,11 +333,17 @@ sequenceDiagram
     participant Git as 本地 Git 仓库
     participant Cache as ZIP 缓存
 
-    Web->>API: GET /skills/{skill_id}/download
-    API->>DB: 查询 Skill + SkillRepo
-    DB-->>API: skill, skill_repo
-    API->>DM: create_skill_archive(skill, repository)
-    DM->>DM: 解析 skill 相对路径
+    Web->>API: GET /skills/{skill_id}/download?version=v1.0.0
+    API->>API: 判断 version 参数是否存在
+    alt version 存在
+        API->>DB: 查询 SkillVersion + SkillRepo (skill_id + version)
+        DB-->>API: skill_version, skill_repo
+    else version 不存在
+        API->>DB: 查询 Skill + SkillRepo (skill_id)
+        DB-->>API: skill, skill_repo
+    end
+    API->>DM: create_skill_archive(skill_or_version, repository)
+    DM->>DM: 从 source_url 解析 Skill 相对路径
     DM->>Git: cat-file -e commit
     Git-->>DM: commit 存在
     DM->>Git: cat-file -e commit:path/SKILL.md
@@ -340,8 +357,8 @@ sequenceDiagram
         DM->>Cache: 写入 archive_key.zip
     end
     DM-->>API: SkillArchive(path, filename)
-    API->>DB: 写 download_history
-    API->>DB: increment download_count
+    API->>DB: 写 download_history (resource_type=skill 或 skill_version)
+    API->>DB: increment download_count (skills 或 skill_versions 表)
     API-->>Web: FileResponse application/zip
 ```
 
@@ -351,12 +368,15 @@ sequenceDiagram
 
 ```ts
 const blob = await api.getSkillDownload(skill.value.skill_id)
+// 下载指定版本
+const blob = await api.getSkillDownload(skill.value.skill_id, 'v1.0.0')
 ```
 
 API client 使用：
 
 ```ts
 client.get(`/skills/${encodeURIComponent(skillId)}/download`, {
+  params: version ? { version } : undefined,
   responseType: 'blob',
 })
 ```
@@ -382,10 +402,12 @@ flowchart TD
 | 场景 | 后端状态码 | 说明 |
 |------|------------|------|
 | Skill 不存在 | `404` | `skill_id` 没有对应记录 |
+| 指定版本不存在 | `404` | `skill_id` + `version` 在 `skill_versions` 表无记录 |
 | SkillRepo 缺失 | `409` | Skill 没有关联仓库信息 |
 | `local_path` 为空或不存在 | `409` | 本地仓库不可用 |
 | `local_path` 不是 Git 仓库 | `409` | 本地仓库无效 |
 | `skill_id` 不属于该仓库 | `409` | 前缀不匹配 |
+| `source_url` 无法解析路径 | `404` | 浏览 URL 中找不到已知 ref 的 `/blob/{ref}/` 标记 |
 | `commit_id` 缺失或格式非法 | `409` | 不能定位 Git 提交 |
 | 本地仓库没有该 commit | `409` | 需要重新同步仓库 |
 | 指定 commit 下没有 `SKILL.md` | `404` | 该提交下目标 Skill 不存在 |

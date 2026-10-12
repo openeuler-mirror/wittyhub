@@ -15,18 +15,22 @@ from urllib.parse import urlparse
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skillcrawler.config import load_crawler_config, normalize_dict_keys
+from skillcrawler.config import load_crawler_config, sync_openEuler_skills_repo
 from skillcrawler.core.category_classifier import CategoryClassificationError
 from skillcrawler.core.popularity import (
     PopularityCollector,
-    RepoPopularity,
     allocate_skill_downloads,
     estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+from skillcrawler.core.skill_parser import normalize_git_clone_url
 from src.core.config import get_settings
 from src.core.database import get_db_context
-from src.models.repository import SkillRepoRepository, SkillRepository
+from src.models.repository import (
+    ContributorRepository,
+    SkillRepoRepository,
+    SkillRepository,
+)
 
 settings = get_settings()
 
@@ -36,7 +40,7 @@ _LOG_LEVEL = getattr(logging, settings.logging.level.strip().upper(), logging.IN
 
 logging.basicConfig(
     level=_LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    format="%(asctime)s %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(_LOG_DIR / "skillcrawler.log"),
@@ -47,16 +51,16 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_KEYS = ["openeuler_repos", "personal_repos", "enterprise_repos"]
-PLATFORM_CONFIG_KEYS = {
-    "enterprise": "enterprise_repos",
-    "enterprise_repos": "enterprise_repos",
-    "openeuler": "openeuler_repos",
-    "openeuler_repos": "openeuler_repos",
-    "personal": "personal_repos",
-    "personal_repos": "personal_repos",
-}
-PLATFORM_CHOICES = list(PLATFORM_CONFIG_KEYS)
+PLATFORM_CHOICES = ("community", "enterprise", "personal")
+
+
+def _normalize_platform(platform: str) -> str:
+    normalized = platform.strip().lower()
+    if normalized not in PLATFORM_CHOICES:
+        raise ValueError(
+            f"Unsupported platform {platform!r}; expected community, enterprise, or personal"
+        )
+    return normalized
 
 DISCOVER_RESULT_COLUMNS = [
     ("#", "#", 5),
@@ -70,64 +74,41 @@ DISCOVER_RESULT_COLUMNS = [
 
 
 def _build_requests_from_config(
-    config_path: Path | None,
-    key: str,
+    repos_dict: dict[str, Any],
     platform: str,
-    *,
-    allow_empty: bool = False,
+    seen_urls: set[str] | None = None,
 ) -> list[SkillRepositoryRequest]:
-    """Read url entries from <key> in config."""
-    config = load_crawler_config(config_path)
-    urls = config.get(key)
-    if not isinstance(urls, list) or not urls:
-        if allow_empty and (urls == [] or urls is None):
-            return []
-        raise ValueError(f"No {key} entries found in config")
+    """Build requests for one catalog group from an already-loaded catalog."""
+    platform_urls = repos_dict.get(platform)
+    if not isinstance(platform_urls, list) or not platform_urls:
+        logger.warning(f"Discover: No {platform} entries found in config")
+        return []
 
-    seen: set[str] = set()
+    seen = seen_urls if seen_urls is not None else set()
     requests: list[SkillRepositoryRequest] = []
-    for item in urls:
-        if hasattr(item, "model_dump"):
-            normalized_item = item.model_dump()
-        elif isinstance(item, dict):
-            normalized_item = normalize_dict_keys(item)
-        else:
-            raise ValueError(f"Invalid entry in {key}: {item!r}")
-        url = normalized_item.get("url")
+    for item in platform_urls:
+        if not isinstance(item, dict):
+            raise ValueError(f"Invalid entry in {platform}: {item!r}")
+        url = item.get("url")
         if not isinstance(url, str) or not url.strip():
-            raise ValueError(f"Invalid url entry in {key}: {item!r}")
+            raise ValueError(f"Invalid url entry in {platform}: {item!r}")
         url = url.strip()
         if url in seen:
             continue
         seen.add(url)
-        branch = normalized_item.get("branch") or None
+        branch = item.get("branch") or None
+        sig_name = item.get("sig_name") if platform == "community" else None
+        if sig_name is not None:
+            sig_name = str(sig_name).strip() or None
         requests.append(
             SkillRepositoryRequest(
                 url=url,
                 branch=branch,
                 platform=platform,
+                sig_name=sig_name,
             )
         )
     return requests
-
-
-def _platform_for_config_key(key: str) -> str:
-    return key.removesuffix("_repos")
-
-
-def _config_key_for_platform(platform: str) -> str:
-    normalized = platform.strip().lower()
-    if normalized not in PLATFORM_CONFIG_KEYS:
-        raise ValueError(
-            f"Unsupported platform {platform!r}; expected enterprise, openeuler, or personal"
-        )
-    return PLATFORM_CONFIG_KEYS[normalized]
-
-
-def _config_keys_for_platform(platform: str | None) -> list[str]:
-    if platform is None:
-        return list(DEFAULT_CONFIG_KEYS)
-    return [_config_key_for_platform(platform)]
 
 
 def _format_skill_repo(repository: Any) -> str:
@@ -477,12 +458,6 @@ async def _discover_repositories_from_requests(
     return 1 if failed_count else 0
 
 
-def _platform_from_cli_value(platform: str | None) -> str | None:
-    if not platform:
-        return None
-    return _platform_for_config_key(_config_key_for_platform(platform))
-
-
 def _infer_platform_from_repo_url(repo_url: str | None) -> str | None:
     if not repo_url:
         return None
@@ -491,80 +466,65 @@ def _infer_platform_from_repo_url(repo_url: str | None) -> str | None:
         return None
     path_parts = [part for part in parsed.path.strip("/").split("/") if part]
     if len(path_parts) >= 2 and path_parts[0].lower() == "openeuler":
-        return "openeuler"
+        return "community"
     return None
 
 
 def _build_single_url_discover_request(
     args: argparse.Namespace,
 ) -> SkillRepositoryRequest:
-    platform = (
-        _platform_from_cli_value(args.platform)
-        or _infer_platform_from_repo_url(args.url)
-    )
+    normalized_url = normalize_git_clone_url(args.url)
+    # argparse choices already validate an explicitly supplied platform.
+    # 优先级：显式 --platform > URL 推断（gitcode.com/openeuler/* → community）> 默认 personal
+    platform = args.platform or _infer_platform_from_repo_url(normalized_url) or "personal"
     return SkillRepositoryRequest(
-        url=args.url,
+        url=normalized_url,
         branch=args.branch,
         platform=platform,
     )
 
 
-def _build_configured_discover_requests(
-    args: argparse.Namespace,
+def build_configured_discover_requests(
+    platform: str | None = None,
+    repository_path: Path | None = None,
 ) -> tuple[list[SkillRepositoryRequest], list[str]]:
-    config_path = Path(args.config) if args.config else None
-    config_keys = _config_keys_for_platform(args.platform)
+    """从 openEuler-skills catalog（或显式覆盖配置）构建 discover 请求列表。
+
+    供 CLI discover 与后台定时调度共用：读取全部三个 key
+    （community / personal / enterprise）并按 URL 去重。
+    指定 platform 时仅读取对应 key 且要求非空；否则每个 key 都允许为空。
+    """
+    # The default source is the openEuler-skills catalog repository.
+    if repository_path is not None:
+        repository_path = repository_path.expanduser()
+        if not repository_path.exists():
+            raise ValueError(f"openEuler-skills repository path does not exist: {repository_path}")
+        if not repository_path.is_dir():
+            raise ValueError(f"openEuler-skills repository path is not a directory: {repository_path}")
+    else:
+        repository_path = sync_openEuler_skills_repo()
+    repos_dict = load_crawler_config(repository_path)
+
+    if platform is None:
+        platform_keys = list(PLATFORM_CHOICES)
+    else:
+        platform_keys = [_normalize_platform(platform)]
+
     requests: list[SkillRepositoryRequest] = []
     seen_urls: set[str] = set()
+    for platform in platform_keys:
+        requests.extend(
+            _build_requests_from_config(
+                repos_dict,
+                platform,
+                seen_urls,
+            )
+        )
 
-    for config_key in config_keys:
-        platform = _platform_for_config_key(config_key)
-        for request in _build_requests_from_config(
-            config_path,
-            config_key,
-            platform,
-            allow_empty=args.platform is None,
-        ):
-            if request.url in seen_urls:
-                continue
-            seen_urls.add(request.url)
-            requests.append(request)
-
-    return requests, config_keys
-
-
-async def _discover_single_existing_repository(
-    manager: "SkillManager",
-    repo_id: str,
-    *,
-    force: bool,
-) -> int:
-    repository = await manager.discover_skills_from_single_existing_repository(repo_id, force=force)
-    _print_table(
-        [_successful_existing_repository_row("1", repository)],
-        DISCOVER_RESULT_COLUMNS,
-        empty_message="No skill repos to discover.",
-    )
-    print()
-    logger.info("Discover summary: total=1 success=1 failed=0 skipped=0")
-    return 0
-
-
-def _successful_existing_repository_row(index: str, repository: Any) -> dict[str, str]:
-    return {
-        "#": index,
-        "result": "success",
-        "status": str(repository.skill_discover_status or "-"),
-        "skills": str(repository.skill_num),
-        "name": _display_skill_repo_name(repository),
-        "url": repository.url or "-",
-        "error": "-",
-    }
+    return requests, platform_keys
 
 
 async def _run_discover(manager: "SkillManager", args: argparse.Namespace) -> int:
-    if args.id:
-        return await _run_discover_existing_repo_by_id(manager, args)
     if args.url:
         return await _run_discover_single_url(manager, args)
     return await _run_discover_from_config(manager, args)
@@ -574,12 +534,6 @@ async def _run_discover_single_url(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
-    if args.config:
-        raise _build_cli_error(
-            "discover",
-            "--config cannot be used with --url",
-            "python main.py discover --url \"https://example.com/repo\"",
-        )
     request = _build_single_url_discover_request(args)
     return await _discover_repositories_from_requests(
         manager,
@@ -598,29 +552,14 @@ async def _run_discover_from_config(
             "python main.py discover --url \"https://example.com/repo\" --branch main",
         )
 
-    requests, config_keys = _build_configured_discover_requests(args)
+    requests, config_keys = build_configured_discover_requests(
+        platform=args.platform,
+        repository_path=Path(args.repository_path) if args.repository_path else None,
+    )
     return await _discover_repositories_from_requests(
         manager,
         requests,
         source_label=f" from {', '.join(config_keys)}",
-    )
-
-
-async def _run_discover_existing_repo_by_id(
-    manager: "SkillManager",
-    args: argparse.Namespace,
-) -> int:
-    if args.url or args.branch:
-        raise _build_cli_error(
-            "discover",
-            "discover --id no longer supports --url/--branch; update skill repo config separately",
-            "python main.py discover --id <repo_id>",
-        )
-
-    return await _discover_single_existing_repository(
-        manager,
-        args.id,
-        force=args.force,
     )
 
 
@@ -657,14 +596,13 @@ async def _run_popularity(
     Fetches metrics from the hosting platform API, stores them on the
     matching ``skill_repos`` row (matched by URL), then distributes each
     repository's estimated total downloads across its skills. Repos are
-    weighted by type (enterprise / openeuler / personal) and individual
+    weighted by type (enterprise / community / personal) and individual
     skills by category popularity and risk score, so every skill ends up
     with a different download count. The frontend ranks popularity by the
     existing ``download_count`` field, so no frontend changes are needed.
     """
-    config_path = Path(args.config) if args.config else None
     collector = PopularityCollector()
-    results = await collector.collect(config_path, only=args.source)
+    results = await collector.collect(None, only=args.source)
 
     if not results:
         logger.info("No repos to collect popularity for")
@@ -755,16 +693,15 @@ def _add_query_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_discover_parser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "discover",
-        help="Register, clone, and scan skills from config or existing repos",
+        help="Register, clone, and scan skills from config or single URL",
     )
-    parser.add_argument("-i", "--id", help="Existing skill repo ID to rediscover")
     parser.add_argument("-u", "--url", help="Single Git repo URL to discover")
     parser.add_argument("-b", "--branch", help="Git branch to clone with --url")
     parser.add_argument(
-        "-c",
-        "--config",
+        "-r",
+        "--repository-path",
         default=None,
-        help="Repo list YAML path (default: skills/skill-repos.yaml)",
+        help="Local openEuler-skills checkout (default: auto-download)",
     )
     parser.add_argument(
         "-p",
@@ -772,12 +709,6 @@ def _add_discover_parser(subparsers: argparse._SubParsersAction) -> None:
         choices=PLATFORM_CHOICES,
         default=None,
         help="Config repo list to read (default: all repo lists)",
-    )
-    parser.add_argument(
-        "-f", "--force",
-        dest="force",
-        action="store_true",
-        help="Force rediscover existing repos even when status is discovering",
     )
 
 
@@ -796,12 +727,6 @@ def _add_popularity_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     parser.add_argument(
-        "-c",
-        "--config",
-        default=None,
-        help="Repo list YAML path (default: skills/skill-repos.yaml)",
-    )
-    parser.add_argument(
         "-s",
         "--source",
         choices=("github", "gitcode"),
@@ -813,12 +738,19 @@ def _add_popularity_parser(subparsers: argparse._SubParsersAction) -> None:
 async def _main() -> int:
     args = _build_parser().parse_args()
 
+    # Resolve the catalog once for discover so the classifier and request
+    # builder share the same checkout and do not issue duplicate pulls.
+    if args.action == "discover" and not getattr(args, "repository_path", None):
+        args.repository_path = str(sync_openEuler_skills_repo())
+
     async with get_db_context() as session:
         skill_repository = SkillRepository(session)
         skill_repo_repository = SkillRepoRepository(session)
         manager = SkillManager(
             skill_repository=skill_repository,
             skill_repo_repository=skill_repo_repository,
+            contributor_repository=ContributorRepository(session),
+            catalog_path=(Path(args.repository_path).expanduser() if getattr(args, "repository_path", None) else None),
         )
 
         if args.action == "query":

@@ -11,15 +11,20 @@ import heroBgDark from '@/assets/bg/hero-top-texture-dark.png'
 import copySvg from '@/assets/icons/copy.svg?raw'
 import checkSvg from '@/assets/icons/check.svg?raw'
 import downloadSvg from '@/assets/icons/download.svg?raw'
-import chevronDownSvg from '@/assets/icons/chevron-down.svg?raw'
-import { OTab, OTabPane, OBreadcrumb, OBreadcrumbItem, ODropdown, ODropdownItem, OLoading, ODialog, OButton } from '@opensig/opendesign'
+import timeSvg from '@/assets/icons/skill-update-time.svg?raw'
+import riskScoreSvg from '@/assets/icons/skill-risk-score.svg?raw'
+import categorySvg from '@/assets/icons/skill-category.svg?raw'
+import personSvg from '@/assets/icons/person.svg?raw'
+import { OBreadcrumb, OBreadcrumbItem, OLoading, ODialog, OButton, OPopover, OIconInfoTip, useToast } from '@opensig/opendesign'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
+const { show: showToast } = useToast()
 
 const platformNames: Record<string, string> = {
-  openeuler: '社区SIG',
+  community: '社区SIG',
   enterprise: '企业组织',
   personal: '个人'
 }
@@ -31,8 +36,6 @@ const error = ref('')
 const activeTab = ref<'versions' | 'usage'>('usage')
 const downloading = ref(false)
 const toastVisible = ref(false)
-const copiedVersion = ref(false)
-const cliCopied = ref(false)
 // 第三方链接跳转提示
 const externalDialogVisible = ref(false)
 const externalUrl = ref('')
@@ -47,6 +50,28 @@ function openExternalUrl() {
   if (!externalUrl.value) return
   window.open(externalUrl.value, '_blank', 'noopener')
   externalDialogVisible.value = false
+  oaReport('click_external_source', { module: 'skill_detail', skill_id: skill.value?.skill_id, host: (() => { try { return new URL(externalUrl.value).host } catch { return '' } })() })
+}
+
+/** 风险评估报告页链接：作为 OButton 的 href，使按钮渲染为 <a>，支持右击“在新标签页/新窗口打开” */
+const riskReportHref = computed(() =>
+  skill.value ? `/skills/${encodeURIComponent(skill.value.skill_id)}/report` : ''
+)
+
+/** 进入该 Skill 的风险评估报告页 */
+function goRiskReport(e?: MouseEvent) {
+  if (!skill.value) return
+  oaReport('click_risk_report', { module: 'skill_detail', skill_id: skill.value.skill_id })
+  // 修饰键 / 非左键点击交给浏览器原生 <a> 行为（新标签页、新窗口），不拦截
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0)) return
+  e?.preventDefault()
+  router.push(riskReportHref.value)
+}
+
+/** 「风险评估说明」浮层的查看详情：打开安全评估说明文档（docs/skillhub-security-audit.md） */
+function goSecurityDoc() {
+  oaReport('click_risk_guide', { module: 'skill_detail', skill_id: skill.value?.skill_id })
+  router.push('/docs/skillhub-security-audit')
 }
 
 // ===== Shiki 代码高亮 =====
@@ -65,7 +90,6 @@ function showCopyToast() {
   toastVisible.value = true
   setTimeout(() => { toastVisible.value = false }, 2000)
 }
-const selectedVersion = ref<string>('')
 
 function stripFrontmatter(content: string): string {
   const match = content.match(/^---\n[\s\S]*?\n---\n?/)
@@ -75,11 +99,8 @@ function stripFrontmatter(content: string): string {
   return content
 }
 
-// 根据当前选中版本展示对应的 content（未选中时回退到 Skill 默认 content）
-const displayContent = computed(() => {
-  const selected = versions.value.find(v => v.version === selectedVersion.value)
-  return selected?.content ?? skill.value?.content ?? null
-})
+// 使用描述展示 skills 表当前版本（latest）的内容；历史版本仅在版本信息表格中列出
+const displayContent = computed(() => skill.value?.content ?? null)
 
 const renderedContent = computed(() => {
   if (!displayContent.value) return ''
@@ -144,25 +165,96 @@ async function copyMarkdownCode(e: MouseEvent) {
   }
 }
 
-const filteredVersions = computed(() => {
-  if (!selectedVersion.value) return versions.value
-  return versions.value.filter(v => v.version === selectedVersion.value)
-})
-
-function getSecurityLevel(score: number | null): { label: string; class: string } {
-  if (score === null) return { label: '未检测', class: 'tag-gray' }
-  if (score <= 20) return { label: '安全', class: 'tag-green' }
-  if (score <= 50) return { label: '低风险', class: 'tag-blue' }
-  if (score <= 80) return { label: '中风险', class: 'tag-orange' }
-  return { label: '高风险', class: 'tag-red' }
+// riskClass/arcColor 仅用于右侧风险评估卡片；class 沿用全局 tag-*（顶部信息卡片）
+function getSecurityLevel(score: number | null): { label: string; class: string; riskClass: string; arcColor: string; desc: string } {
+  if (score === null) return { label: '未检测', class: 'tag-gray', riskClass: 'risk-gray', arcColor: '', desc: '暂无风险评估数据' }
+  if (score <= 20) return { label: '安全', class: 'tag-green', riskClass: 'risk-green', arcColor: 'var(--o-color-success1)', desc: '无显著风险，可以放心使用' }
+  if (score <= 50) return { label: '低风险', class: 'tag-blue', riskClass: 'risk-blue', arcColor: '#497AF8', desc: '风险较低，可以正常使用' }
+  if (score <= 80) return { label: '中风险', class: 'tag-orange', riskClass: 'risk-orange', arcColor: 'var(--o-color-warning1)', desc: '存在一定风险，建议谨慎使用' }
+  return { label: '高风险', class: 'tag-red', riskClass: 'risk-red', arcColor: 'var(--o-color-danger1)', desc: '存在较严重问题，不建议直接安装' }
 }
 
 const securityLevel = computed(() => getSecurityLevel(skill.value?.risk_score ?? null))
-const installCommand = computed(() => {
-  if (!skill.value) return ''
-  const repository = skill.value.repo_url || skill.value.source_url
-  return `npx wittyhub install ${repository} --skill ${skill.value.name}`
+
+// 得分圆弧：以 100 分为满分，圆弧从 12 点方向起顺时针填充「得分 ÷ 100 × 360°」的角度
+// 圆心 (70, 70)、半径 63（140px 仪表盘）；得分变化时自动重算
+const riskScore = computed(() => {
+  const score = skill.value?.risk_score
+  return typeof score === 'number' ? Math.min(Math.max(score, 0), 100) : null
 })
+// 满分绘制整圆（arc 起止点重合无法用 path 表达）
+const scoreArcFull = computed(() => riskScore.value === 100)
+const scoreArcPath = computed(() => {
+  const score = riskScore.value
+  // 未检测 / 0 分不绘制圆弧；100 分由整圆元素绘制
+  if (score === null || score <= 0 || score >= 100) return ''
+  const angle = score * 3.6
+  const rad = (angle * Math.PI) / 180
+  const x = (70 + 63 * Math.sin(rad)).toFixed(2)
+  const y = (70 - 63 * Math.cos(rad)).toFixed(2)
+  return `M 70 7 A 63 63 0 ${angle > 180 ? 1 : 0} 1 ${x} ${y}`
+})
+// 风险评分展示：有分值显示 x/100，未检测显示文案
+const riskScoreText = computed(() => {
+  const score = skill.value?.risk_score
+  if (score === null || score === undefined) return '未检测'
+  return `${score}/100`
+})
+
+// 统一 skill_id 到新格式 {source_type}:{owner}/{repo}/{skill_dir}。
+// 历史数据可能仍为旧格式 {source_type}/{owner}/{repo}/<path...>，
+// 优先用 source_url 的 SKILL.md 路径确定目录名，确保提示词恒为新格式。
+function toNewSkillId(skillId: string, sourceUrl?: string | null): string {
+  const sourceTypes = ['github', 'gitcode', 'gitlab', 'gitee']
+  const id = (skillId || '').trim()
+  const colon = id.indexOf(':')
+  if (colon > 0 && sourceTypes.includes(id.slice(0, colon).toLowerCase())) {
+    return id // 已是新格式
+  }
+  const parts = id.split('/').filter(Boolean)
+  const sourceType = parts[0]?.toLowerCase() ?? ''
+  if (!sourceTypes.includes(sourceType) || parts.length < 3) return id
+  const owner = parts[1]!
+  const repo = parts[2]!
+  let skillDir: string | undefined
+  const blobMatch = sourceUrl?.match(/\/blob\/[^/]+\/(.+?)\/?SKILL\.md$/i)
+  if (blobMatch) {
+    skillDir = blobMatch[1]!.split('/').filter(Boolean).pop()
+  }
+  if (!skillDir) {
+    skillDir = parts.slice(3).filter((p) => p !== '.').pop() ?? repo
+  }
+  return `${sourceType}:${owner}/${repo}/${skillDir}`
+}
+
+// AI 提示词：复制后发送给任意 AI Agent，由其读取安装指南并执行安装
+const installPrompt = computed(() => {
+  if (!skill.value) return ''
+  const skillId = toNewSkillId(skill.value.skill_id, skill.value.source_url)
+  return `请根据 https://skillhub.openeuler.org/install/skillhub.md，安装 ${skillId}。`
+})
+
+async function copyInstallPrompt() {
+  if (!skill.value) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(installPrompt.value)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = installPrompt.value
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    showCopyToast()
+    oaReport('copy_ai_prompt', { module: 'skill_detail', skill_id: skill.value.skill_id })
+  } catch (e) {
+    console.error('复制失败:', e)
+  }
+}
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '-'
@@ -173,50 +265,28 @@ function formatDate(dateStr: string | null): string {
   return `${year}-${month}-${day}`
 }
 
-async function copyCliCommand() {
-  if (!skill.value) return
-  const command = installCommand.value
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(command)
-    } else {
-      // fallback for HTTP contexts
-      const textarea = document.createElement('textarea')
-      textarea.value = command
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    cliCopied.value = true
-    setTimeout(() => { cliCopied.value = false }, 2000)
-  } catch (e) {
-    console.error('复制失败:', e)
+// 从 Blob 错误响应中解析后端返回的 detail 文案（responseType: 'blob' 时 e.response.data 是 Blob 而非 JSON）
+async function extractBlobErrorDetail(e: unknown): Promise<string> {
+  const blob = (e as { response?: { data?: unknown } })?.response?.data
+  if (blob instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await blob.text())
+      if (parsed?.detail) return String(parsed.detail)
+    } catch { /* 非 JSON 响应，走兜底 */ }
   }
+  return (e as { message?: string })?.message || '下载失败，请稍后重试'
 }
 
-function copyVersionCmd() {
-  const command = installCommand.value
-  try {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(command)
-    } else {
-      const textarea = document.createElement('textarea')
-      textarea.value = command
-      textarea.style.position = 'fixed'
-      textarea.style.opacity = '0'
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-    }
-    copiedVersion.value = true
-    setTimeout(() => { copiedVersion.value = false }, 2000)
-  } catch (e) {
-    console.error('复制失败:', e)
-  }
+// 触发浏览器下载 Blob；延迟释放 objectURL，避免 Safari 等浏览器中断下载
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => window.URL.revokeObjectURL(url), 1000)
 }
 
 async function downloadSkill() {
@@ -224,18 +294,35 @@ async function downloadSkill() {
   downloading.value = true
   try {
     const { blob, filename } = await api.getSkillDownload(skill.value.skill_id)
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    window.URL.revokeObjectURL(url)
+    triggerBlobDownload(blob, filename)
+    oaReport('download_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, success: true })
   } catch (e) {
+    const detail = await extractBlobErrorDetail(e)
     console.error('下载失败:', e)
+    showToast({ content: detail, long: true })
+    oaReport('download_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, success: false })
   } finally {
     downloading.value = false
+  }
+}
+
+// 版本信息表格：按指定版本下载 ZIP
+const downloadingVersion = ref<string | null>(null)
+
+async function downloadVersionSkill(version: string) {
+  if (!skill.value || downloadingVersion.value) return
+  downloadingVersion.value = version
+  try {
+    const { blob, filename } = await api.getSkillDownload(skill.value.skill_id, version)
+    triggerBlobDownload(blob, filename)
+    oaReport('download_version_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, version, success: true })
+  } catch (e) {
+    const detail = await extractBlobErrorDetail(e)
+    console.error('版本下载失败:', e)
+    showToast({ content: `${version} 下载失败：${detail}`, long: true })
+    oaReport('download_version_zip', { module: 'skill_detail', skill_id: skill.value.skill_id, version, success: false })
+  } finally {
+    downloadingVersion.value = null
   }
 }
 
@@ -256,9 +343,11 @@ onMounted(async () => {
     ])
     skill.value = skillRes
     versions.value = versionsRes.versions || []
-    if (versions.value.length > 0) {
-      selectedVersion.value = versions.value[0].version
-    }
+    oaReport('detail_view', {
+      module: 'skill_detail',
+      skill_id: skill.value.skill_id,
+      skill_name: skill.value.name
+    })
   } catch (e: any) {
     console.error('加载 Skill 详情失败:', e)
     error.value = e?.response?.data?.detail || e.message || '加载失败'
@@ -301,7 +390,7 @@ onMounted(async () => {
 
         <!-- 加载态 -->
         <div v-if="loading" class="info-card-hero loading-card">
-          <OLoading v-model:visible="loading" size="medium" />
+          <OLoading :visible="true" size="medium" :mask="false" />
         </div>
 
         <!-- 错误态 -->
@@ -319,12 +408,30 @@ onMounted(async () => {
             </div>
             <p class="skill-desc" v-if="skill.description">{{ skill.description }}</p>
 
+            <!-- 元信息区：分类 / 平台类型 / 更新时间 / 风险评分 -->
+            <div class="skill-meta">
+              <div v-if="skill.category" class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="categorySvg"></span>
+                <span class="skill-meta-text">{{ skill.category_label || skill.category }}</span>
+              </div>
+              <div v-if="skill.platform" class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="personSvg"></span>
+                <span class="skill-meta-text">{{ platformNames[skill.platform] || skill.platform }}</span>
+              </div>
+              <div class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="timeSvg"></span>
+                <span class="skill-meta-text">更新时间：{{ formatDate(skill.updated_at) }}</span>
+              </div>
+              <div class="skill-meta-item">
+                <span class="skill-meta-icon" v-html="riskScoreSvg"></span>
+                <span class="skill-meta-text">风险评分：{{ riskScoreText }}</span>
+              </div>
+            </div>
+
             <!-- 标签区 -->
-            <div class="skill-tags">
-              <span v-if="skill.category" class="tag tag-category">{{ skill.category_label || skill.category }}</span>
-              <span v-if="skill.platform" class="tag tag-gray">{{ platformNames[skill.platform] || skill.platform }}</span>
+            <div v-if="(skill.tags || []).length" class="skill-tags">
               <span
-                v-for="tag in (skill.tags || []).slice(0, 5)"
+                v-for="tag in (skill.tags || [])"
                 :key="tag"
                 class="tag tag-gray"
               >{{ tag }}</span>
@@ -338,89 +445,105 @@ onMounted(async () => {
     <div v-if="skill" class="container-wide">
       <div class="detail-body">
         <div class="detail-body-main">
-          <!-- Tab 导航区（全部隐藏：OTab和版本下拉都不再需要，'使用描述'标题已移到文档卡片顶部）
-          <div class="tab-header">
-            <OTab
-              v-model="activeTab"
-              variant="button"
-              round="4px"
-              size="large"
-              header-class="detail-tab"
-            >
-              <OTabPane value="usage" label="使用描述" />
-            </OTab>
-
-            <div class="version-toolbar">
-              <div class="version-card">
-                <span class="version-card-label">版本</span>
-                <ODropdown
-                  trigger="click"
-                  option-width-mode="min-width"
-                  option-wrap-class="version-dropdown"
-                >
-                  <button class="version-btn">
-                    {{ selectedVersion || '选择版本' }}
-                    <span class="version-btn-icon" v-html="chevronDownSvg"></span>
-                  </button>
-                  <template #dropdown>
-                    <ODropdownItem
-                      v-for="v in versions"
-                      :key="v.version"
-                      :label="v.version"
-                      :value="v.version"
-                      @click="selectedVersion = v.version"
-                    />
-                  </template>
-                </ODropdown>
-              </div>
-            </div>
-          </div>
-          -->
-
-          <!-- ========== 使用文档 ========== -->
+          <!-- ========== 使用文档 / 版本信息 ========== -->
           <div class="tab-content">
-            <!-- 文档标题：样式与原 OTab active 状态一致（HarmonyHeiTi + semibold + primary1） -->
-            <div class="doc-title">使用描述</div>
-            <div class="doc-title-divider"></div>
+            <!-- Tab 页签：激活态 SemiBold + primary1 + 底部 pill 下划线，非激活 regular + 80% 黑 -->
+            <div class="doc-tabs">
+              <button
+                :class="['doc-tab-btn', { 'doc-tab-btn--active': activeTab === 'usage' }]"
+                @click="activeTab = 'usage'"
+              >使用描述</button>
+              <button
+                :class="['doc-tab-btn', { 'doc-tab-btn--active': activeTab === 'versions' }]"
+                @click="activeTab = 'versions'"
+              >版本信息</button>
+            </div>
 
-            <div v-if="displayContent" class="usage-content">
-              <!-- eslint-disable-next-line vue/no-v-html -->
-              <div class="markdown-body" v-html="renderedContent" @click="copyMarkdownCode"></div>
-            </div>
-            <div v-else class="empty-tab">
-              <p>暂无使用描述</p>
-              <p class="empty-hint">内容将在本地安装后显示</p>
-            </div>
+            <!-- 使用描述 -->
+            <template v-if="activeTab === 'usage'">
+              <div v-if="displayContent" class="usage-content">
+                <!-- eslint-disable-next-line vue/no-v-html -->
+                <div class="markdown-body" v-html="renderedContent" @click="copyMarkdownCode"></div>
+              </div>
+              <div v-else class="empty-tab">
+                <p>暂无使用描述</p>
+                <p class="empty-hint">内容将在本地安装后显示</p>
+              </div>
+            </template>
+
+            <!-- 版本信息 -->
+            <template v-else>
+              <div v-if="versions.length" class="version-table">
+                <div class="version-table-header">
+                  <span class="version-col-version">版本</span>
+                  <span class="version-col-date">发布时间</span>
+                  <span class="version-col-action">操作</span>
+                </div>
+                <div class="version-table-rows">
+                  <div v-for="v in versions" :key="v.version" class="version-table-row">
+                    <span class="version-col-version" :title="v.version">{{ v.version }}</span>
+                    <span class="version-col-date">{{ formatDate(v.created_at) }}</span>
+                    <span class="version-col-action">
+                      <button
+                        class="version-download-btn"
+                        :disabled="downloadingVersion === v.version"
+                        :aria-label="`下载 ${v.version}`"
+                        @click="downloadVersionSkill(v.version)"
+                      >
+                        <span class="btn-icon-sm" v-html="downloadSvg"></span>
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-tab">
+                <p>暂无版本信息</p>
+              </div>
+            </template>
           </div>
         </div>
 
-        <!-- ========== 右侧：CLI 安装独立卡片 ========== -->
+        <!-- ========== 右侧：安装卡片（设计稿-使用描述画板） ========== -->
         <aside class="detail-body-sidebar">
           <div class="sidebar-sticky">
             <div class="action-card">
-              <div class="cli-section">
-                <h3 class="cli-label">CLI 安装</h3>
-                <div class="cli-divider"></div>
-                <div class="cli-input-group">
-                  <code class="cli-command">{{ installCommand }}</code>
-                  <button class="cli-copy-btn" :class="{ 'is-copied': cliCopied }" @click="copyCliCommand" :aria-label="cliCopied ? '已复制' : '复制'">
-                    <span v-if="!cliCopied" class="btn-icon-sm" v-html="copySvg"></span>
-                    <span v-else class="btn-icon-sm copied-icon">
-                      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="12" cy="12" r="10" fill="currentColor"/>
-                        <path d="M8 12l3 3 5-5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
+              <h3 class="install-title">安装</h3>
+              <div class="install-divider"></div>
 
-            <!-- 下载按钮 -->
-            <button class="download-btn" :disabled="downloading" @click="downloadSkill">
-              <span class="download-btn-icon" v-html="downloadSvg"></span>
-              <span>{{ downloading ? '下载中...' : '下载ZIP包安装' }}</span>
-            </button>
+              <!-- 方式一：复制提示词发送给 AI 直接安装 -->
+              <p class="method-label">方式一：复制提示词发送给你的 AI 直接安装</p>
+              <code class="prompt-box">{{ installPrompt }}</code>
+              <OButton
+                class="install-action"
+                color="primary"
+                variant="outline"
+                size="large"
+                round="pill"
+                @click="copyInstallPrompt"
+              >
+                <template #icon>
+                  <span class="action-icon" v-html="copySvg"></span>
+                </template>
+                复制提示词
+              </OButton>
+
+              <!-- 方式二：下载 ZIP 包安装 -->
+              <p class="method-label method-label-second">方式二：下载ZIP包安装</p>
+              <OButton
+                class="install-action"
+                color="primary"
+                variant="outline"
+                size="large"
+                round="pill"
+                :loading="downloading"
+                @click="downloadSkill"
+              >
+                <template #icon>
+                  <span class="action-icon" v-html="downloadSvg"></span>
+                </template>
+                {{ downloading ? '下载中...' : '立即下载' }}
+              </OButton>
+            </div>
 
             <!-- Skill 信息卡片 -->
             <div class="info-card">
@@ -429,14 +552,19 @@ onMounted(async () => {
               <div class="info-list">
                 <div class="info-row">
                   <span class="info-label">贡献者</span>
-                  <span class="info-value">{{ skill.author || '-' }}</span>
+                  <router-link
+                    v-if="skill.author && skill.source"
+                    :to="`/contributors/${encodeURIComponent(skill.source)}/${encodeURIComponent(skill.author)}`"
+                    class="info-link"
+                  >{{ skill.author }}</router-link>
+                  <span v-else class="info-value">-</span>
                 </div>
                 <div class="info-row">
                   <span class="info-label">仓库地址</span>
                   <a
                     v-if="skill.source_url"
                     href="javascript:void(0)"
-                    class="info-link"
+                    class="info-link info-repo-link"
                     @click.prevent="confirmExternalLink"
                   >{{ skill.source_url }}</a>
                   <span v-else class="info-value">-</span>
@@ -446,13 +574,92 @@ onMounted(async () => {
                   <span class="info-value">{{ skill.download_count.toLocaleString() }}</span>
                 </div>
                 <div class="info-row">
-                  <span class="info-label">更新时间</span>
-                  <span class="info-value">{{ formatDate(skill.updated_at) }}</span>
-                </div>
-                <div class="info-row">
                   <span class="info-label">版本</span>
                   <span class="info-value">{{ skill.version || '-' }}</span>
                 </div>
+              </div>
+            </div>
+
+            <!-- ========== 风险评估卡片（设计稿-使用描述画板） ========== -->
+            <div class="risk-card">
+              <div class="risk-card-header">
+                <h3 class="risk-card-title">风险评估</h3>
+                <!-- 箭头尖距 ⓘ 图标框顶边 4px：offset = 4 + 5.66（官方 8×8 锚点斜向伸出量） -->
+                <OPopover
+                  position="top"
+                  trigger="hover"
+                  wrap-class="risk-popover"
+                  :offset="9.66"
+                  :adjust-width="false"
+                  :adjust-min-width="false"
+                >
+                  <div class="risk-popover-body">
+                    <p class="risk-popover-title">风险评估说明</p>
+                    <p class="risk-popover-desc">综合得分基于 17 个安全维度，加权统计后给出总体安全等级。</p>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">0-20 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-green">安全</span>
+                    </div>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">21-50 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-blue">低风险</span>
+                    </div>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">51-80 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-orange">中风险</span>
+                    </div>
+                    <div class="risk-popover-row">
+                      <span class="risk-popover-label">81-100 分：</span>
+                      <span class="risk-tag risk-tag-fixed risk-red">高风险</span>
+                    </div>
+                    <a class="risk-popover-link" href="javascript:void(0)" @click="goSecurityDoc">查看详情</a>
+                  </div>
+                  <template #target>
+                    <span class="risk-info-trigger"><OIconInfoTip /></span>
+                  </template>
+                </OPopover>
+              </div>
+
+              <div class="risk-gauge-wrap">
+                <div class="risk-gauge">
+                  <svg class="risk-gauge-svg" viewBox="0 0 140 140">
+                    <circle class="risk-gauge-track" cx="70" cy="70" r="63" />
+                    <!-- 满分：完整圆环，circle 默认从 3 点起，旋转 -90° 使其从 12 点起 -->
+                    <circle
+                      v-if="scoreArcFull"
+                      class="risk-gauge-arc risk-gauge-arc-full"
+                      cx="70"
+                      cy="70"
+                      r="63"
+                      transform="rotate(-90 70 70)"
+                      :style="{ stroke: securityLevel.arcColor }"
+                    />
+                    <!-- 其余得分：按得分百分比绘制弧（path 从 12 点起顺时针，直角端头） -->
+                    <path
+                      v-else-if="scoreArcPath"
+                      class="risk-gauge-arc"
+                      :d="scoreArcPath"
+                      :style="{ stroke: securityLevel.arcColor }"
+                    />
+                  </svg>
+                  <div class="risk-gauge-center">
+                    <span class="risk-score">{{ skill.risk_score ?? '-' }}</span>
+                    <span class="risk-score-label">风险得分</span>
+                  </div>
+                </div>
+                <span :class="['risk-tag', securityLevel.riskClass]">{{ securityLevel.label }}</span>
+                <p class="risk-desc">{{ securityLevel.desc }}</p>
+                <OButton
+                  class="risk-report-btn"
+                  color="primary"
+                  variant="text"
+                  size="large"
+                  round="pill"
+                  :href="riskReportHref"
+                  @click="goRiskReport"
+                >
+                  查看风险评估报告
+                </OButton>
               </div>
             </div>
           </div>
@@ -462,14 +669,25 @@ onMounted(async () => {
     </div>
 
     <!-- ========== 第三方链接跳转提示 ========== -->
-    <ODialog v-model:visible="externalDialogVisible" size="auto" :mask-close="false">
-      <template #header>跳转提示</template>
-      <p class="external-dialog-desc">您即将离开本站，前往第三方外部链接：</p>
-      <p class="external-dialog-url">{{ externalUrl }}</p>
+    <ODialog
+      v-model:visible="externalDialogVisible"
+      size="auto"
+      main-class="external-jump-dialog"
+      :mask-close="false"
+    >
+      <template #header>
+        <p class="external-title">即将跳转到外部网站</p>
+      </template>
+      <div class="external-content">
+        <p class="text">您将要访问的链接不属于openEuler社区，请关注您的账号安全。</p>
+        <div class="content-link">
+          <div class="external-link-href" :title="externalUrl">{{ externalUrl }}</div>
+        </div>
+      </div>
       <template #footer>
-        <div class="external-dialog-actions">
-          <OButton variant="outline" @click="externalDialogVisible = false">取消</OButton>
-          <OButton color="brand" variant="solid" @click="openExternalUrl">继续访问</OButton>
+        <div class="dlg-action">
+          <OButton color="primary" variant="solid" size="large" round="pill" @click="openExternalUrl">继续前往</OButton>
+          <OButton color="primary" variant="outline" size="large" round="pill" @click="externalDialogVisible = false">取消</OButton>
         </div>
       </template>
     </ODialog>
@@ -602,7 +820,42 @@ onMounted(async () => {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    margin-top: 12px;
     margin-bottom: 0;
+  }
+
+  .skill-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 24px;
+  }
+
+  .skill-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .skill-meta-icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--o-color-info3);
+
+    :deep(svg) {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .skill-meta-text {
+    font-family: HarmonyHeiTi;
+    font-weight: var(--o-font_weight-regular);
+    font-size: 14px;
+    line-height: 22px;
+    letter-spacing: 0px;
+    text-align: left;
+    color: var(--o-color-info3);
   }
 }
 
@@ -693,8 +946,8 @@ onMounted(async () => {
 
 .dark .version-btn,
 [data-o-theme="e.dark"] .version-btn {
-  background: #242427;
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--o-color-fill2);
+  border-color: var(--o-color-control4);
   color: var(--o-color-info1);
 }
 
@@ -713,11 +966,10 @@ onMounted(async () => {
 
 .action-card {
   background: var(--o-color-fill2);
-  border-radius: 8px;
-  padding: 20px;
+  border-radius: 4px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
 .info-card {
@@ -782,123 +1034,272 @@ onMounted(async () => {
   text-align: right;
   word-break: break-all;
   text-decoration: none;
+  transition: color 0.2s;
 
   @include hover {
-    text-decoration: underline;
+    color: var(--o-color-link2);
+    text-decoration: none;
+  }
+
+  &:focus-visible {
+    color: var(--o-color-link2);
+    text-decoration: none;
   }
 }
 
-/* ===== 下载按钮 ===== */
-.download-btn {
+.info-repo-link:hover,
+.info-repo-link:focus-visible {
+  text-decoration: underline;
+}
+
+/* ===== 安装卡片（设计稿-使用描述画板） ===== */
+.install-title {
+  margin: 0 0 24px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 22px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+.install-divider {
+  height: 1px;
+  background: var(--o-color-control4);
+  margin-bottom: 24px;
+}
+
+.method-label {
+  margin: 0 0 12px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 14px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+.method-label-second {
+  margin-top: 24px;
+}
+
+.prompt-box {
+  display: block;
+  min-height: 60px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: var(--o-color-fill1);
+  border-radius: 4px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--o-color-info3);
+  word-break: break-all;
+  white-space: normal;
+}
+
+.install-action {
+  width: 100%;
+  justify-content: center;
+  font-family: HarmonyHeiTi;
+
+  /* 图标与文字同色（primary1），与组件库描边按钮规范一致 */
+  .action-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 24px;
+    height: 24px;
+
+    :deep(svg) {
+      width: 24px;
+      height: 24px;
+      display: block;
+      fill: currentColor;
+    }
+  }
+}
+
+/* ===== 风险评估卡片（设计稿-使用描述画板） ===== */
+.risk-card {
+  background: var(--o-color-fill2);
+  border-radius: 4px;
+  padding: 32px;
+}
+
+.risk-card-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.risk-card-title {
+  margin: 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-medium);
+  font-size: 22px;
+  line-height: 30px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+/* 标题旁 ⓘ 说明图标（设计稿 提示/形状结合）：默认一级文字色，悬停品牌蓝 */
+.risk-info-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px 20px;
-  border-radius: 100px;
-  font-size: var(--o-r-font_size-tip1);
-  font-weight: var(--o-font_weight-medium);
-  border: none;
+  width: 24px;
+  height: 24px;
+  color: var(--o-color-info1);
   cursor: pointer;
-  background: var(--o-color-primary1);
-  color: #fff;
-  transition: background 0.2s;
+  transition: color 0.2s;
 
   @include hover {
-    background: color-mix(in srgb, var(--o-color-primary1) 85%, #000);
+    color: var(--o-color-primary1);
   }
 
-  &:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
-
-  .download-btn-icon {
-    width: 18px;
-    height: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    :deep(svg) {
-      width: 18px;
-      height: 18px;
-    }
+  svg {
+    width: 24px;
+    height: 24px;
+    display: block;
   }
 }
 
-
-/* ===== CLI 安装区 ===== */
-.cli-section {
+.risk-gauge-wrap {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  align-items: center;
+  margin-top: 24px;
+}
 
-  .cli-label {
-    font-size: var(--o-font_size-h3);
-    font-weight: var(--o-font_weight-medium);
-    line-height: var(--o-line_height-h3);
-    color: var(--o-color-info1);
-    margin: 0;
-  }
+.risk-gauge-wrap .risk-tag {
+  margin-top: 12px;
+}
 
-  .cli-divider {
-    height: 1px;
-    background: var(--o-color-control4);
-    margin: 0;
-  }
+/* 风险得分仪表盘：140px 圆环，环厚 14px，12 点起顺时针 90° 弧（与设计稿一致） */
+.risk-gauge {
+  position: relative;
+  width: 140px;
+  height: 140px;
+}
 
-  .cli-input-group {
-    display: flex;
-    align-items: center;
-    background: var(--o-color-fill3);
-    border: none;
-    border-radius: 6px;
-  }
+.risk-gauge-svg {
+  width: 140px;
+  height: 140px;
+  display: block;
+}
 
-  .cli-command {
-    flex: 1;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    padding: 0 12px;
-    font-size: 13px;
-    font-family: var(--o-font_family-code);
-    color: var(--o-color-info1);
-    background: var(--o-color-fill3);
-    word-break: keep-all;
-    white-space: nowrap;
-    overflow-x: auto;
-    border-radius: 6px;
+.risk-gauge-track {
+  fill: none;
+  /* 圆环底色：light 主题等同 brand-1（浅紫 246,238,253）保持设计稿效果；
+     dark 主题自动切换为 control2-light（深灰 43,43,47），避免深紫底环 */
+  stroke: var(--o-color-control2-light);
+  stroke-width: 14;
+}
 
-    &::-webkit-scrollbar {
-      height: 4px;
-    }
+.risk-gauge-arc {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: butt;
+}
 
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
+.risk-gauge-arc-full {
+  fill: none;
+  stroke-width: 14;
+}
 
-    &::-webkit-scrollbar-thumb {
-      background: var(--o-color-control4);
-      border-radius: 3px;
-    }
-  }
+.risk-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
 
-  .cli-copy-btn {
-    width: 24px;
-    height: 24px;
-    margin-right: 12px;
-    color: var(--o-color-info3);
-    cursor: pointer;
-    transition: color 0.2s;
-    flex-shrink: 0;
+.risk-score {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: 0px;
+  color: var(--o-color-info1);
+}
 
-    @include hover {
-      color: var(--o-color-primary1);
-    }
-  }
+.risk-score-label {
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0px;
+  color: var(--o-color-info3);
+}
+
+/* 风险等级标签：24px 高、12px 文字（设计稿 标签 Tag/状态标签） */
+.risk-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0px;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.risk-green {
+  background: var(--o-color-success1);
+  color: #ffffff;
+}
+
+.risk-blue {
+  background: #497af8;
+  color: #ffffff;
+}
+
+.risk-orange {
+  background: var(--o-color-warning1);
+  color: #ffffff;
+}
+
+.risk-red {
+  background: var(--o-color-danger1);
+  color: #ffffff;
+}
+
+.risk-gray {
+  border: 1px solid var(--o-color-control4);
+  background: transparent;
+  color: var(--o-color-info1);
+}
+
+.risk-desc {
+  margin: 12px 0 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: center;
+  color: var(--o-color-info3);
+}
+
+.risk-card .risk-report-btn {
+  margin-top: 12px;
+  font-family: HarmonyHeiTi;
+
+  /* 设计稿链接按钮为品牌色文字（组件 text 变体默认 info1，需提高优先级覆盖） */
+  --btn-color: var(--o-color-primary1) !important;
 }
 
 /* ===== Tab 导航 (OTab button variant) ===== */
@@ -944,168 +1345,178 @@ onMounted(async () => {
   }
 }
 
-/* ===== Tab 内容区 ===== */
+/* ===== Tab 内容区（白卡 1008 宽，圆角 4px，padding 24） ===== */
 .tab-content {
   background: var(--o-color-fill2);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 24px;
   min-height: 200px;
 }
 
-/* 文档标题：字体与正文 h1 保持一致 */
-.doc-title {
-  margin-top: 0;
+/* ===== Tab 页签（tab 高 48，文字顶部对齐，激活 tab 底部 80×2 pill 下划线） ===== */
+.doc-tabs {
+  display: flex;
+  align-items: flex-start;
+  gap: 40px;
   margin-bottom: 32px;
-  font-family: var(--o-font_family);
-  font-weight: var(--o-font_weight-semibold);
-  font-size: var(--o-font_size-h1);
-  line-height: var(--o-line_height-h1);
+}
+
+.doc-tab-btn {
+  position: relative;
+  height: 48px;
+  padding: 2px 0 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'HarmonyHeiTi', var(--o-font_family);
+  font-weight: 400;
+  font-size: 20px;
+  line-height: 28px;
   letter-spacing: 0px;
   text-align: left;
-  color: var(--o-color-info1);
-}
-
-.doc-title-divider {
-  height: 2px;
-  background: #002FA7;
-  margin-bottom: 32px;
-}
-
-/* ===== 版本列表卡片 ===== */
-.version-list-card {
-  display: flex;
-  flex-direction: column;
-}
-
-.version-list-title {
-  font-size: var(--o-r-font_size-h2);
-  font-weight: var(--o-font_weight-semibold);
-  color: var(--o-color-info1);
-  margin: 0 0 32px;
-}
-
-.version-list-divider {
-  height: 1px;
-  background: var(--o-color-control4);
-  margin: 0 0 32px;
-}
-
-.version-list-header {
-  display: flex;
-  align-items: center;
-  gap: 40px;
-  height: 38px;
-  padding: 0 4px;
-
-  .header-label {
-    font-size: var(--o-font_size-tip1);
-    color: var(--o-color-info1);
-    opacity: 0.8;
-    font-family: HarmonyHeiTi;
-    font-weight: var(--o-font_weight-semibold);
-    line-height: var(--o-line_height-tip1);
-
-    &:first-child {
-      width: 100px;
-      flex-shrink: 0;
-    }
-
-    &:last-child {
-      flex: 1;
-    }
-  }
-}
-
-.version-cli-group {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  height: 40px;
-  background: var(--o-color-fill3);
-  border: none;
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.version-install-cmd {
-  flex: 1;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 13px;
-  font-family: var(--o-font_family-code);
-  color: var(--o-color-info1);
-  background: var(--o-color-fill3);
-  word-break: keep-all;
-  white-space: nowrap;
-  overflow-x: auto;
-
-  &::-webkit-scrollbar {
-    height: 6px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--o-color-control4);
-    border-radius: 3px;
-  }
-}
-
-.version-copy-btn {
-  width: 24px;
-  height: 24px;
-  margin: 12px 12px 12px 0;
-  color: var(--o-color-info3);
-  cursor: pointer;
+  color: hsla(0, 0%, 0%, 0.8);
   transition: color 0.2s;
-  flex-shrink: 0;
+
+  @include hover {
+    color: hsl(223.1, 100%, 32.7%);
+  }
+
+  &--active {
+    font-weight: 600;
+    color: hsl(223.1, 100%, 32.7%);
+
+    @include hover {
+      color: hsl(223.1, 100%, 32.7%);
+    }
+
+    /* 激活下划线：文字下方 16px，80×2 primary1，两端全圆角 */
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 80px;
+      height: 2px;
+      border-radius: 100px;
+      background: hsl(223.1, 100%, 32.7%);
+    }
+  }
+}
+
+/* Dark 模式：未激活白色 80% 透明度，激活/下划线用 primary1 token */
+[data-o-theme='e.dark'] .doc-tab-btn {
+  color: hsla(0, 0%, 100%, 0.8);
 
   @include hover {
     color: var(--o-color-primary1);
   }
+
+  &.doc-tab-btn--active {
+    color: var(--o-color-primary1);
+
+    &::after {
+      background: var(--o-color-primary1);
+    }
+  }
 }
 
-.version-badge {
-  display: inline-block;
-  font-family: HarmonyHeiTi;
-  font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-tip1);
-  line-height: var(--o-r-line_height-tip1);
-  letter-spacing: 0px;
-  text-align: left;
-  color: var(--o-color-info1);
-  padding: 2px 0;
-  white-space: nowrap;
-  flex-shrink: 0;
-  width: 100px;
-}
-
-.version-header-divider {
-  height: 1px;
-  background: var(--o-color-primary1);
-  border-radius: 1px;
-  margin: 0;
-}
-
-.version-rows {
+/* ===== 版本信息表格（表头 38px、数据行 56px、下载图标 24×24） ===== */
+.version-table {
   display: flex;
   flex-direction: column;
 }
 
-.version-row {
+.version-col-version {
+  width: 238px;
+  flex-shrink: 0;
+  /* 长版本号（如 commit hash）单行截断显示，hover 时通过 title 查看完整值 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-col-date {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 操作列：内容右对齐，距右缘 12px（设计稿图标距内容右缘 ~13px） */
+.version-col-action {
+  width: 72px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 12px;
+}
+
+.version-table-header {
   display: flex;
   align-items: center;
-  gap: 40px;
+  height: 38px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--o-color-primary1);
+
+  > span {
+    font-family: var(--o-font_family);
+    font-weight: var(--o-font_weight-semibold);
+    font-size: var(--o-font_size-tip1);
+    line-height: var(--o-line_height-tip1);
+    color: var(--o-color-info2);
+  }
+}
+
+.version-table-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.version-table-row {
+  position: relative;
+  display: flex;
+  align-items: center;
   height: 56px;
-  padding: 0 4px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--o-color-control4);
 
   &:last-child {
     border-bottom: none;
+  }
+
+  > span {
+    font-family: var(--o-font_family);
+    font-weight: var(--o-font_weight-regular);
+    font-size: var(--o-font_size-tip1);
+    line-height: var(--o-line_height-tip1);
+    color: var(--o-color-info1);
+  }
+}
+
+.version-download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--o-color-info1);
+  cursor: pointer;
+  transition: color 0.2s;
+  @include hover {
+    color: var(--o-color-primary1);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .btn-icon-sm {
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
   }
 }
 
@@ -1197,15 +1608,15 @@ onMounted(async () => {
 
   :deep(pre) {
     background: var(--o-color-control2-light);
-    border-radius: 4px;
-    padding: 16px;
+    border-radius: var(--o-radius-m);
+    padding: var(--o-r-gap-4);
     overflow-x: auto;
     margin-bottom: 16px;
     color: var(--o-color-info1);
-    font-family: HarmonyHeiTi;
-    font-weight: regular;
-    font-size: 14px;
-    line-height: 22px;
+    font-family: var(--o-font_family-code);
+    font-weight: var(--o-font_weight-regular);
+    font-size: var(--o-r-font_size-tip1);
+    line-height: var(--o-r-line_height-tip1);
     letter-spacing: 0px;
     text-align: left;
 
@@ -1219,16 +1630,15 @@ onMounted(async () => {
 
     &::-webkit-scrollbar-thumb {
       background: var(--o-color-control4);
-      border-radius: 3px;
+      border-radius: var(--o-radius-s);
     }
 
     code {
       background: none;
       padding: 0;
       color: inherit;
-      font-size: 14px;
+      font-size: inherit;
     }
-    font-size: 14px;
   }
 
   /* ===== Shiki 双主题：浅色默认，深色由 --shiki-dark ===== */
@@ -1383,31 +1793,55 @@ onMounted(async () => {
 }
 
 /* ===== 第三方链接跳转提示对话框 ===== */
-.external-dialog-actions {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
+:global(.external-jump-dialog) {
+  --dlg-width: min(680px, calc(100vw - var(--o-gap-8)));
 }
 
-.external-dialog-desc {
-  margin: 0 0 8px;
+.dlg-action {
+  display: flex;
+  justify-content: center;
+  gap: var(--o-gap-4);
+}
+
+.external-title,
+.external-content .text {
+  margin: 0;
+}
+
+.external-title {
+  font-size: var(--o-r-font_size-h2);
+  line-height: var(--o-r-line_height-h2);
+  font-weight: var(--o-font_weight-regular);
+  letter-spacing: 0;
+  text-align: center;
+  color: var(--o-color-info1);
+}
+
+.external-content .text {
+  font-size: var(--o-r-font_size-text2);
+  line-height: var(--o-r-line_height-text2);
+}
+
+.external-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--o-gap-5);
   font-family: HarmonyHeiTi;
   font-weight: var(--o-font_weight-regular);
-  font-size: var(--o-r-font_size-text1);
-  line-height: var(--o-r-line_height-text1);
   letter-spacing: 0;
   text-align: left;
   color: var(--o-color-info1);
 }
 
-.external-dialog-url {
-  margin: 0;
-  font-family: var(--o-font_family-code);
-  font-size: var(--o-r-font_size-tip1);
-  line-height: var(--o-r-line_height-tip1);
+.content-link {
+  min-width: 0;
+}
+
+.external-link-href {
+  font-size: var(--o-r-font_size-text2);
+  line-height: var(--o-r-line_height-text2);
   letter-spacing: 0;
-  text-align: left;
-  color: var(--o-color-info3);
+  color: var(--o-color-info2);
   word-break: break-all;
 }
 </style>
@@ -1470,22 +1904,97 @@ onMounted(async () => {
 </style>
 
 <style lang="scss">
-/* ODropdown teleport 到 body 的全局样式 */
-.version-dropdown {
-  min-width: 92px !important;
+/* ===== 风险评估说明浮层（设计稿 气泡提示 → OpenDesign OPopover） ===== */
+/* OPopover teleport 到 body，样式需全局；宽度 375 含内边距 */
+/* 其余视觉（圆角 4px、边框 --o-color-control4、阴影 --o-shadow-1、8×8 锚点箭头）
+   均沿用 OPopover 组件规范默认值，light/dark 由 token 自动适配 */
+.risk-popover {
+  width: 375px;
+  box-sizing: border-box;
+  --popup-padding: 16px 16px 8px;
+}
 
-  .o-dropdown-item {
-    color: #000000;
-    font-family: HarmonyHeiTi;
-    font-weight: var(--o-font_weight-regular);
-    font-size: 16px;
-    line-height: 24px;
-    letter-spacing: 0px;
-    text-align: left;
+.risk-popover-title {
+  margin: 0 0 4px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-semibold);
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info1);
+}
+
+.risk-popover-desc {
+  margin: 0 0 10px;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info2);
+}
+
+.risk-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 24px;
+  margin-bottom: 10px;
+}
+
+.risk-popover-row:last-of-type {
+  margin-bottom: 8px;
+}
+
+.risk-popover-label {
+  display: inline-flex;
+  align-items: center;
+  width: 100px;
+  flex-shrink: 0;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-info2);
+  /* 设计稿为单行文本（高22px），防止回退字体过宽导致换行 */
+  white-space: nowrap;
+
+  /* 分数前缀圆点（设计稿列表项目符号）：3px 实心圆，左缩进 9px 时圆点占 +9~+12、文字墨迹起点 +22，与设计稿逐像素对齐 */
+  &::before {
+    content: '';
+    display: inline-block;
+    flex-shrink: 0;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    margin: 0 9px;
   }
 }
 
-[data-o-theme='e.dark'] .version-dropdown .o-dropdown-item {
-  color: var(--o-color-info1);
+.risk-tag-fixed {
+  width: 60px;
+  padding: 0;
+}
+
+.risk-popover-link {
+  align-self: flex-start;
+  font-family: HarmonyHeiTi;
+  font-weight: var(--o-font_weight-regular);
+  font-size: 14px;
+  line-height: 22px;
+  letter-spacing: 0px;
+  text-align: left;
+  color: var(--o-color-link1);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.risk-popover-link:hover {
+  text-decoration: underline;
 }
 </style>

@@ -7,26 +7,30 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+from sqlalchemy import update
 
-from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+from skillcrawler.config import load_contributor_profiles
+from skillcrawler.core.category_classifier import (
+    CategoryClassificationError,
+    DeepSeekCategoryClassifier,
+)
 from skillcrawler.core.git_operations import GitOperations
 from skillcrawler.core.openeuler_sig import build_openeuler_repo_sig_mapping
 from skillcrawler.core.skill_parser import (
     as_optional_str,
-    as_optional_str_list,
     derive_skill_source,
-    extract_owner_repo,
-    find_scannable_skill_files,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
 )
 from skillcrawler.core.skill_scanner import SkillScanner
+from src.utils.skill_id import extract_owner_repo
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import (
+    ContributorRepository,
     SecurityAuditRepository,
     SkillRepoRepository,
     SkillRepository,
@@ -44,6 +48,7 @@ class SkillRepositoryRequest(BaseModel):
     branch: str | None = None
     url: str | None = None
     platform: str | None = None
+    sig_name: str | None = None
 
 
 class SkillDiscoverStatus:
@@ -57,10 +62,17 @@ class SkillDiscoverStatus:
 class SkillManager:
     skill_repository: SkillRepository
     skill_repo_repository: SkillRepoRepository
+    contributor_repository: ContributorRepository | None = None
     workspace_base: Path | None = None
+    catalog_path: Path | None = None
     _git_ops: GitOperations = field(init=False, repr=False)
     _scanner: SkillScanner = field(init=False, repr=False)
     _openeuler_sig_by_repo_name: dict[str, str] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _contributor_profile_by_key: dict[tuple[str, str], dict[str, Any]] | None = field(
         default=None,
         init=False,
         repr=False,
@@ -73,7 +85,7 @@ class SkillManager:
         category_classifier: DeepSeekCategoryClassifier | None = None
         security_detector: SecurityDetector | None = None
         try:
-            category_classifier = DeepSeekCategoryClassifier()
+            category_classifier = DeepSeekCategoryClassifier(self.catalog_path)
         except Exception as exc:
             _logger.warning('Failed to initialize category classifier: %s', exc)
 
@@ -84,7 +96,7 @@ class SkillManager:
             else:
                 _logger.info('SecurityDetector: skillspector not configured')
         except Exception as exc:
-            _logger.warning('Failed to initialize security detector: %s', exc)
+            _logger.warning('SecurityDetector: Failed to initialize security detector: %s', exc)
 
         self._git_ops = GitOperations()
         self._scanner = SkillScanner(
@@ -105,25 +117,17 @@ class SkillManager:
         await self.skill_repository.session.rollback()
 
     async def create_skill_repository(
-        self, request: SkillRepositoryRequest
-    ) -> SkillRepoModel | None:
-        normalized = self._normalize_repository_request(request)
-        repo_name = self._derive_repo_name(normalized)
-        existing = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
-        if existing is not None:
-            _logger.info(
-                f'Skill repo "{repo_name}" already exists with id "{existing.id}", skipping creation'
-            )
-            return None
-        source, _ = derive_skill_source(normalized.url)
+        self, normalized_request: SkillRepositoryRequest, repo_name: str,
+    ) -> SkillRepoModel:
+        source, _ = derive_skill_source(normalized_request.url)
         return await self.skill_repo_repository.create_skill_repository(
             repo_name=repo_name,
             source=source,
-            branch=normalized.branch,
-            url=normalized.url,
+            branch=normalized_request.branch,
+            url=normalized_request.url,
             local_path=None,
             skill_discover_status=SkillDiscoverStatus.INIT,
-            platform=normalized.platform,
+            platform=normalized_request.platform,
         )
 
     async def delete_skill_repository(self, repository_id: str) -> None:
@@ -134,64 +138,8 @@ class SkillManager:
                 try:
                     shutil.rmtree(local_path)
                 except Exception as exc:
-                    _logger.warning(f'Failed to clean up directory {local_path}: {exc}')
+                    _logger.warning(f'Discover: Failed to clean up directory {local_path}: {exc}')
         await self.skill_repo_repository.delete_skill_repository(stored.id)
-
-    async def discover_skills_from_single_existing_repository(
-        self,
-        repository_id: str,
-        *,
-        force: bool = False,
-    ) -> SkillRepoModel:
-        repository = await self.get_repository_by_id(repository_id)
-        if not force and repository.skill_discover_status == SkillDiscoverStatus.DISCOVERING:
-            raise ValueError('Skill repo discovery is already in progress')
-
-        # Cache values needed by the error path before any commit/rollback can
-        # expire the ORM instance. Accessing expired attributes after rollback
-        # may attempt async lazy loading outside greenlet_spawn.
-        repository_id_value = repository.id
-        repository_name = repository.repo_name
-        repository_skill_num = repository.skill_num
-        repository_url = repository.url
-        repository_branch = repository.branch
-        repository_platform = repository.platform
-
-        await self._set_discovery_status(repository, SkillDiscoverStatus.DISCOVERING)
-        try:
-            request = SkillRepositoryRequest(
-                url=repository_url,
-                branch=repository_branch,
-                platform=repository_platform,
-            )
-            repo_name = self._derive_repo_name(request)
-            clone_dir = self._local_repository_path(repo_name)
-            self._sync_git_repository(
-                clone_dir=clone_dir,
-                clone_url=normalize_clone_url_for_git(repository_url),
-                branch=repository_branch,
-                repo_url=repository_url,
-            )
-            return await self._discover_and_store_skills(
-                repository,
-                clone_dir=clone_dir,
-                repo_name=repo_name,
-            )
-        except Exception as exc:
-            error_summary = self._git_ops.summarize_exception(exc)
-            _logger.warning(
-                'Failed to discover skills from skill repo %s (%s): %s',
-                repository_id_value, repository_name, error_summary,
-            )
-            await self.rollback()
-            await self.skill_repo_repository.update_skill_repository(
-                repository_id_value,
-                skill_discover_status=SkillDiscoverStatus.FAILED,
-                skill_num=repository_skill_num,
-            )
-            raise ValueError(
-                f'Failed to discover skills from skill repo {repository_id_value}: {error_summary}'
-            ) from exc
 
     async def get_repository_by_id(self, repository_id: str) -> SkillRepoModel:
         repository = await self.skill_repo_repository.get_skill_repository_by_id(repository_id)
@@ -201,10 +149,9 @@ class SkillManager:
 
     # ── Discover from configured repo list ────────────────────────
 
-    @staticmethod
-    def _has_skill_md(clone_dir: Path) -> bool:
-        """Check whether a cloned repo contains at least one scannable skill."""
-        return bool(find_scannable_skill_files(clone_dir))
+    def _list_skill_paths(self, clone_dir: Path) -> list[str]:
+        """List the scannable SKILL.md paths at HEAD for a cloned repo."""
+        return self._git_ops.list_skill_paths_for_ref(clone_dir, 'HEAD')
 
     async def discover_configured_skill_repository(
         self,
@@ -229,7 +176,8 @@ class SkillManager:
             repo_url=normalized.url,
         )
 
-        if not self._has_skill_md(clone_dir):
+        skill_paths = self._list_skill_paths(clone_dir)
+        if not skill_paths:
             _logger.info(
                 'Discover: no scannable SKILL.md found in %s; retaining clone at %s',
                 repo_name,
@@ -238,7 +186,21 @@ class SkillManager:
             repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
             if repository is not None:
                 setattr(repository, "_removed_existing", True)
+                # 由于 skills / skill_versions 表对 skill_repos 有 ondelete="CASCADE" 外键（ orm.py ），
+                # 删 repository 时其下所有 skill 记录会 级联删除
                 await self.skill_repo_repository.delete_skill_repository(repository.id)
+                if repository.author and self.contributor_repository is not None:
+                    # 仓库删除后重新聚合该贡献者的 skill_count（同 author 的
+                    # 其他仓库不受影响）；repo_url 传 None 保留已有值
+                    await self.contributor_repository.upsert(
+                        source=repository.source,
+                        author=repository.author,
+                        platform=repository.platform,
+                        repo_url=None,
+                        skill_count=await self.contributor_repository.count_skills(
+                            repository.source, repository.author
+                        ),
+                    )
                 return repository
             return None
 
@@ -246,14 +208,26 @@ class SkillManager:
             normalized,
             repo_name,
         )
-        if not created_new and self._is_commit_unchanged(repository, clone_dir):
-            candidates, triggered = await self._retry_unscored_security_audits(repository)
-            if candidates:
-                setattr(repository, "_security_retry_candidates", candidates)
-                setattr(repository, "_security_retriggered", triggered)
+        if not created_new:
+            # 此前以直接采集方式（platform=''）收录的仓库，若后续在锚点目录中
+            # 登记（platform='community'），即使 git 提交未变化，也必须迁移其
+            # 列表来源字段（platform/source）。
+            repository = await self._sync_catalog_source(repository, normalized)
+            if self._is_commit_unchanged(repository, clone_dir):
+                candidates, triggered = await self._retry_unscored_security_audits(repository)
+                if candidates:
+                    setattr(repository, "_security_retry_candidates", candidates)
+                    setattr(repository, "_security_retriggered", triggered)
+                    return repository
+                setattr(repository, "_unchanged", True)
                 return repository
-            setattr(repository, "_unchanged", True)
-            return repository
+
+        # Cache values needed by the error path before any commit/rollback can
+        # expire the ORM instance, otherwise accessing them after rollback triggers
+        # async lazy loading outside greenlet_spawn.
+        repository_id_value = repository.id
+        repository_name_value = repository.repo_name
+        repository_skill_num = repository.skill_num
 
         await self._set_discovery_status(repository, SkillDiscoverStatus.DISCOVERING)
         try:
@@ -261,21 +235,25 @@ class SkillManager:
                 repository,
                 clone_dir=clone_dir,
                 repo_name=repo_name,
+                skill_paths=skill_paths,
+                author=normalized.sig_name,
             )
         except Exception as exc:
             error_summary = self._git_ops.summarize_exception(exc)
             _logger.warning(
                 'Failed to discover skills from skill repo %s (%s): %s',
-                repository.id, repository.repo_name, error_summary,
+                repository_id_value, repository_name_value, error_summary,
             )
             await self.rollback()
             await self.skill_repo_repository.update_skill_repository(
-                repository.id,
+                repository_id_value,
                 skill_discover_status=SkillDiscoverStatus.FAILED,
-                skill_num=repository.skill_num,
+                skill_num=repository_skill_num,
             )
+            if isinstance(exc, CategoryClassificationError):
+                raise
             raise ValueError(
-                f'Failed to discover skills from skill repo {repository.id}: {error_summary}'
+                f'Failed to discover skills from skill repo {repository_id_value}: {error_summary}'
             ) from exc
         setattr(refreshed, "_created_new", created_new)
         return refreshed
@@ -288,15 +266,32 @@ class SkillManager:
         *,
         clone_dir: Path,
         repo_name: str,
+        skill_paths: list[str] | None = None,
+        author: str | None = None,
     ) -> SkillRepoModel:
-        author = self._resolve_skill_author(repo.platform, repo_name)
-        latest_skills, tagged_skills = await self._discover_skills(
+        author = author or self._resolve_skill_author(repo.platform, repo_name)
+        latest_skills, tagged_skills, repository_commit_id = await self._discover_skills(
             repo,
             clone_dir=clone_dir,
             author=author,
+            skill_paths=skill_paths,
+        )
+        # enterprise/personal 仓库 author 未显式传入（community 走 sig_name）时，
+        # 用扫描结果里 URL 推导的 author 兜底，保证 skill_repos.author 与
+        # contributors 表对全部 platform 都有值
+        if not author and latest_skills:
+            author = next(
+                (skill.author for skill in latest_skills if skill.author), None
+            )
+        _logger.info(
+            'Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d, '
+            'security_cache_hits=%d, security_audits_submitted=%d, security_audits_pending=%d',
+            repo.repo_name, len(latest_skills), len(tagged_skills),
+            self._scanner._security_cache_hits,
+            self._scanner._security_audit_submitted,
+            self._scanner._security_audit_pending,
         )
         unique_skill_count = self._count_unique_skills(latest_skills)
-        repository_commit_id = self._git_ops.get_repository_head_commit_id(clone_dir)
         await self.skill_repository.store_skills_and_versions(
             repo.id,
             latest_skills,
@@ -307,12 +302,92 @@ class SkillManager:
             latest_skills,
             tagged_skills,
         )
-        return await self.skill_repo_repository.update_skill_repository(
+        # Write author back to skill_repos + upsert contributors table
+        # (profile 字段取自 openEuler-skills catalog 各 platform 的 skill.yaml)
+        if author and self.contributor_repository is not None:
+            profile = self._contributor_profile(repo.platform, author)
+            # skill_count 从 skills 表实时聚合该 author 名下全部可见 skill
+            # （含同 author 的其他仓库），避免多仓库 upsert 互相覆盖单仓库扫描值
+            contributor_skill_count = await self.contributor_repository.count_skills(
+                repo.source, author
+            )
+            await self.contributor_repository.upsert(
+                source=repo.source,
+                author=author,
+                platform=repo.platform,
+                repo_url=repo.url,
+                skill_count=contributor_skill_count,
+                name=profile.get('name'),
+                description=profile.get('description'),
+                git_profile=profile.get('git_profile'),
+                website=profile.get('website'),
+                commit=False,
+            )
+        repository = await self.skill_repo_repository.update_skill_repository(
             repo.id,
             repository_commit_id=repository_commit_id,
             skill_discover_status=SkillDiscoverStatus.DONE,
             skill_num=unique_skill_count,
+            author=author,
         )
+        await self._reconcile_skill_statistics()
+        return repository
+
+    async def _reconcile_skill_statistics(self) -> None:
+        """扫描落库后按 skills 表实际数据自愈统计值。
+
+        修正三类漂移：skill 被删除后 contributors.skill_count /
+        skill_repos.skill_num 的残留、多作者仓库只刷新单一 author 的
+        contributors 行、以及手工直改 skills 表造成的偏差。统计口径
+        与扫描写入一致（contributors 走 risk_score 非空的可见口径，
+        skill_repos 走仓库下 skill 行数），因此不会与扫描互相翻转。
+        失败仅告警，不影响已提交的扫描结果。
+        """
+        try:
+            corrected_contributors = 0
+            if self.contributor_repository is not None:
+                corrected_contributors = (
+                    await self.contributor_repository.reconcile_skill_counts()
+                )
+            corrected_repos = await self.skill_repo_repository.reconcile_skill_nums()
+            if corrected_contributors or corrected_repos:
+                _logger.info(
+                    'Discover: statistics reconciled after scan: '
+                    'contributors=%d, skill_repos=%d',
+                    corrected_contributors,
+                    corrected_repos,
+                )
+        except Exception as exc:
+            _logger.warning('Failed to reconcile skill statistics after scan: %s', exc)
+
+    def _contributor_profile(self, platform: str | None, author: str) -> dict[str, Any]:
+        """Lookup catalog profile fields (name/description/git_profile) for a contributor.
+
+        Lazily loads all profiles from the openEuler-skills catalog
+        (community/enterprise/personal skill.yaml) and indexes them by
+        (platform, author). Returns an empty dict when the catalog is
+        unavailable or the contributor is not registered.
+        """
+        if self.catalog_path is None:
+            return {}
+        if self._contributor_profile_by_key is None:
+            try:
+                profiles = load_contributor_profiles(self.catalog_path)
+                self._contributor_profile_by_key = {
+                    (p['platform'], p['author']): p for p in profiles
+                }
+                _logger.info(
+                    'Loaded contributor profiles from catalog: %d entries',
+                    len(self._contributor_profile_by_key),
+                )
+            except Exception as exc:
+                _logger.warning(
+                    'Failed to load contributor profiles from catalog %s: %s',
+                    self.catalog_path,
+                    exc,
+                )
+                self._contributor_profile_by_key = {}
+        return self._contributor_profile_by_key.get((platform or '', author), {})
 
     async def _discover_skills(
         self,
@@ -320,16 +395,18 @@ class SkillManager:
         *,
         clone_dir: Path,
         author: str | None,
-    ) -> tuple[list[Skill], list[SkillVersion]]:
+        skill_paths: list[str] | None = None,
+    ) -> tuple[list[Skill], list[SkillVersion], str | None]:
         clone_url = normalize_clone_url_for_git(repo.url)
-        self._git_ops.ensure_full_history(clone_dir, clone_url, repo.url)
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
             clone_dir,
             clone_url,
             repo.url,
         )
-        version_snapshots = GitOperations.build_repository_version_snapshots(
-            repository_git_metadata, as_optional_str, as_optional_str_list,
+        _logger.info(
+            'Discover: git metadata collected for %s, latest_tags: %s',
+            repo.repo_name,
+            repository_git_metadata.get('latest_tags', []),
         )
 
         detected_branch: str | None = None
@@ -341,32 +418,48 @@ class SkillManager:
             local_path=str(clone_dir),
             commit=False,
         )
-        return await self._scanner.start_scan(
+        repository_commit_id = as_optional_str(repository_git_metadata.get('commit_id'))
+        latest_skills, tagged_skills = await self._scanner.start_scan(
             repo=repo,
             repo_root=clone_dir,
             repository_git_metadata=repository_git_metadata,
-            version_snapshots=version_snapshots or None,
             author=author,
+            skill_paths=skill_paths,
         )
+        return latest_skills, tagged_skills, repository_commit_id
 
     async def _store_to_security_audits(
         self,
         latest_skills: list[Skill],
         tagged_skills: list[SkillVersion],
     ) -> None:
-        """Create ``SecurityAudit`` records for async-triggered skills."""
+        """Create ``SecurityAudit`` records for async-triggered skills.
+
+        触发失败（Jenkins 不可达等）的记录同样落库 risk_level=unknown，
+        与 API 审计路径（SecurityService.audit_skill）保持一致，
+        保证审计链路故障时审计状态仍可观测。
+        """
         records: list[Skill | SkillVersion] = [*latest_skills, *tagged_skills]
-        pending = [record for record in records if self._has_new_security_audit(record)]
+        # Records without a database id were never persisted (e.g. dropped as
+        # skill_id duplicates); writing their audit would violate the
+        # resource_id NOT NULL constraint and fail the whole transaction.
+        pending = [
+            record for record in records
+            if (
+                self._has_new_security_audit(record)
+                or self._has_attempted_security_audit(record)
+            )
+            and record.id is not None
+        ]
 
         if not pending:
             return
 
         audit_repo = SecurityAuditRepository(self.skill_repository.session)
-        for record in pending:
-            await audit_repo.upsert_by_resource(
-                resource_type='skill',
-                resource_id=record.id,
-                audit_data={
+        entries = [
+            (
+                record.id,
+                {
                     'resource_type': 'skill',
                     'resource_id': record.id,
                     'version': record.version,
@@ -377,13 +470,21 @@ class SkillManager:
                     'details': dict(record.extra_metadata['security_audit']),
                 },
             )
+            for record in pending
+        ]
+        await audit_repo.upsert_many_by_resource('skill', entries)
 
-        _logger.info('Upserted %d SecurityAudit records', len(pending))
+        _logger.info('SecurityDetector: Upserted %d SecurityAudit records', len(pending))
 
     @staticmethod
     def _has_new_security_audit(record: Skill | SkillVersion) -> bool:
         """Return whether this scan triggered a new audit for the record."""
         return bool(getattr(record, '_security_audit_triggered', False))
+
+    @staticmethod
+    def _has_attempted_security_audit(record: Skill | SkillVersion) -> bool:
+        """Return whether an async audit was attempted even if trigger failed."""
+        return bool(getattr(record, '_security_audit_attempted', False))
 
     async def _retry_unscored_security_audits(
         self,
@@ -403,7 +504,7 @@ class SkillManager:
         detector = self._scanner.security_detector
         if detector is None or not detector.has_skillspector:
             _logger.warning(
-                'Security retry skipped for repo %s: %d unscored records but '
+                'SecurityDetector: retry skipped for repo %s: %d unscored records but '
                 'Skillspector is unavailable',
                 repo.repo_name,
                 len(records),
@@ -423,7 +524,7 @@ class SkillManager:
             details = dict(report.details) if report is not None else {}
             if details.get('skillspector_build_number') is None:
                 _logger.warning(
-                    'Security retry failed to trigger: skill_id=%s version=%s',
+                    'SecurityDetector: retry failed to trigger: skill_id=%s version=%s',
                     record.skill_id,
                     record.version or '-',
                 )
@@ -451,9 +552,11 @@ class SkillManager:
 
         await self.skill_repository.session.commit()
         _logger.info(
-            'Security retry for unchanged repo %s: triggered=%d candidates=%d',
+            'SecurityDetector: retry unscored audits for unchanged repo %s: '
+            'triggered=%d skipped=%d total_unscored=%d',
             repo.repo_name,
             triggered,
+            len(records) - triggered,
             len(records),
         )
         return len(records), triggered
@@ -480,7 +583,7 @@ class SkillManager:
                     return relative_path
 
         owner_repo = extract_owner_repo(repo.url)
-        prefix = f'{repo.source}/{owner_repo}/'
+        prefix = f'{repo.source}:{owner_repo}/'
         skill_path = record.skill_id.removeprefix(prefix)
         repository_name = owner_repo.rsplit('/', 1)[-1]
         if skill_path == repository_name:
@@ -501,7 +604,7 @@ class SkillManager:
         repo_url: str | None,
     ) -> None:
         if clone_dir.is_dir() and (clone_dir / '.git').exists():
-            _logger.info('Discover: existing clone found, pulling updates: %s', clone_dir)
+            _logger.info('Discover: updating skill repo: %s', clone_dir)
             self._git_ops.update_existing_repository(
                 clone_dir, clone_url,
                 branch=branch, repo_url=repo_url,
@@ -520,18 +623,86 @@ class SkillManager:
 
     async def _get_or_create_skill_repository(
         self,
-        request: SkillRepositoryRequest,
+        normalized_request: SkillRepositoryRequest,
         repo_name: str,
     ) -> tuple[SkillRepoModel, bool]:
-        repository = await self.create_skill_repository(request)
-        if repository is not None:
-            return repository, True
+        existing_repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
+        if existing_repository is not None:
+            _logger.info(
+                f'Discover: Skill repo already exists, "{repo_name}": "{existing_repository.id}", skipping creation'
+            )
+            return existing_repository, False
 
-        _logger.info('Discover: skill repo already exists in DB: %s', repo_name)
-        repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
-        if repository is None:
-            raise ValueError(f'Skill repo {repo_name} was expected in DB but not found')
-        return repository, False
+        repository = await self.create_skill_repository(normalized_request, repo_name)
+        return repository, True
+
+    async def _sync_catalog_source(
+        self,
+        repo: SkillRepoModel,
+        normalized_request: SkillRepositoryRequest,
+    ) -> SkillRepoModel:
+        """将 skill_repos / skills 的列表来源字段刷新为目录视图。
+
+        此前通过直接采集方式（``discover --url``，platform 为空）收录的仓库，
+        若后续在锚点目录中登记（如 ``platform='community'``），则下一次采集时
+        必须迁移其 ``platform``/``source`` 字段，即使 git 提交未变化也是如此。
+        否则技能列表会一直显示旧来源，直到仓库内容发生变化。
+        """
+        target_source: str | None = None
+        try:
+            target_source, _ = derive_skill_source(normalized_request.url)
+        except ValueError:
+            _logger.warning(
+                'Discover: cannot derive source for %s from %s; source migration skipped',
+                repo.repo_name,
+                normalized_request.url,
+            )
+        target_platform = normalized_request.platform
+
+        current_source = getattr(repo, 'source', None)
+        current_platform = getattr(repo, 'platform', None)
+
+        source_changed = bool(target_source) and target_source != current_source
+        platform_changed = bool(target_platform) and target_platform != current_platform
+        if not source_changed and not platform_changed:
+            return repo
+
+        _logger.info(
+            'Discover: migrating list source for %s: source %r -> %r, platform %r -> %r',
+            repo.repo_name,
+            current_source,
+            target_source if source_changed else current_source,
+            current_platform,
+            target_platform if platform_changed else current_platform,
+        )
+
+        repo_values: dict[str, Any] = {}
+        skill_values: dict[str, Any] = {}
+        if source_changed:
+            repo_values['source'] = target_source
+            skill_values['source'] = target_source
+        if platform_changed:
+            repo_values['platform'] = target_platform
+            skill_values['platform'] = target_platform
+
+        await self.skill_repo_repository.update_skill_repository(
+            repo.id,
+            commit=False,
+            **repo_values,
+        )
+        if skill_values:
+            await self.skill_repository.session.execute(
+                update(Skill)
+                .where(Skill.skill_repo_id == repo.id)
+                .values(**skill_values)
+            )
+            await self.skill_repository.session.execute(
+                update(SkillVersion)
+                .where(SkillVersion.skill_repo_id == repo.id)
+                .values(**skill_values)
+            )
+        await self.skill_repository.session.commit()
+        return await self.get_repository_by_id(repo.id)
 
     def _is_commit_unchanged(
         self,
@@ -543,7 +714,7 @@ class SkillManager:
         return bool(current_commit_id and stored_commit_id == current_commit_id)
 
     def _resolve_skill_author(self, platform: str | None, repo_name: str) -> str | None:
-        if platform == 'openeuler':
+        if platform == 'community':
             return self._get_openeuler_sig_name(repo_name)
         return None
 
@@ -579,7 +750,10 @@ class SkillManager:
         if not url:
             raise ValueError('git skill repos require url')
         platform = request.platform.strip() if request.platform is not None else None
-        return SkillRepositoryRequest(branch=branch, url=url, platform=platform)
+        sig_name = request.sig_name.strip() if request.sig_name else None
+        return SkillRepositoryRequest(
+            branch=branch, url=url, platform=platform, sig_name=sig_name,
+        )
 
     @staticmethod
     def _derive_repo_name(request: SkillRepositoryRequest) -> str:

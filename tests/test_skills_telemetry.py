@@ -1,7 +1,9 @@
 import asyncio
-from unittest.mock import AsyncMock
+import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 from src.api.services.telemetry import TelemetryService, build_skill_id_from_telemetry
+from src.models.orm import DownloadHistory
 
 
 class TestSkillsTelemetry:
@@ -12,7 +14,7 @@ class TestSkillsTelemetry:
             "deploy-to-vercel",
         )
 
-        assert skill_id == "github/vercel-labs/agent-skills/deploy-to-vercel"
+        assert skill_id == "github:vercel-labs/agent-skills/deploy-to-vercel"
 
     def test_build_skill_id_from_telemetry_prefers_skill_files_path(self):
         skill_id = build_skill_id_from_telemetry(
@@ -22,7 +24,7 @@ class TestSkillsTelemetry:
             {"Deploy to Vercel": "skills/deploy-to-vercel/SKILL.md"},
         )
 
-        assert skill_id == "github/vercel-labs/agent-skills/skills/deploy-to-vercel"
+        assert skill_id == "github:vercel-labs/agent-skills/deploy-to-vercel"
 
     def test_build_skill_id_from_telemetry_root_skill_matches_crawler(self):
         # Root-level SKILL.md resolves to the repo slug — same as the crawler
@@ -34,7 +36,7 @@ class TestSkillsTelemetry:
             {"agent-skills": "SKILL.md"},
         )
 
-        assert skill_id == "github/acme/agent-skills/agent-skills"
+        assert skill_id == "github:acme/agent-skills/agent-skills"
 
     def test_build_skill_id_from_telemetry_gitcode_matches_crawler(self):
         skill_id = build_skill_id_from_telemetry(
@@ -44,13 +46,15 @@ class TestSkillsTelemetry:
             {"gitcode-api": ".skills/gitcode-api/SKILL.md"},
         )
 
-        assert skill_id == "gitcode/openeuler/yuanrong/.skills/gitcode-api"
+        assert skill_id == "gitcode:openeuler/yuanrong/gitcode-api"
 
     def test_process_install_telemetry_increments_each_matched_skill(self):
         service = TelemetryService(AsyncMock())
         service.skill_repo = AsyncMock()
+        service.session.add = MagicMock()
         service.session.commit = AsyncMock()
-        service.skill_repo.increment_download.side_effect = [True, True]
+        skill_uuid_1, skill_uuid_2 = uuid.uuid4(), uuid.uuid4()
+        service.skill_repo.increment_download.side_effect = [skill_uuid_1, skill_uuid_2]
         params = {
             "event": "install",
             "source": "vercel-labs/agent-skills",
@@ -62,26 +66,38 @@ class TestSkillsTelemetry:
             ),
         }
 
-        matched_skill_ids = asyncio.run(service.process(params))
+        matched_skill_ids = asyncio.run(
+            service.process(params, ip_address="127.0.0.1", user_agent="wittyhub-cli/1.0")
+        )
 
         assert matched_skill_ids == [
-            "github/vercel-labs/agent-skills/skills/deploy-to-vercel",
-            "github/vercel-labs/agent-skills/skills/create-sdk-plugin",
+            "github:vercel-labs/agent-skills/deploy-to-vercel",
+            "github:vercel-labs/agent-skills/create-sdk-plugin",
         ]
         assert service.skill_repo.increment_download.await_count == 2
         service.skill_repo.increment_download.assert_any_await(
-            "github/vercel-labs/agent-skills/skills/deploy-to-vercel"
+            "github:vercel-labs/agent-skills/deploy-to-vercel"
         )
         service.skill_repo.increment_download.assert_any_await(
-            "github/vercel-labs/agent-skills/skills/create-sdk-plugin"
+            "github:vercel-labs/agent-skills/create-sdk-plugin"
         )
+        # 每个命中 Skill 落一条 DownloadHistory 记录，携带 IP/User-Agent
+        added_records = [c.args[0] for c in service.session.add.call_args_list]
+        assert len(added_records) == 2
+        assert all(isinstance(r, DownloadHistory) for r in added_records)
+        assert {r.resource_id for r in added_records} == {skill_uuid_1, skill_uuid_2}
+        assert all(r.resource_type == "skill" for r in added_records)
+        assert all(r.ip_address == "127.0.0.1" for r in added_records)
+        assert all(r.user_agent == "wittyhub-cli/1.0" for r in added_records)
         service.session.commit.assert_awaited_once()
 
     def test_process_install_telemetry_skips_unmatched_skill_ids(self):
         service = TelemetryService(AsyncMock())
         service.skill_repo = AsyncMock()
+        service.session.add = MagicMock()
         service.session.commit = AsyncMock()
-        service.skill_repo.increment_download.side_effect = [True, False]
+        skill_uuid = uuid.uuid4()
+        service.skill_repo.increment_download.side_effect = [skill_uuid, None]
         params = {
             "event": "install",
             "source": "vercel-labs/agent-skills",
@@ -96,6 +112,10 @@ class TestSkillsTelemetry:
         matched_skill_ids = asyncio.run(service.process(params))
 
         assert matched_skill_ids == [
-            "github/vercel-labs/agent-skills/skills/deploy-to-vercel",
+            "github:vercel-labs/agent-skills/deploy-to-vercel",
         ]
+        # 未命中的 Skill 不落 DownloadHistory 记录
+        added_records = [c.args[0] for c in service.session.add.call_args_list]
+        assert len(added_records) == 1
+        assert added_records[0].resource_id == skill_uuid
         service.session.commit.assert_awaited_once()

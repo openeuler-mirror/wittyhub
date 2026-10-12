@@ -22,7 +22,9 @@ class PostgresConfig(BaseSettings):
 
     @property
     def sync_url(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
+        # Keep the synchronous driver explicit. SQLAlchemy's default PostgreSQL
+        # driver can vary across major releases; this project installs psycopg2.
+        return f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class StorageConfig(BaseSettings):
@@ -42,7 +44,7 @@ class CrawlerConfig(BaseSettings):
     github_token: str = ""
     gitcode_token: str = ""
     github_username: str = "git"
-    max_tags_per_repo: int = 3
+    max_tags_per_repo: int = 5
 
 
 class SkillRepoEntry(BaseSettings):
@@ -56,11 +58,34 @@ class SecurityConfig(BaseSettings):
     skillspector_jenkins_url: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_URL
     skillspector_jenkins_user: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_USER
     skillspector_jenkins_token: str = ""  # env: SECURITY__SKILLSPECTOR_JENKINS_TOKEN
+    # 同步扫描等待 Jenkins 构建结束的超时（秒），默认 600（10 分钟）
+    skillspector_timeout: float = 600.0  # env: SECURITY__SKILLSPECTOR_TIMEOUT
+    # Jenkins 部署参数（skillspector 容器入口读取注入为 JENKINS_* 环境变量；
+    # 后端仅解析 config.yaml，不消费这些字段）
+    skillspector_jenkins_http_port: int = 8083
+    skillspector_jenkins_num_executors: int = 10
+    skillspector_jenkins_quiet_period: int = 5
+    skillspector_repository_root: str = "/opt/wittyhub/skill-repositories"
 
 
 class AppConfig(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     admin_api_token: str = ""
+
+
+class DiscoverSchedulerConfig(BaseSettings):
+    """后台定时 discover 调度配置。
+
+    interval 支持 "daily"（每天）或 "weekly"（每周），触发时刻由 time
+    （本地时区 HH:MM）决定；weekly 时 weekday 指定星期（mon/tue/wed/
+    thu/fri/sat/sun）。
+    """
+
+    enabled: bool = False
+    interval: str = "daily"
+    time: str = "03:00"
+    weekday: str = "sun"
+    result_dir: str = ""  # 每轮结果 JSON 保存目录；空则用 storage.local_path/logs
 
 
 class LoggingConfig(BaseSettings):
@@ -69,8 +94,8 @@ class LoggingConfig(BaseSettings):
 
 
 class AIConfig(BaseSettings):
-    embedding_model: str = "bge-base-zh-v1.5"
-    embedding_host: str = "http://localhost:8081"
+    embedding_model: str = "BAAI/bge-base-zh-v1.5"
+    embedding_host: str = "http://localhost:8082"
     embedding_dimension: int = 768
     enable_semantic_search: bool = True
 
@@ -82,6 +107,7 @@ class Settings(BaseSettings):
     crawler: CrawlerConfig = Field(default_factory=CrawlerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     app: AppConfig = Field(default_factory=AppConfig)
+    discover_scheduler: DiscoverSchedulerConfig = Field(default_factory=DiscoverSchedulerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     openeuler_repos: list[SkillRepoEntry] = Field(default_factory=list)
@@ -104,6 +130,7 @@ class Settings(BaseSettings):
             crawler=CrawlerConfig(**data.get("crawler", {})),
             security=SecurityConfig(**data.get("security", {})),
             app=AppConfig(**data.get("app", {})),
+            discover_scheduler=DiscoverSchedulerConfig(**data.get("discover_scheduler", {})),
             logging=LoggingConfig(**data.get("logging", {})),
             ai=AIConfig(**data.get("ai", {})),
             openeuler_repos=data.get("openeuler_repos", []) or [],

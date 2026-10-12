@@ -1,6 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from '@/pages/Home.vue'
 import SkillDetail from '@/pages/SkillDetail.vue'
+import SkillRiskReport from '@/pages/SkillRiskReport.vue'
+import DocsPage from '@/pages/DocsPage.vue'
+import ContributorDetail from '@/pages/ContributorDetail.vue'
+import Contributors from '@/pages/Contributors.vue'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -9,6 +14,11 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: Home
+    },
+    {
+      path: '/docs/:doc',
+      name: 'docs',
+      component: DocsPage
     },
     {
       path: '/skills/search',
@@ -20,15 +30,39 @@ const router = createRouter({
       name: 'category',
       component: Home
     },
+    // 必须声明在详情路由（贪婪的 :skillId(.*)）之前，避免被其吞掉
+    {
+      path: '/skills/:skillId(.*)/report',
+      name: 'skill-risk-report',
+      component: SkillRiskReport
+    },
     {
       path: '/skills/:skillId(.*)',
       name: 'skill-detail',
       component: SkillDetail
+    },
+    {
+      path: '/contributors/:source/:author(.*)',
+      name: 'contributor-detail',
+      component: ContributorDetail
+    },
+    {
+      path: '/contributors',
+      name: 'contributors',
+      component: Contributors
     }
   ],
-  scrollBehavior() {
+  scrollBehavior(to) {
+    // 带锚点的导航（文档页章节跳转）滚动到锚点元素，top 偏移避开 72px 吸顶导航；
+    // 目标元素尚未渲染时（文档正文异步加载）由页面在内容就绪后再定位
+    if (to.hash) return { el: to.hash, top: 96 }
     return { top: 0 }
   }
+})
+
+// Page-level PV tracking: report once per completed navigation.
+router.afterEach((to, from) => {
+  oaReport('page_view', { module: 'navigation', from_path: from.fullPath })
 })
 
 export default router

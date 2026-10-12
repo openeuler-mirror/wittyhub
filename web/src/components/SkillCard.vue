@@ -3,11 +3,17 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { Skill } from '@/api/types'
 import { useSkillStore } from '@/stores/skill'
+import { oaReport } from '@opendesign-plus/plugins/analytics'
 import personSvg from '@/assets/icons/person.svg?raw'
 
 const props = defineProps<{
   skill: Skill
+  rank?: number
 }>()
+
+function onClickCard() {
+  oaReport('list_click_card', { module: 'skill_list', skill_id: props.skill.skill_id, rank: props.rank })
+}
 
 function getSkillRoutePath(skillId: string): string {
   return `/skills/${encodeURIComponent(skillId)}`
@@ -27,18 +33,20 @@ const skillStore = useSkillStore()
 
 // 近7天/近30天排序时显示周期下载量，否则显示累计下载量
 // 搜索场景后端不返回周期下载量（搜索忽略 sort_period），始终显示累计下载量
+// 贡献者详情页等非首页场景后端也不会返回 period_downloads，此时回退到累计下载量
 const displayDownloadCount = computed(() => {
   const period = skillStore.filter.sortPeriod
   const isSearching = !!skillStore.filter.keyword
-  if (!isSearching && (period === 'week' || period === 'month')) {
-    return props.skill.period_downloads ?? 0
+  if (!isSearching && (period === 'week' || period === 'month') && props.skill.period_downloads != null) {
+    return props.skill.period_downloads
   }
   return props.skill.download_count
 })
 
 function truncate(text: string | null, length: number): string {
-  if (!text) return ''
-  return text.length > length ? text.slice(0, length) + '...' : text
+  const description = text?.trim()
+  if (!description) return '暂无说明'
+  return description.length > length ? description.slice(0, length) + '...' : description
 }
 </script>
 
@@ -46,6 +54,7 @@ function truncate(text: string | null, length: number): string {
   <RouterLink
     :to="getSkillRoutePath(skill.skill_id)"
     class="card card-hover flex flex-col p-4 group border-0"
+    @click="onClickCard"
   >
     <div class="mb-3">
       <h3 class="skill-card-title"><span class="title-text">{{ skill.name }}</span><span :class="['tag', securityLevel.class]">{{ securityLevel.label }}</span></h3>
@@ -113,6 +122,10 @@ function truncate(text: string | null, length: number): string {
 
 .skill-card-title .title-text {
   margin-right: 12px;
+}
+
+.card:hover .skill-card-title .title-text {
+  color: var(--o-color-primary1);
 }
 
 .skill-card-title .tag {
@@ -189,6 +202,6 @@ function truncate(text: string | null, length: number): string {
 
 .dark .tag-gray,
 [data-o-theme="e.dark"] .tag-gray {
-  background: #242427;
+  background: var(--o-color-fill2);
 }
 </style>

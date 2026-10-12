@@ -11,6 +11,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/
     gcc \
     git \
     libpq-dev \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
@@ -20,7 +21,6 @@ COPY migrations ./migrations
 COPY alembic.ini ./
 COPY deploy/api/entrypoint.sh /usr/local/bin/wittyhub-api-entrypoint
 COPY skillcrawler ./skillcrawler
-COPY skills ./skills
 
 RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
 

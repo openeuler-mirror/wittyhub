@@ -55,12 +55,25 @@ export const useSkillStore = defineStore('skill', () => {
       }
 
       if (filter.value.keyword) {
-        const res = await api.searchSkills({
+        const searchParams: Record<string, unknown> = {
           q: filter.value.keyword,
-          mode: 'text',
+          mode: 'hybrid',
           scope: 'summary',
-          ...params
-        })
+          skip: params.skip,
+          limit: params.limit
+        }
+        if (params.category) searchParams.category = params.category
+        if (params.security_level) searchParams.security_level = params.security_level
+        if (params.platform) searchParams.platform = params.platform
+        // 排序：热门-全部时间（默认态）保持搜索相关度排序；
+        // 本周/本月最热、最新、下载量则在搜索结果内生效
+        if (params.sort_period) {
+          searchParams.sort_by = 'download_count'
+          searchParams.sort_period = params.sort_period
+        } else if (filter.value.sortBy === 'latest' || filter.value.sortBy === 'downloads') {
+          searchParams.sort_by = params.sort_by
+        }
+        const res = await api.searchSkills(searchParams)
         skills.value = res.results
         total.value = res.total
       } else {

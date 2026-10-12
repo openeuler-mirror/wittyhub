@@ -63,76 +63,6 @@ def normalize_repository_browse_base_url(repo_url: str) -> str | None:
     return f'{parsed.scheme}://{parsed.netloc}/{path}'
 
 
-# ── Skill ID generation ────────────────────────────────────────────
-
-
-def build_public_skill_id_from_relative_path(
-    source: str,
-    owner_repo: str,
-    relative_path: str,
-) -> str:
-    """Derive a public skill_id from a normalized owner/repo and the
-    repository-relative path of the SKILL.md file.
-
-    Shared by the crawler (which writes the skill records) and the install
-    audit lookup (which reads them back), so both use the exact same skill_id
-    in the database. Root-level SKILL.md resolves to the repo slug, matching
-    the crawler's historical behaviour.
-    """
-    if relative_path == 'SKILL.md':
-        skill_path = owner_repo.rsplit('/', 1)[-1]
-    elif relative_path.endswith('/SKILL.md'):
-        skill_path = relative_path.removesuffix('/SKILL.md')
-    else:
-        raise ValueError(f'Expected a SKILL.md file, got: {relative_path}')
-    return f'{source}/{owner_repo}/{skill_path}'
-
-
-def build_public_skill_id(
-    repo: "SkillRepoModel",
-    repo_root: Path,
-    skill_file: Path,
-) -> str:
-    owner_repo = extract_owner_repo(repo.url)
-    relative_path = to_repository_relative_path(repo_root, skill_file)
-    return build_public_skill_id_from_relative_path(repo.source, owner_repo, relative_path)
-
-
-def extract_owner_repo(repo_url: str | None) -> str:
-    if not repo_url:
-        raise ValueError('Repository url is required to derive skill_id')
-
-    normalized_url = repo_url.strip()
-    ssh_match = re.match(r'git@([^:]+):(.+)', normalized_url)
-    if ssh_match:
-        path = ssh_match.group(2).strip('/')
-    else:
-        parsed = urlparse(normalized_url)
-        path = parsed.path.strip('/')
-
-    if path.endswith('.git'):
-        path = path[:-4]
-
-    segments = [segment for segment in path.split('/') if segment]
-    if len(segments) < 2:
-        raise ValueError(f'Failed to extract owner/repo from url: {repo_url}')
-
-    owner = slugify_identifier(segments[-2])
-    repo = slugify_identifier(segments[-1])
-    if not owner or not repo:
-        raise ValueError(f'Invalid owner/repo derived from url: {repo_url}')
-    return f'{owner}/{repo}'
-
-
-def slugify_identifier(value: str) -> str:
-    lowered = value.strip().lower()
-    if not lowered:
-        return ''
-    normalized = re.sub(r'[^a-z0-9._-]+', '-', lowered)
-    normalized = re.sub(r'-{2,}', '-', normalized)
-    return normalized.strip('-')
-
-
 # ── Skill source derivation ────────────────────────────────────────
 
 
@@ -222,12 +152,18 @@ def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
                 continue
             block_scalar_indicator = None
 
-        if stripped_line.startswith('- ') and current_key == 'triggers':
-            triggers = metadata.setdefault('triggers', [])
-            if isinstance(triggers, list):
-                trigger = stripped_line[2:].strip()
-                if trigger:
-                    triggers.append(trigger)
+        # YAML block list item: "- value" under any key (not just triggers)
+        if stripped_line.startswith('- ') and current_key is not None:
+            existing = metadata.get(current_key)
+            if not isinstance(existing, list):
+                # First list item — convert from scalar (usually empty
+                # string) to list, preserving a non-empty scalar as the
+                # first element (handles "key: val\n- item" edge case).
+                existing = [existing] if isinstance(existing, str) and existing else []
+                metadata[current_key] = existing
+            item = stripped_line[2:].strip()
+            if item:
+                existing.append(item)
             continue
 
         if ':' not in line:
@@ -252,6 +188,25 @@ def parse_skill_frontmatter_text(text: str) -> tuple[dict[str, object], str]:
     return metadata, content.strip()
 
 
+def extract_declared_version(metadata: dict[str, object]) -> str | None:
+    """提取 SKILL.md frontmatter 声明的版本号，兼容两种写法：
+
+    - 顶层声明：``version: 1.0.0``
+    - 嵌套声明（azure-skills 风格）：``metadata:`` 块下的 ``version``
+
+    当前扁平解析器会把嵌套键提升为顶层键，两种写法都落在顶层；
+    显式再查一次 ``metadata`` 字典，保证将来切换为保留嵌套结构的
+    YAML 解析器时行为不变。顶层声明优先。
+    """
+    top_level = as_optional_str(metadata.get('version'))
+    if top_level:
+        return top_level
+    nested = metadata.get('metadata')
+    if isinstance(nested, dict):
+        return as_optional_str(nested.get('version'))
+    return None
+
+
 def _parse_frontmatter_value(key: str, value: str) -> object:
     if not value:
         return [] if key == 'triggers' else ''
@@ -271,7 +226,16 @@ def _parse_frontmatter_value(key: str, value: str) -> object:
         return True
     if lowered == 'false':
         return False
-    return value.strip('"\'')
+
+    # Inline array syntax [a, b, c] — YAML flow sequence, applies to all keys
+    if value.startswith('[') and value.endswith(']'):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        items = [item.strip().strip('"\'') for item in inner.split(',')]
+        return [item for item in items if item] or []
+
+    return value.strip('"\'' )
 
 
 # ── Misc helpers ───────────────────────────────────────────────────
@@ -288,34 +252,42 @@ def derive_repository_skill_name(
     return skill_file.stem
 
 
-def to_repository_relative_path(repo_root: Path, skill_file: Path) -> str:
-    return skill_file.relative_to(repo_root).as_posix()
+# 扫描时需要跳过的目录规则：
+# - 单层目录直接写目录名，匹配路径中任意一级目录（'docs' 匹配 'a/docs/SKILL.md'）
+# - 多层目录用 '/' 连接，匹配路径中任意位置的连续片段
+#   （'community/sig/demo' 匹配 'community/sig/demo/xxx/SKILL.md'）
+SKILL_SKIP_PATH_RULES: tuple[str, ...] = (
+    'template', 'templates', 'example', 'examples',
+    'demo', 'demos', 'test', 'tests',
+    'fixture', 'fixtures', 'docs', 'doc',
+    'archive', 'archives', 'legacy',
+)
+# strip 首尾 '/'，容忍 'a/b/' 这类带尾斜杠的写法
+_SKIP_RULE_PARTS: tuple[tuple[str, ...], ...] = tuple(
+    rule.strip('/').lower().split('/') for rule in SKILL_SKIP_PATH_RULES
+)
 
 
 def should_skip_relative_path(relative_path: str) -> bool:
-    relative_path = relative_path.lower()
-    path_parts = relative_path.split('/')
-    return any(
-        part in {
-            'template', 'templates', 'example', 'examples',
-            'demo', 'demos', 'test', 'tests',
-            'fixture', 'fixtures', 'docs', 'doc',
-            'archive', 'archives', 'legacy',
-        }
-        for part in path_parts[:-1]
-    )
+    directory_parts = relative_path.lower().split('/')[:-1]
+    for rule_parts in _SKIP_RULE_PARTS:
+        rule_length = len(rule_parts)
+        if any(
+            directory_parts[index:index + rule_length] == rule_parts
+            for index in range(len(directory_parts) - rule_length + 1)
+        ):
+            return True
+    return False
 
 
-def find_scannable_skill_files(repo_root: Path) -> list[Path]:
-    """Return SKILL.md files that are eligible for repository discovery."""
-    return sorted(
-        skill_file
-        for skill_file in repo_root.rglob('SKILL.md')
-        if skill_file.is_file()
-        and not should_skip_relative_path(
-            to_repository_relative_path(repo_root, skill_file)
-        )
-    )
+# 无效 skill 内容判定（扫描期内容门禁）：
+# - 空洞内容：正文长度低于阈值，多为占位文件或测试桩
+MIN_SKILL_CONTENT_LENGTH = 100
+
+def is_low_value_skill_content(content: str) -> bool:
+    """扫描时跳过内容无效的 skill：指针文件或正文过短。"""
+    text = content.strip()
+    return len(text) < MIN_SKILL_CONTENT_LENGTH
 
 
 def normalize_git_clone_url(url: str | None) -> str:
@@ -326,6 +298,8 @@ def normalize_git_clone_url(url: str | None) -> str:
     ssh_match = re.match(r'git@([^:]+):(.+)', stripped)
     if ssh_match:
         host = ssh_match.group(1)
+        if host.lower() == 'atomgit.com':
+            host = 'gitcode.com'
         path = ssh_match.group(2).strip('/')
         return f'git@{host}:{path}'
 
@@ -333,10 +307,13 @@ def normalize_git_clone_url(url: str | None) -> str:
     if not parsed.scheme or not parsed.netloc:
         return ''
 
+    host = parsed.netloc
+    if host.lower() == 'atomgit.com':
+        host = 'gitcode.com'
     path = parsed.path.strip('/')
     if path.endswith('.git'):
         path = path[:-4]
-    return f'{parsed.scheme}://{parsed.netloc}/{path}'
+    return f'{parsed.scheme}://{host}/{path}'
 
 
 def normalize_clone_url_for_git(repo_url: str | None) -> str:

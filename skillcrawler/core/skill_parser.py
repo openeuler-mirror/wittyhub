@@ -285,7 +285,7 @@ def should_skip_relative_path(relative_path: str) -> bool:
 MIN_SKILL_CONTENT_LENGTH = 100
 
 def is_low_value_skill_content(content: str) -> bool:
-    """扫描时跳过内容无效的 skill：指针文件或正文过短。"""
+    """扫描时跳过正文过短内容无效的skill。"""
     text = content.strip()
     return len(text) < MIN_SKILL_CONTENT_LENGTH
 

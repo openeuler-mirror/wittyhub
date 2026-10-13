@@ -707,7 +707,29 @@ class SkillspectorCollector:
                 pending_count=len(pending),
                 completed_count=processed,
             )
+            if processed:
+                # risk_score 回填会改变可见 skill 数（扫描提交审计时多为
+                # pending，count_skills 口径聚合结果是 0），这里补一次对账
+                # 把 contributors.skill_count 修正为回填后的实际值
+                await self._reconcile_contributor_skill_counts(session)
         return processed
+
+    @staticmethod
+    async def _reconcile_contributor_skill_counts(session: Any) -> None:
+        try:
+            from src.models.repository import ContributorRepository
+
+            corrected = await ContributorRepository(session).reconcile_skill_counts()
+            if corrected:
+                logger.info(
+                    "Contributor skill_count reconciled after audit collection: %d row(s)",
+                    corrected,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to reconcile contributor skill_count after audit collection",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Internals

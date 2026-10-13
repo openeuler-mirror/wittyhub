@@ -316,6 +316,34 @@ class TestSkillRepositoryUnit:
 
         assert "skills/release-helper/SKILL.md" in manager._list_skill_paths(tmp_path)
 
+    def test_list_skill_paths_rejects_lookalike_skill_filenames(self, tmp_path):
+        """文件名不是恰好 SKILL.md 的（如 _cannbot_SKILL.md）不算 skill，
+        否则后续 build_skill_id 校验会抛错导致整仓扫描失败。"""
+        from skillcrawler.core.skill_manager import SkillManager
+
+        lookalike = (
+            tmp_path
+            / "plugins-community"
+            / "ascendc"
+            / "reference"
+            / "_cannbot_SKILL.md"
+        )
+        lookalike.parent.mkdir(parents=True)
+        lookalike.write_text("# Reference only", encoding="utf-8")
+        valid_skill = tmp_path / "skills" / "cannbot" / "SKILL.md"
+        valid_skill.parent.mkdir(parents=True)
+        valid_skill.write_text("# Cannbot", encoding="utf-8")
+
+        _git(tmp_path, "init")
+        _git(tmp_path, "config", "user.email", "tests@example.com")
+        _git(tmp_path, "config", "user.name", "WittyHub Tests")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "-m", "add skills")
+
+        manager = SkillManager(MagicMock(), MagicMock())
+
+        assert manager._list_skill_paths(tmp_path) == ["skills/cannbot/SKILL.md"]
+
     def test_skill_manager_workspace_defaults_to_storage_local_path(self, tmp_path):
         from skillcrawler.core import skill_manager
 

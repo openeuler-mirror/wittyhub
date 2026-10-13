@@ -149,9 +149,10 @@ class DiscoverScheduler:
         run_started = time.monotonic()
         run_started_wall = datetime.now()
         logger.info(
-            "Scheduled discover round started: %d repos from %s",
+            "Scheduled discover round started: %d repos from %s (catalog: %s)",
             total,
             ", ".join(config_keys),
+            repository_path,
         )
 
         counters = {

@@ -199,7 +199,11 @@ class GitOperations:
         skill_paths: list[str] = []
         for line in output.splitlines():
             relative_path = line.strip()
-            if not relative_path or not relative_path.endswith('SKILL.md'):
+            # 只认文件名恰好为 SKILL.md 的文件（根级或 */SKILL.md），
+            # _cannbot_SKILL.md 等同名后缀文件不是 skill，与 build_skill_id 口径一致
+            if not relative_path or not (
+                relative_path == 'SKILL.md' or relative_path.endswith('/SKILL.md')
+            ):
                 continue
             if should_skip_relative_path(relative_path):
                 continue

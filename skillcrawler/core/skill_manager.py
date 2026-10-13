@@ -579,7 +579,7 @@ class SkillManager:
             marker = f'/blob/{ref}/'
             if marker in record.source_url:
                 relative_path = record.source_url.split(marker, 1)[1]
-                if relative_path.endswith('SKILL.md'):
+                if relative_path == 'SKILL.md' or relative_path.endswith('SKILL.md'):
                     return relative_path
 
         owner_repo = extract_owner_repo(repo.url)

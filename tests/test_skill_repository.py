@@ -569,6 +569,39 @@ repositories:
             "git clone timed out after 120s"
         )
 
+    def test_called_process_error_str_includes_git_stderr(self):
+        """净化后的 git 错误 str() 带 stderr 失败原因，traceback 可直接排查。"""
+        from skillcrawler.core.git_operations import GitCommandError, GitOperations
+
+        git_ops = GitOperations(github_token=None)
+        exc = git_ops._sanitize_called_process_error(
+            subprocess.CalledProcessError(
+                128, ["git", "fetch"],
+                output="", stderr="OpenSSL SSL_connect: SSL_ERROR_SYSCALL",
+            )
+        )
+
+        assert isinstance(exc, subprocess.CalledProcessError)
+        assert isinstance(exc, GitCommandError)
+        assert "SSL_ERROR_SYSCALL" in str(exc)
+
+    def test_called_process_error_str_masks_github_token(self):
+        """str() 里的 stderr 同样做 token 打码，不泄露凭据。"""
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token="secret-token-123")
+        exc = git_ops._sanitize_called_process_error(
+            subprocess.CalledProcessError(
+                128,
+                ["git", "fetch", "https://x/secret-token-123"],
+                output="",
+                stderr="auth failed for secret-token-123",
+            )
+        )
+
+        assert "secret-token-123" not in str(exc)
+        assert "***" in str(exc)
+
     async def test_skill_scanner_stores_skill_directory_tree_hash_not_repo_head(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
         from skillcrawler.core.skill_scanner import SkillScanner
@@ -2085,6 +2118,68 @@ class TestGitOperationsMaterialize:
 
         git_ops = GitOperations(github_token=None)
         assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is False
+
+    def test_materialize_retries_after_transient_network_error(self, tmp_path, caplog):
+        """网络抖动中断懒拉取后重试续拉（已缓存 blob 自动跳过），日志带 git stderr。"""
+        import logging
+
+        from skillcrawler.core.git_operations import MATERIALIZE_ATTEMPTS, GitOperations
+
+        (tmp_path / ".git").mkdir()
+        git_ops = GitOperations(github_token=None)
+
+        listing = "aaa111 blob 3\nbbb222 blob 4\nccc333 tree 1\n"
+        failure = subprocess.CalledProcessError(
+            128, ["git", "cat-file", "--batch-check"],
+            output="", stderr="OpenSSL SSL_connect: SSL_ERROR_SYSCALL",
+        )
+        success = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="aaa111 blob 3\nbbb222 blob 4\n", stderr="",
+        )
+
+        caplog.set_level(logging.WARNING, logger="skillcrawler.core.git_operations")
+        with (
+            patch.object(GitOperations, "_run_git_command", return_value=listing),
+            patch(
+                "skillcrawler.core.git_operations.subprocess.run",
+                side_effect=[failure, success],
+            ) as run_mock,
+        ):
+            assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is True
+
+        assert run_mock.call_count == 2
+        assert "SSL_ERROR_SYSCALL" in caplog.text
+        assert f"(attempt 1/{MATERIALIZE_ATTEMPTS})" in caplog.text
+
+    def test_materialize_fails_after_exhausting_retries(self, tmp_path, caplog):
+        """全部尝试失败返回 False，每次告警都带 git stderr 便于排查。"""
+        import logging
+
+        from skillcrawler.core.git_operations import MATERIALIZE_ATTEMPTS, GitOperations
+
+        (tmp_path / ".git").mkdir()
+        git_ops = GitOperations(github_token=None)
+
+        listing = "aaa111 blob 3\n"
+        failure = subprocess.CalledProcessError(
+            128, ["git", "cat-file", "--batch-check"],
+            output="", stderr="could not fetch from promisor remote",
+        )
+
+        caplog.set_level(logging.WARNING, logger="skillcrawler.core.git_operations")
+        with (
+            patch.object(GitOperations, "_run_git_command", return_value=listing),
+            patch(
+                "skillcrawler.core.git_operations.subprocess.run",
+                side_effect=failure,
+            ) as run_mock,
+        ):
+            assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is False
+
+        assert run_mock.call_count == MATERIALIZE_ATTEMPTS
+        assert "could not fetch from promisor remote" in caplog.text
+        assert f"(attempt {MATERIALIZE_ATTEMPTS}/{MATERIALIZE_ATTEMPTS})" in caplog.text
 
 
 class TestSearchService:

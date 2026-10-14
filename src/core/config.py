@@ -37,7 +37,7 @@ class ModelConfig(BaseSettings):
     name: str = ""
     base_url: str = ""
     api_key: str = ""
-    timeout: float = 30
+    timeout: float = 60
 
 
 class CrawlerConfig(BaseSettings):

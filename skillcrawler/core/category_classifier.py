@@ -14,6 +14,11 @@ from src.core.config import get_settings
 _logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# 网络抖动（读超时/连接重置/5xx/429）的重试次数与间隔；重试耗尽后降级
+# 沿用 frontmatter category 而不是把整仓扫描打挂
+CATEGORY_RETRY_ATTEMPTS = 2
+CATEGORY_RETRY_BACKOFF_SECONDS = 2.0
+
 
 class CategoryClassificationError(RuntimeError):
     pass
@@ -50,14 +55,46 @@ class DeepSeekCategoryClassifier:
             source_url=source_url,
         )
 
-        try:
-            response_text = self._call_deepseek(prompt)
-        except Exception as exc:
-            message = f"DeepSeek category classification failed for {skill_file}: {exc}"
-            _logger.warning(message)
-            raise CategoryClassificationError(message) from exc
+        declared_category = str(metadata.get("category") or "").strip() or None
+        for attempt in range(1, CATEGORY_RETRY_ATTEMPTS + 1):
+            try:
+                response_text = self._call_deepseek(prompt)
+                return self._normalize_category(response_text)
+            except Exception as exc:
+                if not self._is_transient_error(exc):
+                    message = f"DeepSeek category classification failed for {skill_file}: {exc}"
+                    _logger.warning(message)
+                    raise CategoryClassificationError(message) from exc
+                if attempt < CATEGORY_RETRY_ATTEMPTS:
+                    _logger.warning(
+                        "DeepSeek category classification transient failure for %s "
+                        "(attempt %d/%d): %s",
+                        skill_file, attempt, CATEGORY_RETRY_ATTEMPTS, exc,
+                    )
+                    time.sleep(CATEGORY_RETRY_BACKOFF_SECONDS)
+                    continue
+                # 重试耗尽的网络故障降级：原样沿用 frontmatter category。
+                # 网络抖动是常态，为一个 skill 的分类把整仓扫描回滚代价过高；
+                # 真正的配置/凭据类错误仍走 CategoryClassificationError 保
+                # 持 fatal 语义。
+                _logger.warning(
+                    "DeepSeek category classification degraded to frontmatter "
+                    "category for %s: %s",
+                    skill_file, exc,
+                )
+                return declared_category
+        return None
 
-        return self._normalize_category(response_text)
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        """网络/服务端瞬时故障（可重试、可降级），区别于配置类致命错误。"""
+        if isinstance(exc, httpx.TransportError):
+            # 含 ReadTimeout / ConnectError 等全部传输层错误
+            return True
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            return status == 429 or status >= 500
+        return False
 
     def _load_categories(self) -> list[str]:
         return load_skill_categories(self.repository_path)

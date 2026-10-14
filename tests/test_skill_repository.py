@@ -2182,6 +2182,120 @@ class TestGitOperationsMaterialize:
         assert f"(attempt {MATERIALIZE_ATTEMPTS}/{MATERIALIZE_ATTEMPTS})" in caplog.text
 
 
+class TestDeepSeekCategoryClassifier:
+    @staticmethod
+    def _make_classifier():
+        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+
+        with patch(
+            "skillcrawler.core.category_classifier.load_skill_categories",
+            return_value=["Development and Build", "others"],
+        ):
+            return DeepSeekCategoryClassifier(repository_path=None)
+
+    def test_classify_retries_transient_timeout_then_succeeds(self):
+        import httpx
+
+        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=[
+                    httpx.ReadTimeout("The read operation timed out"),
+                    "Development and Build",
+                ],
+            ) as call_mock,
+            patch("skillcrawler.core.category_classifier.time.sleep") as sleep_mock,
+        ):
+            category = classifier.classify(
+                skill_file=Path("SKILL.md"),
+                metadata={},
+                content="body",
+                source_url="https://x",
+            )
+
+        assert category == "Development and Build"
+        assert call_mock.call_count == 2
+        sleep_mock.assert_called_once()
+
+    def test_classify_degrades_to_frontmatter_after_transient_exhausted(self):
+        """网络故障重试耗尽后原样沿用 frontmatter category，不再 fatal 中断扫描。"""
+        import httpx
+
+        from skillcrawler.core.category_classifier import (
+            CATEGORY_RETRY_ATTEMPTS,
+            DeepSeekCategoryClassifier,
+        )
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=httpx.ReadTimeout("The read operation timed out"),
+            ) as call_mock,
+            patch("skillcrawler.core.category_classifier.time.sleep"),
+        ):
+            category = classifier.classify(
+                skill_file=Path("SKILL.md"),
+                metadata={"category": "Some Random Category"},
+                content="body",
+                source_url="https://x",
+            )
+
+        # 原样沿用 frontmatter 值（不强校验标准分类）
+        assert category == "Some Random Category"
+        assert call_mock.call_count == CATEGORY_RETRY_ATTEMPTS
+
+    def test_classify_fatal_on_non_transient_error(self):
+        """配置/凭据类错误保持 fatal 语义，且不做无意义重试。"""
+        from skillcrawler.core.category_classifier import (
+            CategoryClassificationError,
+            DeepSeekCategoryClassifier,
+        )
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=RuntimeError("invalid api key"),
+            ) as call_mock,
+            patch("skillcrawler.core.category_classifier.time.sleep") as sleep_mock,
+        ):
+            with pytest.raises(CategoryClassificationError):
+                classifier.classify(
+                    skill_file=Path("SKILL.md"),
+                    metadata={},
+                    content="body",
+                    source_url="https://x",
+                )
+
+        assert call_mock.call_count == 1
+        sleep_mock.assert_not_called()
+
+    def test_is_transient_error_classification(self):
+        import httpx
+
+        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+
+        request = httpx.Request("POST", "https://x")
+        server_error = httpx.HTTPStatusError(
+            "boom", request=request, response=httpx.Response(503, request=request)
+        )
+        auth_error = httpx.HTTPStatusError(
+            "boom", request=request, response=httpx.Response(401, request=request)
+        )
+
+        assert DeepSeekCategoryClassifier._is_transient_error(httpx.ReadTimeout("t")) is True
+        assert DeepSeekCategoryClassifier._is_transient_error(server_error) is True
+        assert DeepSeekCategoryClassifier._is_transient_error(auth_error) is False
+        assert DeepSeekCategoryClassifier._is_transient_error(RuntimeError("x")) is False
+
+
 class TestSearchService:
     async def test_search_service_initialization(self):
         from src.indexer.search import SearchService

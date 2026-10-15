@@ -130,16 +130,22 @@ class SkillManager:
             platform=normalized_request.platform,
         )
 
+    def _cleanup_local_clone(self, local_path: Any) -> None:
+        """删除仓库的本地 clone 目录；失败仅告警。"""
+        if not local_path:
+            return
+        path = Path(local_path)
+        if path.is_dir():
+            try:
+                shutil.rmtree(path)
+            except Exception as exc:
+                _logger.warning(f'Discover: Failed to clean up directory {path}: {exc}')
+
     async def delete_skill_repository(self, repository_id: str) -> None:
         stored = await self.get_repository_by_id(repository_id)
-        if stored.local_path:
-            local_path = Path(stored.local_path)
-            if local_path.is_dir():
-                try:
-                    shutil.rmtree(local_path)
-                except Exception as exc:
-                    _logger.warning(f'Discover: Failed to clean up directory {local_path}: {exc}')
+        # DB 删除成功后再清本地 clone 目录，失败时保持本地与 DB 一致
         await self.skill_repo_repository.delete_skill_repository(stored.id)
+        self._cleanup_local_clone(stored.local_path)
 
     async def get_repository_by_id(self, repository_id: str) -> SkillRepoModel:
         repository = await self.skill_repo_repository.get_skill_repository_by_id(repository_id)
@@ -579,7 +585,7 @@ class SkillManager:
             marker = f'/blob/{ref}/'
             if marker in record.source_url:
                 relative_path = record.source_url.split(marker, 1)[1]
-                if relative_path == 'SKILL.md' or relative_path.endswith('SKILL.md'):
+                if relative_path == 'SKILL.md' or relative_path.endswith('/SKILL.md'):
                     return relative_path
 
         owner_repo = extract_owner_repo(repo.url)

@@ -88,6 +88,30 @@ def load_crawler_config(repository_path: Path | None = None) -> dict[str, Any]:
     return normalized
 
 
+def load_catalog_skill_url_entries(repository_path: Path | None = None) -> list[dict[str, Any]]:
+    """收集 catalog 中的单 Skill URL 贡献条目（``skills[].skill_url``）。
+
+    返回 ``{"platform", "owner", "skill_name", "skill_url"}`` 列表，仅做收集；
+    URL 解析与字段校验（skill_name / skill_url 必填）在请求构建侧完成。
+    """
+    path = (repository_path or sync_openEuler_skills_repo()).expanduser()
+    entries: list[dict[str, Any]] = []
+    for platform, owner, entry in _iter_catalog_entries(path):
+        skills = entry.get("skills")
+        if not isinstance(skills, list):
+            continue
+        for skill in skills:
+            if not isinstance(skill, dict):
+                continue
+            entries.append({
+                "platform": platform,
+                "owner": owner,
+                "skill_name": skill.get("skill_name"),
+                "skill_url": skill.get("skill_url"),
+            })
+    return entries
+
+
 def load_skill_categories(repository_path: Path | None = None) -> list[str]:
     """Read category names from ``templates/skill-spec.yaml`` in the catalog."""
     repo = repository_path or sync_openEuler_skills_repo()

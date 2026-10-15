@@ -121,7 +121,26 @@ openEuler-skills/{community,enterprise,personal}/*/skill.yaml
 name: Infrastructure
 skill_repos:
   - url: https://gitcode.com/openeuler/IB_Robot
+skills:                                          # 可选：单 Skill URL 贡献
+  - skill_name: skill-name
+    skill_url: https://github.com/example/skills/blob/main/skills/skill-name/SKILL.md
+    description: 一句话说明该 Skill 的用途
+    category: Development and Build
 ```
+
+两种登记方式：
+
+| 字段 | 扫描范围 | 说明 |
+|------|---------|------|
+| `skill_repos` | 整仓 | 克隆仓库后收录其中全部 SKILL.md |
+| `skills[]` | 单 Skill | 只收录 `skill_url` 指向的 SKILL.md（含其 tag 版本），`skill_name` / `skill_url` 必填 |
+
+`skills[]` 约定：
+
+- `skill_url` 格式为 `<repo>/blob/<ref>/<path>/SKILL.md`，`ref` 取 `/blob/`
+  后第一段，应为单段分支名（作为 clone 分支）；
+- 同一仓库的多条 `skills[]` 条目合并为一次扫描（路径取并集），且 `ref` 必须一致；
+- 仓库已被 `skill_repos` 登记时，其 `skills[]` 条目被整仓扫描覆盖，不再单独处理。
 
 平台映射：
 

@@ -49,6 +49,9 @@ class SkillRepositoryRequest(BaseModel):
     url: str | None = None
     platform: str | None = None
     sig_name: str | None = None
+    # URL 方式贡献的单 Skill 收窄扫描（skills[].skill_url）：非空时只收录
+    # 这些 SKILL.md 相对路径；None 表示整仓扫描
+    skill_paths: list[str] | None = None
 
 
 class SkillDiscoverStatus:
@@ -183,6 +186,11 @@ class SkillManager:
         )
 
         skill_paths = self._list_skill_paths(clone_dir)
+        # URL 方式贡献（skill_paths 非空）只收录登记的 SKILL.md，其余不入库
+        skill_path_filter: set[str] | None = None
+        if normalized.skill_paths:
+            skill_path_filter = set(normalized.skill_paths)
+            skill_paths = [path for path in skill_paths if path in skill_path_filter]
         if not skill_paths:
             _logger.info(
                 'Discover: no scannable SKILL.md found in %s; retaining clone at %s',
@@ -242,6 +250,7 @@ class SkillManager:
                 clone_dir=clone_dir,
                 repo_name=repo_name,
                 skill_paths=skill_paths,
+                skill_path_filter=skill_path_filter,
                 author=normalized.sig_name,
             )
         except Exception as exc:
@@ -273,6 +282,7 @@ class SkillManager:
         clone_dir: Path,
         repo_name: str,
         skill_paths: list[str] | None = None,
+        skill_path_filter: set[str] | None = None,
         author: str | None = None,
     ) -> SkillRepoModel:
         author = author or self._resolve_skill_author(repo.platform, repo_name)
@@ -281,6 +291,7 @@ class SkillManager:
             clone_dir=clone_dir,
             author=author,
             skill_paths=skill_paths,
+            skill_path_filter=skill_path_filter,
         )
         # enterprise/personal 仓库 author 未显式传入（community 走 sig_name）时，
         # 用扫描结果里 URL 推导的 author 兜底，保证 skill_repos.author 与
@@ -402,6 +413,7 @@ class SkillManager:
         clone_dir: Path,
         author: str | None,
         skill_paths: list[str] | None = None,
+        skill_path_filter: set[str] | None = None,
     ) -> tuple[list[Skill], list[SkillVersion], str | None]:
         clone_url = normalize_clone_url_for_git(repo.url)
         repository_git_metadata = self._git_ops.collect_repository_git_metadata(
@@ -431,6 +443,7 @@ class SkillManager:
             repository_git_metadata=repository_git_metadata,
             author=author,
             skill_paths=skill_paths,
+            skill_path_filter=skill_path_filter,
         )
         return latest_skills, tagged_skills, repository_commit_id
 
@@ -757,8 +770,17 @@ class SkillManager:
             raise ValueError('git skill repos require url')
         platform = request.platform.strip() if request.platform is not None else None
         sig_name = request.sig_name.strip() if request.sig_name else None
+        skill_paths = (
+            [path.strip() for path in request.skill_paths if path.strip()]
+            if request.skill_paths
+            else None
+        )
         return SkillRepositoryRequest(
-            branch=branch, url=url, platform=platform, sig_name=sig_name,
+            branch=branch,
+            url=url,
+            platform=platform,
+            sig_name=sig_name,
+            skill_paths=skill_paths or None,
         )
 
     @staticmethod

@@ -15,7 +15,11 @@ from urllib.parse import urlparse
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skillcrawler.config import load_crawler_config, sync_openEuler_skills_repo
+from skillcrawler.config import (
+    load_catalog_skill_url_entries,
+    load_crawler_config,
+    sync_openEuler_skills_repo,
+)
 from skillcrawler.core.category_classifier import CategoryClassificationError
 from skillcrawler.core.popularity import (
     PopularityCollector,
@@ -23,7 +27,7 @@ from skillcrawler.core.popularity import (
     estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
-from skillcrawler.core.skill_parser import normalize_git_clone_url
+from skillcrawler.core.skill_parser import normalize_git_clone_url, parse_skill_md_url
 from src.core.config import get_settings
 from src.core.database import get_db_context
 from src.models.repository import (
@@ -109,6 +113,67 @@ def _build_requests_from_config(
             )
         )
     return requests
+
+
+def _build_requests_from_skill_urls(
+    entries: list[dict[str, Any]],
+    platform_keys: list[str],
+    covered_urls: set[str],
+) -> list[SkillRepositoryRequest]:
+    """把 catalog 的 skills[].skill_url 单 Skill 贡献合并为收窄扫描请求。
+
+    - 按规范化 repo URL 分组：同一仓库多条贡献合并为一个请求、路径取并集
+      （部分扫描按请求同步入库，拆成多个请求会互相删掉对方的 skill）；
+    - 同一仓库的多条贡献必须同 ref（/blob/ 后第一段，约定为分支名），
+      否则无法消歧，抛 ValueError；
+    - 仓库已被 skill_repos 整仓登记（covered_urls 命中）时跳过，整仓扫描
+      已覆盖该 skill；
+    - skill_name / skill_url 均必填（openEuler-skills README 的 URL 贡献约定）。
+    """
+    covered = {normalize_git_clone_url(url) for url in covered_urls}
+    grouped: dict[str, dict[str, Any]] = {}
+    for item in entries:
+        platform = str(item.get("platform") or "").strip()
+        if platform not in platform_keys:
+            continue
+        skill_name = str(item.get("skill_name") or "").strip()
+        skill_url = str(item.get("skill_url") or "").strip()
+        if not skill_name or not skill_url:
+            raise ValueError(
+                f"Invalid skills entry in {platform} (skill_name and skill_url "
+                f"are required): {item!r}"
+            )
+        repo_url, ref, skill_path = parse_skill_md_url(skill_url)
+        if repo_url in covered:
+            continue
+        group = grouped.get(repo_url)
+        if group is None:
+            grouped[repo_url] = {
+                "branch": ref,
+                "platform": platform,
+                "sig_name": str(item.get("owner") or "").strip()
+                if platform == "community"
+                else None,
+                "skill_paths": {skill_path},
+            }
+        elif group["branch"] != ref:
+            raise ValueError(
+                f"skill_url entries for {repo_url} must share one ref, "
+                f"got {group['branch']!r} and {ref!r}"
+            )
+        else:
+            group["skill_paths"].add(skill_path)
+
+    return [
+        SkillRepositoryRequest(
+            url=repo_url,
+            branch=group["branch"],
+            platform=group["platform"],
+            sig_name=group["sig_name"],
+            skill_paths=sorted(group["skill_paths"]),
+        )
+        for repo_url, group in grouped.items()
+    ]
 
 
 def _format_skill_repo(repository: Any) -> str:
@@ -520,6 +585,16 @@ def build_configured_discover_requests(
                 seen_urls,
             )
         )
+
+    # URL 方式贡献（skills[].skill_url）：整仓登记覆盖不到的单 Skill，
+    # 按仓库分组合并为收窄扫描请求（skill_paths 只收录登记的 SKILL.md）
+    requests.extend(
+        _build_requests_from_skill_urls(
+            load_catalog_skill_url_entries(repository_path),
+            platform_keys,
+            seen_urls,
+        )
+    )
 
     return requests, platform_keys
 

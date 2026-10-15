@@ -100,6 +100,7 @@ class SkillScanner:
         repository_git_metadata: dict[str, Any] | None = None,
         author: str | None = None,
         skill_paths: list[str] | None = None,
+        skill_path_filter: set[str] | None = None,
     ) -> tuple[list[Skill], list[SkillVersion]]:
         self._security_cache_hits = 0
         self._security_audit_submitted = 0
@@ -158,6 +159,7 @@ class SkillScanner:
                 existing_versions=existing_versions,
                 category_cache=category_cache,
                 security_cache=security_cache,
+                skill_path_filter=skill_path_filter,
                 # HEAD 声明了 frontmatter version 的 skill 自管版本，
                 # 完全跳过 tag 扫描（不再以 tag 作为版本来源）。
                 skip_skill_ids={row.skill_id for row in metadata_version_rows},
@@ -283,6 +285,7 @@ class SkillScanner:
         existing_versions: dict[tuple[str, str | None], SkillVersion],
         category_cache: dict[str, str | None],
         security_cache: dict[str, SecurityResolution] | None = None,
+        skill_path_filter: set[str] | None = None,
         skip_skill_ids: set[str] | None = None,
     ) -> list[SkillVersion]:
         discovered: list[SkillVersion] = []
@@ -305,6 +308,13 @@ class SkillScanner:
             current_tag_skill_paths = self.git_ops.list_skill_paths_for_ref(
                 repo_root, ref,
             )
+            # URL 方式贡献（skill_path_filter 非空）的 tag 版本同样只收录
+            # 登记的 SKILL.md，防止部分扫描把未贡献的 skill 扫进来
+            if skill_path_filter is not None:
+                current_tag_skill_paths = [
+                    path for path in current_tag_skill_paths
+                    if path in skill_path_filter
+                ]
             tree_hashes = self.git_ops.get_skill_tree_hashes(
                 repo_root, current_tag_skill_paths, ref=ref,
             )

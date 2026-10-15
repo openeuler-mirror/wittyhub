@@ -2404,6 +2404,233 @@ class TestSearchService:
         assert service._vector_search.await_args.kwargs["offset"] == 0
 
 
+class TestSkillUrlContribution:
+    """skills[].skill_url 单 Skill 贡献：URL 解析、请求合并与收窄扫描。"""
+
+    def test_parse_skill_md_url_parses_repo_ref_and_path(self):
+        from skillcrawler.core.skill_parser import parse_skill_md_url
+
+        repo_url, ref, skill_path = parse_skill_md_url(
+            "https://github.com/example/skills.git/blob/main/skills/demo/SKILL.md"
+        )
+        assert repo_url == "https://github.com/example/skills"
+        assert ref == "main"
+        assert skill_path == "skills/demo/SKILL.md"
+
+        # atomgit 旧域名规范化为 gitcode；查询串/锚点忽略
+        repo_url, ref, skill_path = parse_skill_md_url(
+            "https://atomgit.com/acme/x/blob/master/SKILL.md?plain=1"
+        )
+        assert repo_url == "https://gitcode.com/acme/x"
+        assert ref == "master"
+        assert skill_path == "SKILL.md"
+
+    def test_parse_skill_md_url_rejects_invalid(self):
+        from skillcrawler.core.skill_parser import parse_skill_md_url
+
+        for bad in (
+            "",
+            "https://github.com/acme/x/tree/main",
+            "https://github.com/acme/x/blob/main/README.md",
+            "https://github.com/acme/x/blob//SKILL.md",
+        ):
+            with pytest.raises(ValueError):
+                parse_skill_md_url(bad)
+
+    def test_load_catalog_skill_url_entries_collects_skills(self, tmp_path):
+        from skillcrawler.config import load_catalog_skill_url_entries
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_name: demo\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/demo/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        entries = load_catalog_skill_url_entries(tmp_path)
+
+        assert entries == [
+            {
+                "platform": "community",
+                "owner": "sig-demo",
+                "skill_name": "demo",
+                "skill_url": "https://github.com/acme/tools/blob/main/skills/demo/SKILL.md",
+            }
+        ]
+
+    def test_build_requests_merges_skill_urls_per_repo(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n"
+            "  - skill_name: two\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/two/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        requests, _ = build_configured_discover_requests(repository_path=tmp_path)
+
+        # 同仓库多条贡献合并为一个请求，路径取并集
+        assert len(requests) == 1
+        request = requests[0]
+        assert request.url == "https://github.com/acme/tools"
+        assert request.branch == "main"
+        assert request.platform == "community"
+        assert request.sig_name == "sig-demo"
+        assert request.skill_paths == ["skills/one/SKILL.md", "skills/two/SKILL.md"]
+
+    def test_build_requests_skips_skill_urls_covered_by_skill_repos(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skill_repos:\n"
+            "  - url: https://github.com/acme/tools.git\n"
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        requests, _ = build_configured_discover_requests(repository_path=tmp_path)
+
+        # 整仓登记覆盖单 Skill 贡献（.git 后缀规范化后比对），保持整仓扫描
+        assert len(requests) == 1
+        assert requests[0].url == "https://github.com/acme/tools.git"
+        assert requests[0].skill_paths is None
+
+    def test_build_requests_rejects_mixed_refs_for_same_repo(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n"
+            "  - skill_name: two\n"
+            "    skill_url: https://github.com/acme/tools/blob/dev/skills/two/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="must share one ref"):
+            build_configured_discover_requests(repository_path=tmp_path)
+
+    def test_build_requests_rejects_missing_skill_name(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="skill_name and skill_url"):
+            build_configured_discover_requests(repository_path=tmp_path)
+
+    async def test_configured_discover_skill_paths_restricts_scan_scope(self):
+        """URL 方式贡献：请求 skill_paths 非空时只扫描登记的 SKILL.md。"""
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        skill_repository = MagicMock()
+        skill_repository.list_unscored_by_skill_repo = AsyncMock(return_value=([], []))
+        manager = SkillManager(skill_repository, AsyncMock())
+        discover_mock = AsyncMock()
+        repository = SimpleNamespace(
+            id=uuid.uuid4(),
+            repo_name="acme_tools",
+            source="github",
+            platform=None,
+            skill_num=1,
+        )
+        with (
+            patch.object(SkillManager, "_sync_git_repository"),
+            patch.object(
+                SkillManager,
+                "_list_skill_paths",
+                return_value=["skills/one/SKILL.md", "skills/two/SKILL.md"],
+            ),
+            patch.object(SkillManager, "_set_discovery_status", AsyncMock()),
+            patch.object(
+                SkillManager,
+                "_get_or_create_skill_repository",
+                AsyncMock(return_value=(repository, True)),
+            ),
+            patch.object(SkillManager, "_discover_and_store_skills", discover_mock),
+        ):
+            await manager.discover_configured_skill_repository(
+                SkillRepositoryRequest(
+                    url="https://github.com/acme/tools",
+                    skill_paths=["skills/one/SKILL.md"],
+                )
+            )
+
+        kwargs = discover_mock.await_args.kwargs
+        assert kwargs["skill_paths"] == ["skills/one/SKILL.md"]
+        assert kwargs["skill_path_filter"] == {"skills/one/SKILL.md"}
+
+    async def test_start_scan_skill_path_filter_restricts_head_and_tags(self, tmp_path):
+        """收窄扫描：HEAD 与 tag 版本都只收录登记的 SKILL.md。"""
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        for name in ("one", "two"):
+            skill_dir = repository / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {name}\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add two skills")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v1")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/acme/widgets",
+            branch="master",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": head_commit,
+                "latest_tags": ["v1"],
+                "latest_tag_commits": {"v1": head_commit},
+            },
+            skill_paths=["skills/one/SKILL.md"],
+            skill_path_filter={"skills/one/SKILL.md"},
+        )
+
+        assert [skill.skill_id for skill in skills] == ["gitcode:acme/widgets/one"]
+        assert {v.skill_id for v in tagged_skills} == {"gitcode:acme/widgets/one"}
+
+
 class TestConfig:
     async def test_get_settings(self):
         from src.core.config import get_settings

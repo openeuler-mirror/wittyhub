@@ -863,28 +863,30 @@ class SkillRepository:
         await self.session.flush()
         return await self.get_by_skill_id(skill_id)
 
-    async def delete_skill_related_records(self, skill_ids: List[uuid.UUID]) -> None:
+    async def delete_skill_related_records(self, skill_ids: List[uuid.UUID]) -> int:
         """清理与 skill 软关联的 security_audits 和 download_history 记录。
 
         这两张表通过 resource_type='skill' + resource_id=skill.id 关联，
         无外键约束，删 skill 时不会自动级联删除。在删除单个 skill 或
         批量删除仓库下所有 skill 时都应调用此方法，避免留下孤儿数据。
+        返回清理掉的记录总行数（供调用方日志展示）。
         """
         if not skill_ids:
-            return
-        await self.session.execute(
+            return 0
+        audit_result = await self.session.execute(
             delete(SecurityAudit).where(
                 SecurityAudit.resource_type == "skill",
                 SecurityAudit.resource_id.in_(skill_ids),
             )
         )
-        await self.session.execute(
+        history_result = await self.session.execute(
             delete(DownloadHistory).where(
                 DownloadHistory.resource_type == "skill",
                 DownloadHistory.resource_id.in_(skill_ids),
             )
         )
         await self.session.flush()
+        return int(audit_result.rowcount or 0) + int(history_result.rowcount or 0)
 
     async def delete(self, skill_id: str) -> bool:
         # 先查出 skill 的 UUID，用于清理软关联表

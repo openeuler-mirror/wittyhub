@@ -552,15 +552,23 @@ async def _run_discover_from_config(
             "python main.py discover --url \"https://example.com/repo\" --branch main",
         )
 
+    # 统一解析 catalog 路径（未指定 --repository-path 时自动同步一次），
+    # 供请求构建、路径打印与对账删除共用，避免重复 sync
+    repository_path = (
+        Path(args.repository_path).expanduser()
+        if args.repository_path
+        else sync_openEuler_skills_repo()
+    )
     requests, config_keys = build_configured_discover_requests(
         platform=args.platform,
-        repository_path=Path(args.repository_path) if args.repository_path else None,
+        repository_path=repository_path,
     )
-    return await _discover_repositories_from_requests(
+    exit_code = await _discover_repositories_from_requests(
         manager,
         requests,
-        source_label=f" from {', '.join(config_keys)}",
+        source_label=f" from {', '.join(config_keys)} (catalog: {repository_path})",
     )
+    return exit_code
 
 
 async def _run_delete(manager: "SkillManager", args: argparse.Namespace) -> int:

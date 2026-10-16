@@ -48,12 +48,7 @@ python skillcrawler/main.py query --id <repo_id>
 |------|------|
 | `-p` / `--platform` | 选择 `community` / `enterprise` / `personal` 仓库列表；不传时读取全部列表 |
 | `-r` / `--repository-path` | 指定已有的 openEuler-skills 本地目录；默认下载到 `<storage.local_path>/skill-repositories/openEuler-skills` |
-| `-u` / `--url` | 扫描单个仓库 URL，不依赖配置列表 |
-| `-b` / `--branch` | 与 `--url` 搭配使用，指定分支 |
-
-参数约束：
-
-- `--branch` 只能和 `--url` 一起使用。
+| `-u` / `--url` | 只扫描指定的单个 skill.yaml（不读全量配置）；传本地文件路径，或相对 openEuler-skills catalog 的路径 |
 
 默认扫描全部配置列表：
 
@@ -75,22 +70,20 @@ python skillcrawler/main.py discover --platform personal
 python skillcrawler/main.py discover --repository-path /path/to/openEuler-skills
 ```
 
-扫描单个仓库：
+只扫描单个 skill.yaml（catalog 相对路径或本地文件路径）：
 
 ```bash
-python skillcrawler/main.py discover --url https://gitcode.com/openeuler/wittyhub-cli
+python skillcrawler/main.py discover --url personal/leon-wang2021/skill.yaml
+python skillcrawler/main.py discover --url /path/to/openEuler-skills/personal/leon-wang2021/skill.yaml
 ```
 
-单个 URL 平台识别规则：
+单文件模式说明：
 
-- `https://gitcode.com/openeuler/<repo>` 会自动识别为 `platform=community`
-- 如果显式传入 `--platform`，以显式参数为准
-
-扫描单个仓库指定分支：
-
-```bash
-python skillcrawler/main.py discover --url https://gitcode.com/openeuler/wittyhub-cli --branch master
-```
+- 只扫描该 skill.yaml 登记的 `skill_repos`（整仓）与 `skills[]`（单 Skill）条目；
+- `platform` / owner 取自目录结构（`<catalog>/<platform>/<owner>/skill.yaml`），
+  无需传 `--platform`；
+- 文件必须位于 `community` / `enterprise` / `personal` 之下两级目录且名为
+  `skill.yaml`，否则报错。
 
 ### delete
 
@@ -121,7 +114,26 @@ openEuler-skills/{community,enterprise,personal}/*/skill.yaml
 name: Infrastructure
 skill_repos:
   - url: https://gitcode.com/openeuler/IB_Robot
+skills:                                          # 可选：单 Skill URL 贡献
+  - skill_name: skill-name
+    skill_url: https://github.com/example/skills/blob/main/skills/skill-name/SKILL.md
+    description: 一句话说明该 Skill 的用途
+    category: Development and Build
 ```
+
+两种登记方式：
+
+| 字段 | 扫描范围 | 说明 |
+|------|---------|------|
+| `skill_repos` | 整仓 | 克隆仓库后收录其中全部 SKILL.md |
+| `skills[]` | 单 Skill | 只收录 `skill_url` 指向的 SKILL.md（含其 tag 版本），`skill_name` / `skill_url` 必填 |
+
+`skills[]` 约定：
+
+- `skill_url` 格式为 `<repo>/blob/<ref>/<path>/SKILL.md`，`ref` 取 `/blob/`
+  后第一段，应为单段分支名（作为 clone 分支）；
+- 同一仓库的多条 `skills[]` 条目合并为一次扫描（路径取并集），且 `ref` 必须一致；
+- 仓库已被 `skill_repos` 登记时，其 `skills[]` 条目被整仓扫描覆盖，不再单独处理。
 
 平台映射：
 

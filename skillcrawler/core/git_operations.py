@@ -21,6 +21,8 @@ settings = get_settings()
 
 GIT_CLONE_RETRY_TIMES = 2
 GIT_CLONE_TIMEOUT_SECONDS = 180
+# materialize 懒拉取的总尝试次数：网络抖动中断后重试，从本地已缓存 blob 续拉
+MATERIALIZE_ATTEMPTS = 2
 DEFAULT_MAX_TAGS_PER_REPO = 5
 TAG_CANDIDATE_REF_PREFIX = 'refs/crawler/tag-candidates'
 UNSUPPORTED_FILTER_MESSAGES = ( # 检测服务端不支持 partial clone filter 的错误关键词
@@ -34,6 +36,25 @@ GIT_NON_INTERACTIVE_ENV = {
     'GIT_TERMINAL_PROMPT': '0', # git 通用：禁止终端交互
     'GCM_INTERACTIVE': 'Never', # Git Credential Manager：禁止弹窗
 }
+
+
+class GitCommandError(subprocess.CalledProcessError):
+    """str() 带 git stderr 失败原因的 CalledProcessError。
+
+    Python 默认文本只含命令行和退出码（"returned non-zero exit status 128"），
+    线上 traceback 看不到 git 的真实报错（如 SSL_ERROR_SYSCALL）；这里在
+    str() 末尾附上 stderr 的最后一行，stderr 已按需做 token 打码。
+    """
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        detail = self.stderr or self.output
+        if not detail:
+            return base
+        if isinstance(detail, bytes):
+            detail = detail.decode(errors='replace')
+        lines = [line.strip() for line in detail.splitlines() if line.strip()]
+        return f'{base}: {lines[-1]}' if lines else base
 
 
 class GitOperations:
@@ -199,7 +220,11 @@ class GitOperations:
         skill_paths: list[str] = []
         for line in output.splitlines():
             relative_path = line.strip()
-            if not relative_path or not relative_path.endswith('SKILL.md'):
+            # 只认文件名恰好为 SKILL.md 的文件（根级或 */SKILL.md），
+            # _cannbot_SKILL.md 等同名后缀文件不是 skill，与 build_skill_id 口径一致
+            if not relative_path or not (
+                relative_path == 'SKILL.md' or relative_path.endswith('/SKILL.md')
+            ):
                 continue
             if should_skip_relative_path(relative_path):
                 continue
@@ -310,21 +335,36 @@ class GitOperations:
         ]
         env = os.environ.copy()
         env.update(GIT_NON_INTERACTIVE_ENV)
-        try:
-            result = subprocess.run(
-                batch_command,
-                input='\n'.join(blob_shas) + '\n',
-                check=True,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=GIT_CLONE_TIMEOUT_SECONDS,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            _logger.warning(
-                'Failed to materialize skill objects in %s at %s (%s): %s',
-                repo_root, ref, pathspec, exc,
-            )
+        # 网络抖动会让懒拉取中断（如 SSL_ERROR_SYSCALL），已拉取的 blob 已在
+        # 本地对象库缓存，重试只补拉剩余对象，代价小且常能自愈
+        result: Any = None
+        for attempt in range(1, MATERIALIZE_ATTEMPTS + 1):
+            try:
+                result = subprocess.run(
+                    batch_command,
+                    input='\n'.join(blob_shas) + '\n',
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=GIT_CLONE_TIMEOUT_SECONDS,
+                )
+                break
+            except subprocess.CalledProcessError as exc:
+                # 附带 git stderr，否则线上只见退出码无从排查
+                detail = (exc.stderr or '').strip() or str(exc)
+                _logger.warning(
+                    'Failed to materialize skill objects in %s at %s (%s) '
+                    '(attempt %d/%d): %s',
+                    repo_root, ref, pathspec, attempt, MATERIALIZE_ATTEMPTS, detail,
+                )
+            except subprocess.TimeoutExpired:
+                _logger.warning(
+                    'Materialize skill objects timed out in %s at %s (%s) '
+                    '(attempt %d/%d)',
+                    repo_root, ref, pathspec, attempt, MATERIALIZE_ATTEMPTS,
+                )
+        if result is None:
             return False
 
         missing = [
@@ -728,14 +768,12 @@ class GitOperations:
     def _sanitize_called_process_error(
         self, error: subprocess.CalledProcessError,
     ) -> subprocess.CalledProcessError:
-        if not self.github_token:
-            return error
         sanitized_cmd: str | list[str]
         if isinstance(error.cmd, list):
             sanitized_cmd = [self._mask_github_token(part) for part in error.cmd]
         else:
             sanitized_cmd = self._mask_github_token(str(error.cmd))
-        return subprocess.CalledProcessError(
+        return GitCommandError(
             error.returncode, sanitized_cmd,
             output=self._mask_github_token(error.output),
             stderr=self._mask_github_token(error.stderr),

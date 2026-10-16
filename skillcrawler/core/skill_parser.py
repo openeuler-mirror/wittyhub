@@ -39,6 +39,34 @@ def build_skill_md_url(
     return f'{browse_base_url}/blob/{branch}/{cleaned_relative_path}'
 
 
+def parse_skill_md_url(skill_url: str) -> tuple[str, str, str]:
+    """解析单 SKILL.md 贡献 URL → ``(repo_url, ref, skill_path)``。
+
+    格式为 ``<scheme>://<host>/<owner>/<repo>/blob/<ref>/<path>/SKILL.md``
+    （见 openEuler-skills README 的 URL 贡献方式）；``ref`` 取 ``/blob/``
+    后第一段，约定为单段分支名（含 ``/`` 的 ref 无法与路径消歧，不支持）。
+    ``repo_url`` 经 ``normalize_git_clone_url`` 规范化，与 skill_repos 的
+    存储口径一致。不符合格式时抛 ``ValueError``。
+    """
+    stripped = (skill_url or '').split('#', 1)[0].split('?', 1)[0].strip()
+    if not stripped:
+        raise ValueError('skill_url is required')
+    if '/blob/' not in stripped:
+        raise ValueError(f'skill_url must contain /blob/<ref>/<path>: {skill_url}')
+    repo_part, _, ref_path = stripped.partition('/blob/')
+    ref, _, skill_path = ref_path.partition('/')
+    if not ref or not skill_path:
+        raise ValueError(
+            f'skill_url must be <repo>/blob/<ref>/<path>/SKILL.md: {skill_url}'
+        )
+    if skill_path != 'SKILL.md' and not skill_path.endswith('/SKILL.md'):
+        raise ValueError(f'skill_url must point to a SKILL.md file: {skill_url}')
+    repo_url = normalize_git_clone_url(repo_part)
+    if not repo_url:
+        raise ValueError(f'Invalid skill_url repository part: {skill_url}')
+    return repo_url, ref, skill_path
+
+
 def normalize_repository_browse_base_url(repo_url: str) -> str | None:
     normalized_url = repo_url.strip()
     if not normalized_url:
@@ -285,7 +313,7 @@ def should_skip_relative_path(relative_path: str) -> bool:
 MIN_SKILL_CONTENT_LENGTH = 100
 
 def is_low_value_skill_content(content: str) -> bool:
-    """扫描时跳过内容无效的 skill：指针文件或正文过短。"""
+    """扫描时跳过正文过短内容无效的skill。"""
     text = content.strip()
     return len(text) < MIN_SKILL_CONTENT_LENGTH
 

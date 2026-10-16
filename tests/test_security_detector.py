@@ -422,3 +422,60 @@ def test_collector_failure_isolation_continues_batch():
     written = update_stmt.compile(dialect=postgresql.dialect()).params
     stored_report = written["details"]["skillspector_report"]
     assert stored_report["risk_assessment"]["severity"] == "LOW"
+
+
+def test_collector_reconciles_skill_count_after_collection():
+    """审计结果回填 risk_score 后重新对账 contributors.skill_count。
+
+    扫描提交审计时多为 pending（risk_score 为 NULL），count_skills 口径下
+    聚合结果是 0；结果收集落地后必须补一次对账，否则贡献者因
+    skill_count=0 被页面过滤掉。
+    """
+    import asyncio
+
+    from src.security.detector import SkillspectorClient, SkillspectorCollector
+
+    class FakeAudit:
+        def __init__(self, audit_id, resource_id, details):
+            self.id = audit_id
+            self.resource_type = "skill"
+            self.resource_id = resource_id
+            self.details = details
+            self.risk_signals = []
+
+    client = SkillspectorClient("http://jenkins", "admin", "token")
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.get = AsyncMock(return_value=MagicMock())
+
+    collector = SkillspectorCollector(
+        client=client,
+        session_factory=lambda: _AsyncSessionCtx(session),
+        poll_interval=0,
+    )
+
+    audit = FakeAudit(
+        1, "skill-1", {"skillspector_async": True, "skillspector_build_number": 1}
+    )
+
+    with (
+        patch.object(client, "get_build_status", return_value="SUCCESS"),
+        patch.object(
+            client,
+            "fetch_report_with_status",
+            return_value=({"risk_assessment": {"severity": "LOW", "score": 10}}, 200),
+        ),
+        patch.object(collector, "_fetch_pending", new=AsyncMock(return_value=[audit])),
+        patch("src.models.repository.ContributorRepository") as repo_cls,
+    ):
+        repo_cls.return_value.reconcile_skill_counts = AsyncMock(return_value=2)
+        processed = asyncio.run(collector.collect_once())
+        assert processed == 1
+        repo_cls.return_value.reconcile_skill_counts.assert_awaited_once()
+
+        # 空批次（无结果落地）不做对账
+        collector._fetch_pending = AsyncMock(return_value=[])
+        asyncio.run(collector.collect_once())
+        assert repo_cls.return_value.reconcile_skill_counts.await_count == 1

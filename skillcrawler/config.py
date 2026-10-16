@@ -88,6 +88,60 @@ def load_crawler_config(repository_path: Path | None = None) -> dict[str, Any]:
     return normalized
 
 
+def load_catalog_skill_url_entries(repository_path: Path | None = None) -> list[dict[str, Any]]:
+    """收集 catalog 中的单 Skill URL 贡献条目（``skills[].skill_url``）。
+
+    返回 ``{"platform", "owner", "skill_name", "skill_url"}`` 列表，仅做收集；
+    URL 解析与字段校验（skill_name / skill_url 必填）在请求构建侧完成。
+    """
+    path = (repository_path or sync_openEuler_skills_repo()).expanduser()
+    entries: list[dict[str, Any]] = []
+    for platform, owner, entry in _iter_catalog_entries(path):
+        skills = entry.get("skills")
+        if not isinstance(skills, list):
+            continue
+        for skill in skills:
+            if not isinstance(skill, dict):
+                continue
+            entries.append({
+                "platform": platform,
+                "owner": owner,
+                "skill_name": skill.get("skill_name"),
+                "skill_url": skill.get("skill_url"),
+            })
+    return entries
+
+
+def load_single_catalog_entry(skill_yaml: Path) -> tuple[str, str, dict[str, Any]]:
+    """读取单个 skill.yaml → ``(platform, owner, entry)``（``--url`` 单文件模式）。
+
+    platform / owner 取自文件所在目录结构
+    ``<catalog>/<platform>/<owner>/skill.yaml``，与全量扫描的
+    ``_iter_catalog_entries`` 口径一致；文件名必须恰好是 ``skill.yaml``。
+    文件不存在、目录结构不符或 YAML 损坏时抛 ``ValueError``。
+    """
+    path = skill_yaml.expanduser()
+    if not path.is_file():
+        raise ValueError(f"skill.yaml not found: {skill_yaml}")
+    if path.name != "skill.yaml":
+        raise ValueError(f"expected a skill.yaml file: {skill_yaml}")
+    owner = path.parent.name
+    platform = path.parent.parent.name
+    if platform not in ("community", "enterprise", "personal") or not owner:
+        raise ValueError(
+            "skill.yaml must live at <catalog>/<platform>/<owner>/skill.yaml: "
+            f"{skill_yaml}"
+        )
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            entry = yaml.safe_load(fh) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid skill.yaml format: {skill_yaml}: {exc}") from exc
+    if not isinstance(entry, dict):
+        raise ValueError(f"Invalid skill.yaml format: {skill_yaml}")
+    return platform, owner, entry
+
+
 def load_skill_categories(repository_path: Path | None = None) -> list[str]:
     """Read category names from ``templates/skill-spec.yaml`` in the catalog."""
     repo = repository_path or sync_openEuler_skills_repo()

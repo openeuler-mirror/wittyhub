@@ -10,12 +10,16 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skillcrawler.config import load_crawler_config, sync_openEuler_skills_repo
+from skillcrawler.config import (
+    load_catalog_skill_url_entries,
+    load_crawler_config,
+    load_single_catalog_entry,
+    sync_openEuler_skills_repo,
+)
 from skillcrawler.core.category_classifier import CategoryClassificationError
 from skillcrawler.core.popularity import (
     PopularityCollector,
@@ -23,7 +27,7 @@ from skillcrawler.core.popularity import (
     estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
-from skillcrawler.core.skill_parser import normalize_git_clone_url
+from skillcrawler.core.skill_parser import normalize_git_clone_url, parse_skill_md_url
 from src.core.config import get_settings
 from src.core.database import get_db_context
 from src.models.repository import (
@@ -109,6 +113,67 @@ def _build_requests_from_config(
             )
         )
     return requests
+
+
+def _build_requests_from_skill_urls(
+    entries: list[dict[str, Any]],
+    platform_keys: list[str],
+    covered_urls: set[str],
+) -> list[SkillRepositoryRequest]:
+    """把 catalog 的 skills[].skill_url 单 Skill 贡献合并为收窄扫描请求。
+
+    - 按规范化 repo URL 分组：同一仓库多条贡献合并为一个请求、路径取并集
+      （部分扫描按请求同步入库，拆成多个请求会互相删掉对方的 skill）；
+    - 同一仓库的多条贡献必须同 ref（/blob/ 后第一段，约定为分支名），
+      否则无法消歧，抛 ValueError；
+    - 仓库已被 skill_repos 整仓登记（covered_urls 命中）时跳过，整仓扫描
+      已覆盖该 skill；
+    - skill_name / skill_url 均必填（openEuler-skills README 的 URL 贡献约定）。
+    """
+    covered = {normalize_git_clone_url(url) for url in covered_urls}
+    grouped: dict[str, dict[str, Any]] = {}
+    for item in entries:
+        platform = str(item.get("platform") or "").strip()
+        if platform not in platform_keys:
+            continue
+        skill_name = str(item.get("skill_name") or "").strip()
+        skill_url = str(item.get("skill_url") or "").strip()
+        if not skill_name or not skill_url:
+            raise ValueError(
+                f"Invalid skills entry in {platform} (skill_name and skill_url "
+                f"are required): {item!r}"
+            )
+        repo_url, ref, skill_path = parse_skill_md_url(skill_url)
+        if repo_url in covered:
+            continue
+        group = grouped.get(repo_url)
+        if group is None:
+            grouped[repo_url] = {
+                "branch": ref,
+                "platform": platform,
+                "sig_name": str(item.get("owner") or "").strip()
+                if platform == "community"
+                else None,
+                "skill_paths": {skill_path},
+            }
+        elif group["branch"] != ref:
+            raise ValueError(
+                f"skill_url entries for {repo_url} must share one ref, "
+                f"got {group['branch']!r} and {ref!r}"
+            )
+        else:
+            group["skill_paths"].add(skill_path)
+
+    return [
+        SkillRepositoryRequest(
+            url=repo_url,
+            branch=group["branch"],
+            platform=group["platform"],
+            sig_name=group["sig_name"],
+            skill_paths=sorted(group["skill_paths"]),
+        )
+        for repo_url, group in grouped.items()
+    ]
 
 
 def _format_skill_repo(repository: Any) -> str:
@@ -458,30 +523,43 @@ async def _discover_repositories_from_requests(
     return 1 if failed_count else 0
 
 
-def _infer_platform_from_repo_url(repo_url: str | None) -> str | None:
-    if not repo_url:
-        return None
-    parsed = urlparse(repo_url.strip())
-    if parsed.netloc.lower() != "gitcode.com":
-        return None
-    path_parts = [part for part in parsed.path.strip("/").split("/") if part]
-    if len(path_parts) >= 2 and path_parts[0].lower() == "openeuler":
-        return "community"
-    return None
+def _build_requests_from_skill_yaml(skill_yaml: str) -> list[SkillRepositoryRequest]:
+    """从单个 skill.yaml 构建 discover 请求（``--url`` 单文件模式）。
 
+    与全量构建同口径：``skill_repos`` 整仓条目 + ``skills[].skill_url`` 单
+    Skill 收窄请求（整仓登记覆盖同文件的 skills[] 条目）；platform / owner
+    取自文件目录结构（不再由 URL 推断）。路径先按本地文件解析，不存在时按
+    catalog 根（``-r`` / 自动同步）解析。
+    """
+    resolved = Path(skill_yaml).expanduser()
+    if not resolved.is_file():
+        resolved = (sync_openEuler_skills_repo() / skill_yaml).expanduser()
+    platform, owner, entry = load_single_catalog_entry(resolved)
 
-def _build_single_url_discover_request(
-    args: argparse.Namespace,
-) -> SkillRepositoryRequest:
-    normalized_url = normalize_git_clone_url(args.url)
-    # argparse choices already validate an explicitly supplied platform.
-    # 优先级：显式 --platform > URL 推断（gitcode.com/openeuler/* → community）> 默认 personal
-    platform = args.platform or _infer_platform_from_repo_url(normalized_url) or "personal"
-    return SkillRepositoryRequest(
-        url=normalized_url,
-        branch=args.branch,
-        platform=platform,
-    )
+    seen_urls: set[str] = set()
+    repos = entry.get("skill_repos", [])
+    enriched: list[Any] = []
+    if isinstance(repos, list):
+        for repo in repos:
+            if isinstance(repo, dict):
+                repo = dict(repo)
+                if platform == "community":
+                    repo.setdefault("sig_name", owner)
+            enriched.append(repo)
+    requests = _build_requests_from_config({platform: enriched}, platform, seen_urls)
+
+    skill_entries = [
+        {
+            "platform": platform,
+            "owner": owner,
+            "skill_name": skill.get("skill_name"),
+            "skill_url": skill.get("skill_url"),
+        }
+        for skill in (entry.get("skills") or [])
+        if isinstance(skill, dict)
+    ]
+    requests.extend(_build_requests_from_skill_urls(skill_entries, [platform], seen_urls))
+    return requests
 
 
 def build_configured_discover_requests(
@@ -521,23 +599,38 @@ def build_configured_discover_requests(
             )
         )
 
+    # URL 方式贡献（skills[].skill_url）：整仓登记覆盖不到的单 Skill，
+    # 按仓库分组合并为收窄扫描请求（skill_paths 只收录登记的 SKILL.md）
+    requests.extend(
+        _build_requests_from_skill_urls(
+            load_catalog_skill_url_entries(repository_path),
+            platform_keys,
+            seen_urls,
+        )
+    )
+
     return requests, platform_keys
 
 
-async def _run_discover(manager: "SkillManager", args: argparse.Namespace) -> int:
-    if args.url:
-        return await _run_discover_single_url(manager, args)
-    return await _run_discover_from_config(manager, args)
-
-
-async def _run_discover_single_url(
+async def _run_discover(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
-    request = _build_single_url_discover_request(args)
+    if args.url:
+        return await _run_discover_single_skill_yaml(manager, args)
+    return await _run_discover_from_config(manager, args)
+
+
+async def _run_discover_single_skill_yaml(
+    manager: "SkillManager",
+    args: argparse.Namespace,
+) -> int:
+    """--url 单文件模式：只扫描指定 skill.yaml 登记的 skill_repos / skills[]。"""
+    requests = _build_requests_from_skill_yaml(args.url)
     return await _discover_repositories_from_requests(
         manager,
-        [request],
+        requests,
+        source_label=f" from {args.url}",
     )
 
 
@@ -545,22 +638,23 @@ async def _run_discover_from_config(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
-    if args.branch:
-        raise _build_cli_error(
-            "discover",
-            "--branch requires --url for discover",
-            "python main.py discover --url \"https://example.com/repo\" --branch main",
-        )
-
+    # 统一解析 catalog 路径（未指定 --repository-path 时自动同步一次），
+    # 供请求构建与路径打印共用，避免重复 sync
+    repository_path = (
+        Path(args.repository_path).expanduser()
+        if args.repository_path
+        else sync_openEuler_skills_repo()
+    )
     requests, config_keys = build_configured_discover_requests(
         platform=args.platform,
-        repository_path=Path(args.repository_path) if args.repository_path else None,
+        repository_path=repository_path,
     )
-    return await _discover_repositories_from_requests(
+    exit_code = await _discover_repositories_from_requests(
         manager,
         requests,
-        source_label=f" from {', '.join(config_keys)}",
+        source_label=f" from {', '.join(config_keys)} (catalog: {repository_path})",
     )
+    return exit_code
 
 
 async def _run_delete(manager: "SkillManager", args: argparse.Namespace) -> int:
@@ -693,10 +787,18 @@ def _add_query_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_discover_parser(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "discover",
-        help="Register, clone, and scan skills from config or single URL",
+        help="Register, clone, and scan skills from config or a single skill.yaml",
     )
-    parser.add_argument("-u", "--url", help="Single Git repo URL to discover")
-    parser.add_argument("-b", "--branch", help="Git branch to clone with --url")
+    parser.add_argument(
+        "-u",
+        "--url",
+        help=(
+            "Single skill.yaml to discover: a local file path, or a path "
+            "relative to the openEuler-skills catalog (e.g. "
+            "personal/<owner>/skill.yaml); scans only its skill_repos / "
+            "skills[] entries"
+        ),
+    )
     parser.add_argument(
         "-r",
         "--repository-path",

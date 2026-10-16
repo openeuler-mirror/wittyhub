@@ -12,7 +12,7 @@ model:
   name: deepseek-v4-flash
   base_url: https://api.deepseek.com
   api_key: ""
-  timeout: 30
+  timeout: 60
 
 crawler:
   github_token: ""

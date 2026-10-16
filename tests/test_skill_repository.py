@@ -360,58 +360,75 @@ class TestSkillRepositoryUnit:
         with pytest.raises(ValueError, match="expected community"):
             _normalize_platform("openeuler")
 
-    def test_single_url_discover_infers_openeuler_platform(self):
-        from skillcrawler.main import _build_single_url_discover_request
+    def test_single_skill_yaml_builds_repo_and_skill_requests(self, tmp_path):
+        """--url 单文件模式：读取指定 skill.yaml 的 skill_repos 与 skills[] 条目。"""
+        from skillcrawler.main import _build_requests_from_skill_yaml
 
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://gitcode.com/openeuler/mcp-servers",
-                branch=None,
-                platform=None,
-            )
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skill_repos:\n"
+            "  - url: https://github.com/acme/tools\n"
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/solo/blob/main/skills/one/SKILL.md\n",
+            encoding="utf-8",
         )
 
-        assert request.platform == "community"
+        requests = _build_requests_from_skill_yaml(str(skill_file))
 
-    def test_single_url_discover_normalizes_atomgit_url(self):
-        from skillcrawler.main import _build_single_url_discover_request
+        assert len(requests) == 2
+        repo_request = next(r for r in requests if r.skill_paths is None)
+        skill_request = next(r for r in requests if r.skill_paths is not None)
+        # platform / owner 取自目录结构（不再由 URL 推断）
+        assert repo_request.url == "https://github.com/acme/tools"
+        assert repo_request.platform == "community"
+        assert repo_request.sig_name == "sig-demo"
+        assert skill_request.url == "https://github.com/acme/solo"
+        assert skill_request.branch == "main"
+        assert skill_request.skill_paths == ["skills/one/SKILL.md"]
 
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://atomgit.com/openeuler/mcp-servers.git",
-                branch=None,
-                platform=None,
-            )
+    def test_single_skill_yaml_resolves_catalog_relative_path(self, tmp_path, monkeypatch):
+        """本地不存在的路径按 catalog 根解析（-r / 自动同步的 openEuler-skills）。"""
+        from skillcrawler.main import _build_requests_from_skill_yaml
+
+        skill_file = tmp_path / "personal" / "leon-wang2021" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skill_repos:\n- url: https://gitcode.com/leon-wang2021/aet\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "skillcrawler.main.sync_openEuler_skills_repo", lambda: tmp_path
         )
 
-        assert request.url == "https://gitcode.com/openeuler/mcp-servers"
-        assert request.platform == "community"
+        requests = _build_requests_from_skill_yaml("personal/leon-wang2021/skill.yaml")
 
-    def test_single_url_discover_explicit_platform_wins(self):
-        from skillcrawler.main import _build_single_url_discover_request
+        assert len(requests) == 1
+        assert requests[0].url == "https://gitcode.com/leon-wang2021/aet"
+        assert requests[0].platform == "personal"
 
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://gitcode.com/openeuler/mcp-servers",
-                branch=None,
-                platform="personal",
-            )
+    def test_single_skill_yaml_rejects_invalid_target(self, tmp_path, monkeypatch):
+        """文件不存在 / 文件名不对 / 目录结构不符都抛 ValueError。"""
+        from skillcrawler.config import load_single_catalog_entry
+        from skillcrawler.main import _build_requests_from_skill_yaml
+
+        monkeypatch.setattr(
+            "skillcrawler.main.sync_openEuler_skills_repo", lambda: tmp_path
         )
+        with pytest.raises(ValueError, match="skill.yaml not found"):
+            _build_requests_from_skill_yaml("personal/x/skill.yaml")
 
-        assert request.platform == "personal"
+        wrong_name = tmp_path / "personal" / "x" / "other.yaml"
+        wrong_name.parent.mkdir(parents=True)
+        wrong_name.write_text("skill_repos: []\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="expected a skill.yaml file"):
+            load_single_catalog_entry(wrong_name)
 
-    def test_single_url_discover_defaults_to_personal(self):
-        from skillcrawler.main import _build_single_url_discover_request
-
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://gitcode.com/someone/my-skills",
-                branch=None,
-                platform=None,
-            )
-        )
-
-        assert request.platform == "personal"
+        bad_layout = tmp_path / "skill.yaml"
+        bad_layout.write_text("skill_repos: []\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="must live at"):
+            load_single_catalog_entry(bad_layout)
 
     def test_settings_env_overrides_yaml(self, tmp_path, monkeypatch):
         from src.core.config import Settings
@@ -568,6 +585,39 @@ repositories:
         assert git_ops.summarize_exception(sanitized) == (
             "git clone timed out after 120s"
         )
+
+    def test_called_process_error_str_includes_git_stderr(self):
+        """净化后的 git 错误 str() 带 stderr 失败原因，traceback 可直接排查。"""
+        from skillcrawler.core.git_operations import GitCommandError, GitOperations
+
+        git_ops = GitOperations(github_token=None)
+        exc = git_ops._sanitize_called_process_error(
+            subprocess.CalledProcessError(
+                128, ["git", "fetch"],
+                output="", stderr="OpenSSL SSL_connect: SSL_ERROR_SYSCALL",
+            )
+        )
+
+        assert isinstance(exc, subprocess.CalledProcessError)
+        assert isinstance(exc, GitCommandError)
+        assert "SSL_ERROR_SYSCALL" in str(exc)
+
+    def test_called_process_error_str_masks_github_token(self):
+        """str() 里的 stderr 同样做 token 打码，不泄露凭据。"""
+        from skillcrawler.core.git_operations import GitOperations
+
+        git_ops = GitOperations(github_token="secret-token-123")
+        exc = git_ops._sanitize_called_process_error(
+            subprocess.CalledProcessError(
+                128,
+                ["git", "fetch", "https://x/secret-token-123"],
+                output="",
+                stderr="auth failed for secret-token-123",
+            )
+        )
+
+        assert "secret-token-123" not in str(exc)
+        assert "***" in str(exc)
 
     async def test_skill_scanner_stores_skill_directory_tree_hash_not_repo_head(self, tmp_path):
         from skillcrawler.core.git_operations import GitOperations
@@ -2086,6 +2136,182 @@ class TestGitOperationsMaterialize:
         git_ops = GitOperations(github_token=None)
         assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is False
 
+    def test_materialize_retries_after_transient_network_error(self, tmp_path, caplog):
+        """网络抖动中断懒拉取后重试续拉（已缓存 blob 自动跳过），日志带 git stderr。"""
+        import logging
+
+        from skillcrawler.core.git_operations import MATERIALIZE_ATTEMPTS, GitOperations
+
+        (tmp_path / ".git").mkdir()
+        git_ops = GitOperations(github_token=None)
+
+        listing = "aaa111 blob 3\nbbb222 blob 4\nccc333 tree 1\n"
+        failure = subprocess.CalledProcessError(
+            128, ["git", "cat-file", "--batch-check"],
+            output="", stderr="OpenSSL SSL_connect: SSL_ERROR_SYSCALL",
+        )
+        success = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="aaa111 blob 3\nbbb222 blob 4\n", stderr="",
+        )
+
+        caplog.set_level(logging.WARNING, logger="skillcrawler.core.git_operations")
+        with (
+            patch.object(GitOperations, "_run_git_command", return_value=listing),
+            patch(
+                "skillcrawler.core.git_operations.subprocess.run",
+                side_effect=[failure, success],
+            ) as run_mock,
+        ):
+            assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is True
+
+        assert run_mock.call_count == 2
+        assert "SSL_ERROR_SYSCALL" in caplog.text
+        assert f"(attempt 1/{MATERIALIZE_ATTEMPTS})" in caplog.text
+
+    def test_materialize_fails_after_exhausting_retries(self, tmp_path, caplog):
+        """全部尝试失败返回 False，每次告警都带 git stderr 便于排查。"""
+        import logging
+
+        from skillcrawler.core.git_operations import MATERIALIZE_ATTEMPTS, GitOperations
+
+        (tmp_path / ".git").mkdir()
+        git_ops = GitOperations(github_token=None)
+
+        listing = "aaa111 blob 3\n"
+        failure = subprocess.CalledProcessError(
+            128, ["git", "cat-file", "--batch-check"],
+            output="", stderr="could not fetch from promisor remote",
+        )
+
+        caplog.set_level(logging.WARNING, logger="skillcrawler.core.git_operations")
+        with (
+            patch.object(GitOperations, "_run_git_command", return_value=listing),
+            patch(
+                "skillcrawler.core.git_operations.subprocess.run",
+                side_effect=failure,
+            ) as run_mock,
+        ):
+            assert git_ops.materialize_skill_objects(tmp_path, "HEAD", "skills/demo") is False
+
+        assert run_mock.call_count == MATERIALIZE_ATTEMPTS
+        assert "could not fetch from promisor remote" in caplog.text
+        assert f"(attempt {MATERIALIZE_ATTEMPTS}/{MATERIALIZE_ATTEMPTS})" in caplog.text
+
+
+class TestDeepSeekCategoryClassifier:
+    @staticmethod
+    def _make_classifier():
+        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+
+        with patch(
+            "skillcrawler.core.category_classifier.load_skill_categories",
+            return_value=["Development and Build", "others"],
+        ):
+            return DeepSeekCategoryClassifier(repository_path=None)
+
+    def test_classify_retries_transient_timeout_then_succeeds(self):
+        import httpx
+
+        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=[
+                    httpx.ReadTimeout("The read operation timed out"),
+                    "Development and Build",
+                ],
+            ) as call_mock,
+            patch("skillcrawler.core.category_classifier.time.sleep") as sleep_mock,
+        ):
+            category = classifier.classify(
+                skill_file=Path("SKILL.md"),
+                metadata={},
+                content="body",
+                source_url="https://x",
+            )
+
+        assert category == "Development and Build"
+        assert call_mock.call_count == 2
+        sleep_mock.assert_called_once()
+
+    def test_classify_degrades_to_frontmatter_after_transient_exhausted(self):
+        """网络故障重试耗尽后原样沿用 frontmatter category，不再 fatal 中断扫描。"""
+        import httpx
+
+        from skillcrawler.core.category_classifier import (
+            CATEGORY_RETRY_ATTEMPTS,
+            DeepSeekCategoryClassifier,
+        )
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=httpx.ReadTimeout("The read operation timed out"),
+            ) as call_mock,
+            patch("skillcrawler.core.category_classifier.time.sleep"),
+        ):
+            category = classifier.classify(
+                skill_file=Path("SKILL.md"),
+                metadata={"category": "Some Random Category"},
+                content="body",
+                source_url="https://x",
+            )
+
+        # 原样沿用 frontmatter 值（不强校验标准分类）
+        assert category == "Some Random Category"
+        assert call_mock.call_count == CATEGORY_RETRY_ATTEMPTS
+
+    def test_classify_fatal_on_non_transient_error(self):
+        """配置/凭据类错误保持 fatal 语义，且不做无意义重试。"""
+        from skillcrawler.core.category_classifier import (
+            CategoryClassificationError,
+            DeepSeekCategoryClassifier,
+        )
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=RuntimeError("invalid api key"),
+            ) as call_mock,
+            patch("skillcrawler.core.category_classifier.time.sleep") as sleep_mock,
+        ):
+            with pytest.raises(CategoryClassificationError):
+                classifier.classify(
+                    skill_file=Path("SKILL.md"),
+                    metadata={},
+                    content="body",
+                    source_url="https://x",
+                )
+
+        assert call_mock.call_count == 1
+        sleep_mock.assert_not_called()
+
+    def test_is_transient_error_classification(self):
+        import httpx
+
+        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+
+        request = httpx.Request("POST", "https://x")
+        server_error = httpx.HTTPStatusError(
+            "boom", request=request, response=httpx.Response(503, request=request)
+        )
+        auth_error = httpx.HTTPStatusError(
+            "boom", request=request, response=httpx.Response(401, request=request)
+        )
+
+        assert DeepSeekCategoryClassifier._is_transient_error(httpx.ReadTimeout("t")) is True
+        assert DeepSeekCategoryClassifier._is_transient_error(server_error) is True
+        assert DeepSeekCategoryClassifier._is_transient_error(auth_error) is False
+        assert DeepSeekCategoryClassifier._is_transient_error(RuntimeError("x")) is False
+
 
 class TestSearchService:
     async def test_search_service_initialization(self):
@@ -2193,6 +2419,233 @@ class TestSearchService:
         assert service._text_search.await_args.kwargs["offset"] == 0
         assert service._vector_search.await_args.kwargs["limit"] == HYBRID_CANDIDATE_LIMIT
         assert service._vector_search.await_args.kwargs["offset"] == 0
+
+
+class TestSkillUrlContribution:
+    """skills[].skill_url 单 Skill 贡献：URL 解析、请求合并与收窄扫描。"""
+
+    def test_parse_skill_md_url_parses_repo_ref_and_path(self):
+        from skillcrawler.core.skill_parser import parse_skill_md_url
+
+        repo_url, ref, skill_path = parse_skill_md_url(
+            "https://github.com/example/skills.git/blob/main/skills/demo/SKILL.md"
+        )
+        assert repo_url == "https://github.com/example/skills"
+        assert ref == "main"
+        assert skill_path == "skills/demo/SKILL.md"
+
+        # atomgit 旧域名规范化为 gitcode；查询串/锚点忽略
+        repo_url, ref, skill_path = parse_skill_md_url(
+            "https://atomgit.com/acme/x/blob/master/SKILL.md?plain=1"
+        )
+        assert repo_url == "https://gitcode.com/acme/x"
+        assert ref == "master"
+        assert skill_path == "SKILL.md"
+
+    def test_parse_skill_md_url_rejects_invalid(self):
+        from skillcrawler.core.skill_parser import parse_skill_md_url
+
+        for bad in (
+            "",
+            "https://github.com/acme/x/tree/main",
+            "https://github.com/acme/x/blob/main/README.md",
+            "https://github.com/acme/x/blob//SKILL.md",
+        ):
+            with pytest.raises(ValueError):
+                parse_skill_md_url(bad)
+
+    def test_load_catalog_skill_url_entries_collects_skills(self, tmp_path):
+        from skillcrawler.config import load_catalog_skill_url_entries
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_name: demo\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/demo/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        entries = load_catalog_skill_url_entries(tmp_path)
+
+        assert entries == [
+            {
+                "platform": "community",
+                "owner": "sig-demo",
+                "skill_name": "demo",
+                "skill_url": "https://github.com/acme/tools/blob/main/skills/demo/SKILL.md",
+            }
+        ]
+
+    def test_build_requests_merges_skill_urls_per_repo(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n"
+            "  - skill_name: two\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/two/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        requests, _ = build_configured_discover_requests(repository_path=tmp_path)
+
+        # 同仓库多条贡献合并为一个请求，路径取并集
+        assert len(requests) == 1
+        request = requests[0]
+        assert request.url == "https://github.com/acme/tools"
+        assert request.branch == "main"
+        assert request.platform == "community"
+        assert request.sig_name == "sig-demo"
+        assert request.skill_paths == ["skills/one/SKILL.md", "skills/two/SKILL.md"]
+
+    def test_build_requests_skips_skill_urls_covered_by_skill_repos(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skill_repos:\n"
+            "  - url: https://github.com/acme/tools.git\n"
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        requests, _ = build_configured_discover_requests(repository_path=tmp_path)
+
+        # 整仓登记覆盖单 Skill 贡献（.git 后缀规范化后比对），保持整仓扫描
+        assert len(requests) == 1
+        assert requests[0].url == "https://github.com/acme/tools.git"
+        assert requests[0].skill_paths is None
+
+    def test_build_requests_rejects_mixed_refs_for_same_repo(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n"
+            "  - skill_name: two\n"
+            "    skill_url: https://github.com/acme/tools/blob/dev/skills/two/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="must share one ref"):
+            build_configured_discover_requests(repository_path=tmp_path)
+
+    def test_build_requests_rejects_missing_skill_name(self, tmp_path):
+        from skillcrawler.main import build_configured_discover_requests
+
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skills:\n"
+            "  - skill_url: https://github.com/acme/tools/blob/main/skills/one/SKILL.md\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="skill_name and skill_url"):
+            build_configured_discover_requests(repository_path=tmp_path)
+
+    async def test_configured_discover_skill_paths_restricts_scan_scope(self):
+        """URL 方式贡献：请求 skill_paths 非空时只扫描登记的 SKILL.md。"""
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        skill_repository = MagicMock()
+        skill_repository.list_unscored_by_skill_repo = AsyncMock(return_value=([], []))
+        manager = SkillManager(skill_repository, AsyncMock())
+        discover_mock = AsyncMock()
+        repository = SimpleNamespace(
+            id=uuid.uuid4(),
+            repo_name="acme_tools",
+            source="github",
+            platform=None,
+            skill_num=1,
+        )
+        with (
+            patch.object(SkillManager, "_sync_git_repository"),
+            patch.object(
+                SkillManager,
+                "_list_skill_paths",
+                return_value=["skills/one/SKILL.md", "skills/two/SKILL.md"],
+            ),
+            patch.object(SkillManager, "_set_discovery_status", AsyncMock()),
+            patch.object(
+                SkillManager,
+                "_get_or_create_skill_repository",
+                AsyncMock(return_value=(repository, True)),
+            ),
+            patch.object(SkillManager, "_discover_and_store_skills", discover_mock),
+        ):
+            await manager.discover_configured_skill_repository(
+                SkillRepositoryRequest(
+                    url="https://github.com/acme/tools",
+                    skill_paths=["skills/one/SKILL.md"],
+                )
+            )
+
+        kwargs = discover_mock.await_args.kwargs
+        assert kwargs["skill_paths"] == ["skills/one/SKILL.md"]
+        assert kwargs["skill_path_filter"] == {"skills/one/SKILL.md"}
+
+    async def test_start_scan_skill_path_filter_restricts_head_and_tags(self, tmp_path):
+        """收窄扫描：HEAD 与 tag 版本都只收录登记的 SKILL.md。"""
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        for name in ("one", "two"):
+            skill_dir = repository / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {name}\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            )
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add two skills")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+        _git(repository, "tag", "v1")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/acme/widgets",
+            branch="master",
+            platform=None,
+        )
+
+        skills, tagged_skills = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={
+                "commit_id": head_commit,
+                "latest_tags": ["v1"],
+                "latest_tag_commits": {"v1": head_commit},
+            },
+            skill_paths=["skills/one/SKILL.md"],
+            skill_path_filter={"skills/one/SKILL.md"},
+        )
+
+        assert [skill.skill_id for skill in skills] == ["gitcode:acme/widgets/one"]
+        assert {v.skill_id for v in tagged_skills} == {"gitcode:acme/widgets/one"}
 
 
 class TestConfig:

@@ -360,58 +360,75 @@ class TestSkillRepositoryUnit:
         with pytest.raises(ValueError, match="expected community"):
             _normalize_platform("openeuler")
 
-    def test_single_url_discover_infers_openeuler_platform(self):
-        from skillcrawler.main import _build_single_url_discover_request
+    def test_single_skill_yaml_builds_repo_and_skill_requests(self, tmp_path):
+        """--url 单文件模式：读取指定 skill.yaml 的 skill_repos 与 skills[] 条目。"""
+        from skillcrawler.main import _build_requests_from_skill_yaml
 
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://gitcode.com/openeuler/mcp-servers",
-                branch=None,
-                platform=None,
-            )
+        skill_file = tmp_path / "community" / "sig-demo" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skill_repos:\n"
+            "  - url: https://github.com/acme/tools\n"
+            "skills:\n"
+            "  - skill_name: one\n"
+            "    skill_url: https://github.com/acme/solo/blob/main/skills/one/SKILL.md\n",
+            encoding="utf-8",
         )
 
-        assert request.platform == "community"
+        requests = _build_requests_from_skill_yaml(str(skill_file))
 
-    def test_single_url_discover_normalizes_atomgit_url(self):
-        from skillcrawler.main import _build_single_url_discover_request
+        assert len(requests) == 2
+        repo_request = next(r for r in requests if r.skill_paths is None)
+        skill_request = next(r for r in requests if r.skill_paths is not None)
+        # platform / owner 取自目录结构（不再由 URL 推断）
+        assert repo_request.url == "https://github.com/acme/tools"
+        assert repo_request.platform == "community"
+        assert repo_request.sig_name == "sig-demo"
+        assert skill_request.url == "https://github.com/acme/solo"
+        assert skill_request.branch == "main"
+        assert skill_request.skill_paths == ["skills/one/SKILL.md"]
 
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://atomgit.com/openeuler/mcp-servers.git",
-                branch=None,
-                platform=None,
-            )
+    def test_single_skill_yaml_resolves_catalog_relative_path(self, tmp_path, monkeypatch):
+        """本地不存在的路径按 catalog 根解析（-r / 自动同步的 openEuler-skills）。"""
+        from skillcrawler.main import _build_requests_from_skill_yaml
+
+        skill_file = tmp_path / "personal" / "leon-wang2021" / "skill.yaml"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            "skill_repos:\n- url: https://gitcode.com/leon-wang2021/aet\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "skillcrawler.main.sync_openEuler_skills_repo", lambda: tmp_path
         )
 
-        assert request.url == "https://gitcode.com/openeuler/mcp-servers"
-        assert request.platform == "community"
+        requests = _build_requests_from_skill_yaml("personal/leon-wang2021/skill.yaml")
 
-    def test_single_url_discover_explicit_platform_wins(self):
-        from skillcrawler.main import _build_single_url_discover_request
+        assert len(requests) == 1
+        assert requests[0].url == "https://gitcode.com/leon-wang2021/aet"
+        assert requests[0].platform == "personal"
 
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://gitcode.com/openeuler/mcp-servers",
-                branch=None,
-                platform="personal",
-            )
+    def test_single_skill_yaml_rejects_invalid_target(self, tmp_path, monkeypatch):
+        """文件不存在 / 文件名不对 / 目录结构不符都抛 ValueError。"""
+        from skillcrawler.config import load_single_catalog_entry
+        from skillcrawler.main import _build_requests_from_skill_yaml
+
+        monkeypatch.setattr(
+            "skillcrawler.main.sync_openEuler_skills_repo", lambda: tmp_path
         )
+        with pytest.raises(ValueError, match="skill.yaml not found"):
+            _build_requests_from_skill_yaml("personal/x/skill.yaml")
 
-        assert request.platform == "personal"
+        wrong_name = tmp_path / "personal" / "x" / "other.yaml"
+        wrong_name.parent.mkdir(parents=True)
+        wrong_name.write_text("skill_repos: []\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="expected a skill.yaml file"):
+            load_single_catalog_entry(wrong_name)
 
-    def test_single_url_discover_defaults_to_personal(self):
-        from skillcrawler.main import _build_single_url_discover_request
-
-        request = _build_single_url_discover_request(
-            SimpleNamespace(
-                url="https://gitcode.com/someone/my-skills",
-                branch=None,
-                platform=None,
-            )
-        )
-
-        assert request.platform == "personal"
+        bad_layout = tmp_path / "skill.yaml"
+        bad_layout.write_text("skill_repos: []\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="must live at"):
+            load_single_catalog_entry(bad_layout)
 
     def test_settings_env_overrides_yaml(self, tmp_path, monkeypatch):
         from src.core.config import Settings

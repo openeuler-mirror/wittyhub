@@ -2478,6 +2478,80 @@ class TestSearchService:
         assert service._vector_search.await_args.kwargs["offset"] == 0
 
 
+class TestDeleteCleanup:
+    """删除仓库/技能时的软关联清理与统计自愈。"""
+
+    async def test_delete_skill_repositories_cleans_skill_and_version_soft_links(self):
+        from src.models.repository import SkillRepoRepository
+
+        skill_one, skill_two, version_one = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(all=lambda: [(skill_one,), (skill_two,)]),
+                SimpleNamespace(all=lambda: [(version_one,)]),
+                SimpleNamespace(rowcount=1),
+            ]
+        )
+        related_mock = AsyncMock(return_value=3)
+        with patch(
+            "src.models.repository.SkillRepository.delete_skill_related_records",
+            related_mock,
+        ):
+            deleted = await SkillRepoRepository(session).delete_skill_repositories(
+                [uuid.uuid4()]
+            )
+
+        assert deleted == 1
+        # 软关联清理收到 skill 与 skill_versions 两类 UUID 的并集
+        assert set(related_mock.await_args.args[0]) == {
+            skill_one, skill_two, version_one,
+        }
+
+    async def test_skill_delete_cleans_version_soft_links(self):
+        from src.models.repository import SkillRepository
+
+        skill_uuid, version_one, version_two = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: skill_uuid),
+                SimpleNamespace(all=lambda: [(version_one,), (version_two,)]),
+                SimpleNamespace(rowcount=2),
+                SimpleNamespace(rowcount=1),
+            ]
+        )
+        related_mock = AsyncMock()
+        with patch(
+            "src.models.repository.SkillRepository.delete_skill_related_records",
+            related_mock,
+        ):
+            result = await SkillRepository(session).delete("gitcode:acme/widgets/one")
+
+        assert result is True
+        assert set(related_mock.await_args.args[0]) == {
+            skill_uuid, version_one, version_two,
+        }
+
+    async def test_delete_skill_repository_reconciles_statistics(self):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        manager = SkillManager(MagicMock(), AsyncMock())
+        stored = SimpleNamespace(id=uuid.uuid4(), local_path=None)
+        reconcile_mock = AsyncMock()
+        with (
+            patch.object(
+                SkillManager,
+                "get_repository_by_id",
+                AsyncMock(return_value=stored),
+            ),
+            patch.object(SkillManager, "_reconcile_skill_statistics", reconcile_mock),
+        ):
+            await manager.delete_skill_repository(str(stored.id))
+
+        reconcile_mock.assert_awaited_once()
+
+
 class TestSkillUrlContribution:
     """skills[].skill_url 单 Skill 贡献：URL 解析、请求合并与收窄扫描。"""
 

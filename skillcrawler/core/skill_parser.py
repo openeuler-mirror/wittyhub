@@ -318,6 +318,19 @@ def is_low_value_skill_content(content: str) -> bool:
     return len(text) < MIN_SKILL_CONTENT_LENGTH
 
 
+# skill 元数据门禁：frontmatter 必须同时声明 name 与 description，
+# 缺任一字段的 SKILL.md 不算 skill，扫描时跳过
+REQUIRED_SKILL_METADATA_FIELDS: tuple[str, ...] = ('name', 'description')
+
+
+def is_incomplete_skill_metadata(metadata: dict[str, object]) -> bool:
+    """frontmatter 缺少必填元数据（name / description）时返回 True。"""
+    return any(
+        not str(metadata.get(field) or '').strip()
+        for field in REQUIRED_SKILL_METADATA_FIELDS
+    )
+
+
 def normalize_git_clone_url(url: str | None) -> str:
     if not url:
         return ''

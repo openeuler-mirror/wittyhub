@@ -632,7 +632,10 @@ repositories:
         skill_dir = repository / "skills" / "a"
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
-        skill_file.write_text(f"{VALID_SKILL_BODY}\n", encoding="utf-8")
+        skill_file.write_text(
+            f"---\nname: a\ndescription: Tree-hash fixture skill.\n---\n{VALID_SKILL_BODY}\n",
+            encoding="utf-8",
+        )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill a")
         skill_dir_tree_hash = _git(repository, "rev-parse", "HEAD:skills/a")
@@ -687,7 +690,7 @@ repositories:
         tagged_dir = repository / "skill"
         tagged_dir.mkdir(parents=True)
         (tagged_dir / "SKILL.md").write_text(
-            f"---\nname: tagged-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: tagged-skill\ndescription: Tagged fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add tagged skill")
@@ -703,7 +706,7 @@ repositories:
         head_dir = repository / "skills" / "skill-1"
         head_dir.mkdir(parents=True)
         (head_dir / "SKILL.md").write_text(
-            f"---\nname: head-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: head-skill\ndescription: Head fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add head skill")
@@ -765,7 +768,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: dup-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: dup-skill\ndescription: Duplicate fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -828,7 +831,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: stable-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: stable-skill\ndescription: Stable fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -907,7 +910,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: versioned-skill\nversion: 1.2.3\n---\n{VALID_SKILL_BODY}\n",
+            f"---\nname: versioned-skill\ndescription: Versioned fixture skill.\nversion: 1.2.3\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -916,7 +919,7 @@ repositories:
         _git(repository, "tag", "v1")
 
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: versioned-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: versioned-skill\ndescription: Versioned fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "drop metadata version")
@@ -981,7 +984,7 @@ repositories:
         skill1_dir = repository / "skills" / "skill-1"
         skill1_dir.mkdir(parents=True)
         (skill1_dir / "SKILL.md").write_text(
-            f"---\nname: plain-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: plain-skill\ndescription: Plain fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill-1")
@@ -992,7 +995,7 @@ repositories:
         skill3_dir = repository / "skills" / "skill-3"
         skill3_dir.mkdir(parents=True)
         (skill3_dir / "SKILL.md").write_text(
-            f"---\nname: self-versioned-skill\n---\n{VALID_SKILL_BODY}\n",
+            f"---\nname: self-versioned-skill\ndescription: Self-versioned fixture skill.\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -1002,7 +1005,7 @@ repositories:
 
         # commit 3 (HEAD): skill-3 声明 version: 1.0.1
         (skill3_dir / "SKILL.md").write_text(
-            f"---\nname: self-versioned-skill\nversion: 1.0.1\n---\n{VALID_SKILL_BODY}\n",
+            f"---\nname: self-versioned-skill\ndescription: Self-versioned fixture skill.\nversion: 1.0.1\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -1078,6 +1081,7 @@ repositories:
         (skill_dir / "SKILL.md").write_text(
             "---\n"
             "name: my-skill\n"
+            "description: Category-cache fixture skill.\n"
             "category: Engineering and Compilation\n"
             f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
@@ -1134,6 +1138,7 @@ repositories:
         (skill_dir / "SKILL.md").write_text(
             "---\n"
             "name: my-skill\n"
+            "description: Category-cache fixture skill.\n"
             "category: Some Random Category\n"
             f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
@@ -1186,7 +1191,7 @@ repositories:
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
         skill_file.write_text(
-            f"---\nname: example\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: example\ndescription: Example fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -1241,6 +1246,58 @@ repositories:
         assert skills[0].tree_hash == skill_tree_hash
         assert skills[0].risk_score == 12
         assert getattr(skills[0], "_security_audit_triggered") is False
+
+    async def test_skill_scanner_requires_name_and_description(self, tmp_path):
+        """可扫描 Skill 门禁：frontmatter 必须同时有 name 与 description。"""
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        fixtures = {
+            "with-both": (
+                f"---\nname: with-both\ndescription: A complete skill.\n---\n{VALID_SKILL_BODY}\n"
+            ),
+            "no-description": f"---\nname: no-description\n---\n{VALID_SKILL_BODY}\n",
+            "no-name": f"---\ndescription: Only description.\n---\n{VALID_SKILL_BODY}\n",
+            "empty-description": (
+                f"---\nname: empty-description\ndescription: ''\n---\n{VALID_SKILL_BODY}\n"
+            ),
+        }
+        for name, text in fixtures.items():
+            skill_dir = repository / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skills")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/acme/widgets",
+            branch="master",
+            platform=None,
+        )
+
+        skills, _ = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={"commit_id": head_commit},
+        )
+
+        assert {skill.skill_id for skill in skills} == {"gitcode:acme/widgets/with-both"}
 
     async def test_configured_discover_force_does_not_skip_commit_unchanged_check(self):
         from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
@@ -2610,7 +2667,7 @@ class TestSkillUrlContribution:
             skill_dir = repository / "skills" / name
             skill_dir.mkdir(parents=True)
             (skill_dir / "SKILL.md").write_text(
-                f"---\nname: {name}\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+                f"---\nname: {name}\ndescription: Skill {name} fixture.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
             )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add two skills")

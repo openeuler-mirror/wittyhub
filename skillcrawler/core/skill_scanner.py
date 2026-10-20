@@ -20,6 +20,7 @@ from skillcrawler.core.skill_parser import (
     derive_repository_skill_name,
     derive_skill_source,
     extract_declared_version,
+    is_incomplete_skill_metadata,
     is_low_value_skill_content,
 )
 from src.models.orm import Skill, SkillVersion
@@ -214,6 +215,14 @@ class SkillScanner:
                     skill_id,
                 )
                 continue
+            # 元数据门禁：frontmatter 必须同时声明 name 与 description
+            if is_incomplete_skill_metadata(metadata_content[0]):
+                _logger.warning(
+                    'Skipped skill without required metadata '
+                    '(name/description): skill_id=%s ref=HEAD',
+                    skill_id,
+                )
+                continue
             input_elapsed = time.perf_counter() - scan_started_at
             tree_hash = tree_hashes.get(relative_path)
             skill = await self._build_skill_record(
@@ -336,6 +345,14 @@ class SkillScanner:
                 if is_low_value_skill_content(metadata_content[1]):
                     _logger.debug(
                         'Skipped low-value skill content: path=%s ref=%s',
+                        relative_path, ref,
+                    )
+                    continue
+                # 元数据门禁：frontmatter 必须同时声明 name 与 description
+                if is_incomplete_skill_metadata(metadata_content[0]):
+                    _logger.warning(
+                        'Skipped skill without required metadata '
+                        '(name/description): path=%s ref=%s',
                         relative_path, ref,
                     )
                     continue

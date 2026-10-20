@@ -149,6 +149,9 @@ class SkillManager:
         # DB 删除成功后再清本地 clone 目录，失败时保持本地与 DB 一致
         await self.skill_repo_repository.delete_skill_repository(stored.id)
         self._cleanup_local_clone(stored.local_path)
+        # 删除后自愈统计值（contributors.skill_count / skill_repos.skill_num），
+        # 内部容错，失败仅告警不影响删除结果
+        await self._reconcile_skill_statistics()
 
     async def get_repository_by_id(self, repository_id: str) -> SkillRepoModel:
         repository = await self.skill_repo_repository.get_skill_repository_by_id(repository_id)

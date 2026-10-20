@@ -164,8 +164,9 @@ class SkillRepoRepository:
 
         skills / skill_versions 通过外键 CASCADE 自动删除，但
         security_audits 和 download_history 使用 resource_type + resource_id
-        软关联（无外键），需要先按仓库收集 skill UUID 批量清理，
-        否则留下孤儿数据。对账删除等批量场景用本方法减少往返。
+        软关联（无外键），需要先按仓库收集 skill 与 skill_versions 的 UUID
+        批量清理（security_audits 对 tag 版本同样按 resource_type='skill'
+        + 版本 UUID 落记录），否则留下孤儿数据。
         """
         if not repository_ids:
             return 0
@@ -176,15 +177,20 @@ class SkillRepoRepository:
             repo_ids,
         )
 
-        # 一次查出所有待删仓库下的 skill UUID，用于清理软关联表
+        # 一次查出所有待删仓库下的 skill / skill_versions UUID，用于清理软关联表
         skill_ids_result = await self.session.execute(
             select(Skill.id).where(Skill.skill_repo_id.in_(repo_ids))
         )
         skill_ids = [row[0] for row in skill_ids_result.all()]
+        version_ids_result = await self.session.execute(
+            select(SkillVersion.id).where(SkillVersion.skill_repo_id.in_(repo_ids))
+        )
+        version_ids = [row[0] for row in version_ids_result.all()]
 
         related_deleted = 0
-        if skill_ids:
-            related_deleted = await SkillRepository(self.session).delete_skill_related_records(skill_ids)
+        resource_ids = [*skill_ids, *version_ids]
+        if resource_ids:
+            related_deleted = await SkillRepository(self.session).delete_skill_related_records(resource_ids)
 
         result = await self.session.execute(
             delete(SkillRepoModel).where(SkillRepoModel.id.in_(repo_ids))
@@ -889,11 +895,16 @@ class SkillRepository:
         return int(audit_result.rowcount or 0) + int(history_result.rowcount or 0)
 
     async def delete(self, skill_id: str) -> bool:
-        # 先查出 skill 的 UUID，用于清理软关联表
+        # 先查出 skill 与其 tag 版本的 UUID，用于清理软关联表
+        # （security_audits 对 tag 版本同样按 resource_type='skill' + 版本 UUID 落记录）
         id_result = await self.session.execute(
             select(Skill.id).where(Skill.skill_id == skill_id)
         )
         skill_uuid = id_result.scalar_one_or_none()
+        version_ids_result = await self.session.execute(
+            select(SkillVersion.id).where(SkillVersion.skill_id == skill_id)
+        )
+        version_ids = [row[0] for row in version_ids_result.all()]
 
         version_result = await self.session.execute(
             delete(SkillVersion).where(SkillVersion.skill_id == skill_id)
@@ -904,8 +915,9 @@ class SkillRepository:
         await self.session.flush()
 
         # 清理 security_audits 和 download_history 中的孤儿数据
-        if skill_uuid:
-            await self.delete_skill_related_records([skill_uuid])
+        related_ids = [*([skill_uuid] if skill_uuid else []), *version_ids]
+        if related_ids:
+            await self.delete_skill_related_records(related_ids)
 
         return (version_result.rowcount or 0) > 0 or (summary_result.rowcount or 0) > 0
 

@@ -1974,6 +1974,106 @@ class TestExtractDeclaredVersion:
         assert extract_declared_version({"metadata": {"author": "x"}}) is None
 
 
+class TestExtractDeclaredTags:
+    """frontmatter tags 归一化：逗号分隔字符串 / YAML 列表 / 嵌套 metadata 块。"""
+
+    def _parse(self, text: str) -> dict:
+        from skillcrawler.core.skill_parser import parse_skill_frontmatter_text
+
+        meta, _ = parse_skill_frontmatter_text(text)
+        return meta
+
+    def test_comma_separated_string_split(self):
+        """datadog-labs 风格：metadata 块下逗号分隔字符串，拆成多个 tag。"""
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\n"
+            "name: setup-sourcemaps\n"
+            "description: Upload sourcemaps.\n"
+            "metadata:\n"
+            '  tags: "browser-sdk, sourcemaps, rum"\n'
+            "---\n"
+            "# body\n"
+        )
+        assert extract_declared_tags(meta) == ["browser-sdk", "sourcemaps", "rum"]
+
+    def test_inline_list_tags(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\nname: s\ndescription: d\ntags: [python, \"fast api\"]\n---\nbody\n"
+        )
+        assert extract_declared_tags(meta) == ["python", "fast api"]
+
+    def test_space_separated_string_split(self):
+        """NVIDIA blueprint 风格：metadata 块下空格分隔字符串，拆成多个 tag。"""
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\n"
+            "name: vss-setup-behavior-analytics\n"
+            "description: Deploy standalone service.\n"
+            "metadata:\n"
+            '  tags: "nvidia blueprint operational deployment behavior-analytics"\n'
+            "---\n"
+            "# body\n"
+        )
+        assert extract_declared_tags(meta) == [
+            "nvidia", "blueprint", "operational", "deployment", "behavior-analytics",
+        ]
+
+    def test_block_list_preserves_multi_word_tags(self):
+        """YAML 列表项是结构化声明，项内空格属于 tag 名，不拆分。"""
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\n"
+            "name: s\n"
+            "description: d\n"
+            "tags:\n"
+            "  - Extended Context\n"
+            "  - NeMo Curator\n"
+            "---\n"
+            "# body\n"
+        )
+        assert extract_declared_tags(meta) == ["Extended Context", "NeMo Curator"]
+
+    def test_block_list_tags(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\nname: s\ndescription: d\ntags:\n  - python\n  - asyncio\n---\nbody\n"
+        )
+        assert extract_declared_tags(meta) == ["python", "asyncio"]
+
+    def test_single_string_and_dedupe(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\nname: s\ndescription: d\ntags: \"python, python , , asyncio\"\n---\nbody\n"
+        )
+        assert extract_declared_tags(meta) == ["python", "asyncio"]
+
+    def test_top_level_wins_over_nested_dict(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = {"tags": "a, b", "metadata": {"tags": "x, y"}}
+        assert extract_declared_tags(meta) == ["a", "b"]
+
+    def test_nested_dict_tags_fallback(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = {"name": "s", "metadata": {"tags": "x, y"}}
+        assert extract_declared_tags(meta) == ["x", "y"]
+
+    def test_missing_tags_returns_none(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        assert extract_declared_tags({"name": "s"}) is None
+        assert extract_declared_tags({"tags": " , "}) is None
+
+
 class TestGitOperationsTags:
     def _init_repository(self, path: Path) -> None:
         path.mkdir(parents=True)

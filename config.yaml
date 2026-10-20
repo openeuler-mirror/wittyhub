@@ -9,10 +9,21 @@ storage:
   local_path: "/opt/wittyhub"
 
 model:
-  name: deepseek-flash
-  base_url: https://api.deepseek.com
-  api_key: ""
-  timeout: 60
+  # 当前生效的 provider，切换模型只改这一行（也可用 MODEL__PROVIDER 环境变量覆盖）。
+  # 两家都是 OpenAI 兼容接口，调用侧（分类/翻译）无需改代码。
+  provider: siliconflow
+  providers:
+    deepseek:
+      name: deepseek-flash
+      base_url: https://api.deepseek.com
+      api_key: ""
+      timeout: 60
+    siliconflow:
+      # 硅基流动 免费模型，api_key 在 cloud.siliconflow.cn 控制台获取
+      name: Qwen/Qwen3.5-4B
+      base_url: https://api.siliconflow.cn/v1
+      api_key: ""
+      timeout: 60
 
 crawler:
   github_token: ""

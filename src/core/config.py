@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
@@ -33,11 +33,49 @@ class StorageConfig(BaseSettings):
     github_token: str = ""
 
 
-class ModelConfig(BaseSettings):
+class ModelProviderConfig(BaseModel):
+    """单个 LLM provider 的连接配置（OpenAI 兼容 /chat/completions 接口）。"""
+
     name: str = ""
     base_url: str = ""
     api_key: str = ""
     timeout: float = 60
+
+
+class ModelConfig(BaseSettings):
+    # 平铺字段即"当前生效"的模型配置；配置了 provider 时由 resolve()
+    # 用 providers 中对应条目填充。
+    name: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    timeout: float = 60
+    # 当前选用的 provider（providers 的 key）；为空则直接使用上方平铺字段
+    provider: str = ""
+    providers: dict[str, ModelProviderConfig] = Field(default_factory=dict)
+
+    def resolve(self) -> "ModelConfig":
+        """返回当前生效 provider 的模型配置。
+
+        provider 为空时原样返回（兼容只写平铺字段的旧配置）；provider
+        指向 providers 中不存在的 key 时直接报错，避免静默回退到错误的
+        模型/凭据。
+        """
+        if not self.provider:
+            return self
+        entry = self.providers.get(self.provider)
+        if entry is None:
+            available = ", ".join(sorted(self.providers)) or "<none>"
+            raise ValueError(
+                f"unknown model.provider {self.provider!r}, available: {available}"
+            )
+        return self.model_copy(
+            update={
+                "name": entry.name,
+                "base_url": entry.base_url,
+                "api_key": entry.api_key,
+                "timeout": entry.timeout,
+            }
+        )
 
 
 class CrawlerConfig(BaseSettings):
@@ -126,7 +164,7 @@ class Settings(BaseSettings):
         return cls(
             postgres=PostgresConfig(**data.get("postgres", {})),
             storage=StorageConfig(**data.get("storage", {})),
-            model=ModelConfig(**data.get("model", {})),
+            model=ModelConfig(**data.get("model", {})).resolve(),
             crawler=CrawlerConfig(**data.get("crawler", {})),
             security=SecurityConfig(**data.get("security", {})),
             app=AppConfig(**data.get("app", {})),

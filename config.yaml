@@ -9,7 +9,7 @@ storage:
   local_path: "/opt/wittyhub"
 
 model:
-  name: deepseek-v4-flash
+  name: deepseek-flash
   base_url: https://api.deepseek.com
   api_key: ""
   timeout: 60
@@ -61,7 +61,7 @@ app:
 discover_scheduler:
   enabled: true
   interval: "daily"   # 二选一： daily：每天 | weekly：每周
-  time: "00:00"       # 触发时刻（本地时区 HH:MM）
+  time: "16:00"       # 触发时刻（UTC HH:MM；UTC+8 下即北京时间 00:00）
   weekday: "sun"      # 仅 weekly 生效：mon/tue/wed/thu/fri/sat/sun
   result_dir: ""      # 每轮结果 JSON 保存目录；留空则用 storage.local_path/logs
 

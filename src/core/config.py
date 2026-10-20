@@ -77,7 +77,7 @@ class DiscoverSchedulerConfig(BaseSettings):
     """后台定时 discover 调度配置。
 
     interval 支持 "daily"（每天）或 "weekly"（每周），触发时刻由 time
-    （本地时区 HH:MM）决定；weekly 时 weekday 指定星期（mon/tue/wed/
+    （UTC HH:MM）决定；weekly 时 weekday 指定星期（mon/tue/wed/
     thu/fri/sat/sun）。
     """
 

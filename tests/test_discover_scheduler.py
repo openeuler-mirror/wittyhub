@@ -62,14 +62,19 @@ class TestConfigIntegration:
         assert settings.discover_scheduler.weekday == "sun"
 
     def test_config_yaml_section_parsed(self):
-        # 直接验证 from_yaml 的解析路径（config.yaml 当前为 enabled=true, time=00:00）
+        # 验证 from_yaml 的解析路径；不绑定 config.yaml 的具体取值
+        # （调度时刻等运维随时可改，断言具体值会随配置漂移误报）
+        import re
+
         from src.core.config import Settings
 
         settings = Settings.from_yaml("config.yaml")
-        assert settings.discover_scheduler.enabled is True
-        assert settings.discover_scheduler.interval == "daily"
-        assert settings.discover_scheduler.time == "00:00"
-        assert settings.discover_scheduler.weekday == "sun"
+        assert isinstance(settings.discover_scheduler.enabled, bool)
+        assert settings.discover_scheduler.interval in ("daily", "weekly")
+        assert re.fullmatch(r"\d{2}:\d{2}", settings.discover_scheduler.time)
+        assert settings.discover_scheduler.weekday in (
+            "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+        )
 
     def test_invalid_interval_rejected_on_start(self):
         config = DiscoverSchedulerConfig(enabled=True, interval="hourly")

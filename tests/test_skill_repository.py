@@ -2478,6 +2478,43 @@ class TestSearchService:
         assert service._vector_search.await_args.kwargs["offset"] == 0
 
 
+class TestAsyncNonBlocking:
+    """扫描链路的同步阻塞调用（git/LLM）必须放线程池，不冻结事件循环。"""
+
+    async def test_discover_scan_does_not_block_event_loop(self):
+        import asyncio
+        import time
+
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        manager = SkillManager(MagicMock(), AsyncMock())
+        started = time.perf_counter()
+
+        def slow_sync_git(*_args, **_kwargs):
+            # 模拟网络挂起的同步 git 调用（如 github 不可达时的 fetch）
+            time.sleep(0.4)
+
+        probe_elapsed: list[float] = []
+
+        async def probe():
+            await asyncio.sleep(0.1)
+            probe_elapsed.append(time.perf_counter() - started)
+
+        with (
+            patch.object(SkillManager, "_sync_git_repository", slow_sync_git),
+            patch.object(SkillManager, "_list_skill_paths", return_value=[]),
+        ):
+            await asyncio.gather(
+                manager.discover_configured_skill_repository(
+                    SkillRepositoryRequest(url="https://github.com/acme/agent-skills")
+                ),
+                probe(),
+            )
+
+        # 若 git 调用阻塞事件循环，probe 只能等 0.4s 后才完成
+        assert probe_elapsed and probe_elapsed[0] < 0.3
+
+
 class TestDeleteCleanup:
     """删除仓库/技能时的软关联清理与统计自愈。"""
 

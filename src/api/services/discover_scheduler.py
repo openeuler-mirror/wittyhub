@@ -141,8 +141,11 @@ class DiscoverScheduler:
         结束时汇总平均耗时与最慢的仓库，便于排查慢仓库。
         每轮结果（含每仓明细）写入 result_dir 下的 JSON 文件。
         """
-        repository_path = sync_openEuler_skills_repo()
-        requests, config_keys = build_configured_discover_requests(
+        # catalog 同步是 git 操作、请求构建是全量 YAML 解析，均放线程池执行，
+        # 网络挂起或 catalog 较大时不阻塞事件循环（API / 健康检查保持可用）
+        repository_path = await asyncio.to_thread(sync_openEuler_skills_repo)
+        requests, config_keys = await asyncio.to_thread(
+            build_configured_discover_requests,
             repository_path=repository_path,
         )
         total = len(requests)
@@ -298,7 +301,9 @@ class DiscoverScheduler:
         （以扫描结果为准，新插入行默认 0）。
         """
         try:
-            profiles = load_contributor_profiles(repository_path)
+            profiles = await asyncio.to_thread(
+                load_contributor_profiles, repository_path,
+            )
         except Exception:
             logger.warning(
                 "Failed to load contributor profiles from %s", repository_path, exc_info=True

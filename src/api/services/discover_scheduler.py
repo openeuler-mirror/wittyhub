@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,17 @@ from src.models.repository import ContributorRepository, SkillRepoRepository, Sk
 logger = logging.getLogger(__name__)
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+# 北京时间（UTC+8）：调度配置与计算统一按 UTC，日志换算成北京时间展示
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _beijing_hhmm(time_str: str) -> str:
+    """把配置里的 UTC HH:MM 换算成北京时间 HH:MM；解析失败时原样返回。"""
+    try:
+        hour, minute = _parse_hhmm(time_str)
+    except ValueError:
+        return time_str
+    return f"{(hour + 8) % 24:02d}:{minute:02d}"
 
 
 def _parse_hhmm(value: str) -> tuple[int, int]:
@@ -48,7 +59,7 @@ def compute_next_run(
     minute: int,
     weekday: str,
 ) -> datetime:
-    """计算下一次触发时刻（本地时区）。
+    """计算下一次触发时刻（UTC）。
 
     daily：今天已过触发点则取明天同一时刻；
     weekly：取下一个指定 weekday 的触发时刻（今天已过则顺延一周）。
@@ -94,9 +105,10 @@ class DiscoverScheduler:
         self._running = True
         self._task = asyncio.create_task(self._loop())
         logger.info(
-            "DiscoverScheduler started (interval=%s, time=%s, weekday=%s)",
+            "DiscoverScheduler started (interval=%s, trigger=(UTC:%s == 北京时间:%s), weekday=%s)",
             interval,
             self._config.time,
+            _beijing_hhmm(self._config.time),
             self._config.weekday,
         )
 
@@ -117,9 +129,17 @@ class DiscoverScheduler:
         weekday = self._config.weekday.strip().lower()
 
         while self._running:
-            next_run = compute_next_run(datetime.now(), interval, hour, minute, weekday)
-            wait_seconds = (next_run - datetime.now()).total_seconds()
-            logger.info("Next scheduled discover run at %s (in %.0fs)", next_run, wait_seconds)
+            # 触发时刻按 UTC 计算（config.yaml 的 time 为 UTC HH:MM）
+            next_run = compute_next_run(
+                datetime.now(timezone.utc), interval, hour, minute, weekday,
+            )
+            wait_seconds = (next_run - datetime.now(timezone.utc)).total_seconds()
+            logger.info(
+                "Next scheduled discover run at %s 北京时间 (UTC %s, in %.0fs)",
+                next_run.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M"),
+                next_run.strftime("%Y-%m-%d %H:%M"),
+                wait_seconds,
+            )
             try:
                 await asyncio.sleep(wait_seconds)
             except asyncio.CancelledError:
@@ -141,8 +161,11 @@ class DiscoverScheduler:
         结束时汇总平均耗时与最慢的仓库，便于排查慢仓库。
         每轮结果（含每仓明细）写入 result_dir 下的 JSON 文件。
         """
-        repository_path = sync_openEuler_skills_repo()
-        requests, config_keys = build_configured_discover_requests(
+        # catalog 同步是 git 操作、请求构建是全量 YAML 解析，均放线程池执行，
+        # 网络挂起或 catalog 较大时不阻塞事件循环（API / 健康检查保持可用）
+        repository_path = await asyncio.to_thread(sync_openEuler_skills_repo)
+        requests, config_keys = await asyncio.to_thread(
+            build_configured_discover_requests,
             repository_path=repository_path,
         )
         total = len(requests)
@@ -298,7 +321,9 @@ class DiscoverScheduler:
         （以扫描结果为准，新插入行默认 0）。
         """
         try:
-            profiles = load_contributor_profiles(repository_path)
+            profiles = await asyncio.to_thread(
+                load_contributor_profiles, repository_path,
+            )
         except Exception:
             logger.warning(
                 "Failed to load contributor profiles from %s", repository_path, exc_info=True

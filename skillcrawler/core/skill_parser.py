@@ -235,6 +235,48 @@ def extract_declared_version(metadata: dict[str, object]) -> str | None:
     return None
 
 
+def extract_declared_tags(metadata: dict[str, object]) -> list[str] | None:
+    """提取 SKILL.md frontmatter 声明的 tags，归一化为去重后的字符串列表。
+
+    取值位置与 ``extract_declared_version`` 一致（顶层优先，其次
+    ``metadata:`` 嵌套块）。取值兼容三种写法：
+
+    - YAML 列表：``tags: [a, b]`` 或块列表 ``- a``；每个元素是一个
+      tag，元素内的空格属于 tag 名（如 ``- Extended Context``）
+    - 逗号分隔字符串：``tags: "a, b, c"``（datadog-labs 风格）
+    - 空格分隔字符串：``tags: "a b c"``（NVIDIA blueprint 风格）
+
+    标量字符串按逗号和空白拆分（拆分后不再含空格，多词 tag 请用
+    YAML 列表写法声明）；列表项仅按逗号拆分。拆分后 strip 去引号、
+    去空项、保序去重；未声明或全部为空时返回 None。
+    """
+    raw = metadata.get('tags')
+    if raw is None or raw == '' or raw == []:
+        nested = metadata.get('metadata')
+        if isinstance(nested, dict):
+            raw = nested.get('tags')
+    return _normalize_tag_list(raw)
+
+
+def _normalize_tag_list(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        # 列表项是结构化声明，仅按逗号拆分，保留项内空格（多词 tag）
+        parts = (part for item in value for part in str(item).split(','))
+    else:
+        # 标量字符串是分隔符拼接的列表，逗号和空白均为分隔符
+        parts = re.split(r'[,\s]+', str(value))
+    tags: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        tag = part.strip().strip('"\'').strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags or None
+
+
 def _parse_frontmatter_value(key: str, value: str) -> object:
     if not value:
         return [] if key == 'triggers' else ''

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from skillcrawler.core.skill_parser import (
     build_skill_md_url,
     derive_repository_skill_name,
     derive_skill_source,
+    extract_declared_tags,
     extract_declared_version,
     is_incomplete_skill_metadata,
     is_low_value_skill_content,
@@ -113,7 +115,9 @@ class SkillScanner:
 
         discovery_started_at = time.perf_counter()
         if skill_paths is None:
-            skill_paths = self.git_ops.list_skill_paths_for_ref(repo_root, 'HEAD')
+            skill_paths = await asyncio.to_thread(
+                self.git_ops.list_skill_paths_for_ref, repo_root, 'HEAD',
+            )
         _logger.debug(
             'Skill file discovery timing: repo=%s files=%d elapsed=%.3fs',
             getattr(repo, 'repo_name', None) or repo.url,
@@ -188,7 +192,8 @@ class SkillScanner:
         # every returned record maps to a persisted row (records dropped here
         # would never receive a database id).
         seen_skill_ids: set[str] = set()
-        tree_hashes = self.git_ops.get_skill_tree_hashes(
+        tree_hashes = await asyncio.to_thread(
+            self.git_ops.get_skill_tree_hashes,
             repo_root, skill_paths, ref='HEAD',
         )
         for relative_path in skill_paths:
@@ -204,7 +209,8 @@ class SkillScanner:
                 )
                 continue
             seen_skill_ids.add(skill_id)
-            metadata_content = self.git_ops.load_skill_frontmatter_from_git_ref(
+            metadata_content = await asyncio.to_thread(
+                self.git_ops.load_skill_frontmatter_from_git_ref,
                 repo_root, 'HEAD', relative_path,
             )
             if metadata_content is None:
@@ -314,7 +320,8 @@ class SkillScanner:
             # Discover paths per ref: a tag may contain skills that were later
             # renamed, removed, or that never existed at HEAD, so HEAD's path
             # set cannot be reused as the universe of tag paths.
-            current_tag_skill_paths = self.git_ops.list_skill_paths_for_ref(
+            current_tag_skill_paths = await asyncio.to_thread(
+                self.git_ops.list_skill_paths_for_ref,
                 repo_root, ref,
             )
             # URL 方式贡献（skill_path_filter 非空）的 tag 版本同样只收录
@@ -324,7 +331,8 @@ class SkillScanner:
                     path for path in current_tag_skill_paths
                     if path in skill_path_filter
                 ]
-            tree_hashes = self.git_ops.get_skill_tree_hashes(
+            tree_hashes = await asyncio.to_thread(
+                self.git_ops.get_skill_tree_hashes,
                 repo_root, current_tag_skill_paths, ref=ref,
             )
             _logger.debug(
@@ -337,7 +345,8 @@ class SkillScanner:
             )
             for relative_path in current_tag_skill_paths:
                 scan_started_at = time.perf_counter()
-                metadata_content = self.git_ops.load_skill_frontmatter_from_git_ref(
+                metadata_content = await asyncio.to_thread(
+                    self.git_ops.load_skill_frontmatter_from_git_ref,
                     repo_root, ref, relative_path,
                 )
                 if metadata_content is None:
@@ -530,7 +539,7 @@ class SkillScanner:
             'source_url': source_url,
             'repo_url': repo.url,
             'category': category,
-            'tags': as_optional_str_list(metadata.get('tags')),
+            'tags': extract_declared_tags(metadata),
             'platform': as_optional_str(getattr(repo, 'platform', None)) or as_optional_str(metadata.get('platform')),
             'extra_metadata': merged_metadata,
             'content': content or None,
@@ -681,7 +690,8 @@ class SkillScanner:
         if self.category_classifier is None:
             category_cache[skill_id] = declared_category
             return declared_category
-        category = self.category_classifier.classify(
+        category = await asyncio.to_thread(
+            self.category_classifier.classify,
             skill_file=skill_file,
             metadata=metadata,
             content=content,
@@ -712,9 +722,11 @@ class SkillScanner:
         # skillspector 容器以只读方式挂载缓存仓库且无网络访问，
         # 此处提前物化技能路径的所有 blob，避免容器内触发懒拉取失败。
         if repo.local_path and commit_id:
-            if not self.git_ops.materialize_skill_objects(
+            materialized = await asyncio.to_thread(
+                self.git_ops.materialize_skill_objects,
                 Path(repo.local_path), commit_id, skill_path,
-            ):
+            )
+            if not materialized:
                 _logger.warning(
                     'Security audit skipped for skill %s: objects not materialized',
                     skill_id,

@@ -156,6 +156,10 @@ class DeepSeekCategoryClassifier:
                 },
             ],
             "temperature": 0,
+            # 默认关闭 thinking：Qwen3/推理系列默认先输出长思维链，分类任务
+            # 用不上还拖慢批量扫描。硅基流动仅识别顶层 enable_thinking
+            #（chat_template_kwargs 写法无效）；不识别该参数的模型会忽略它。
+            "enable_thinking": False,
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",

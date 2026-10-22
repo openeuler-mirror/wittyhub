@@ -34,6 +34,10 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       HF_HOME: /models-cache
       SENTENCE_TRANSFORMERS_HOME: /models-cache
+      # 离线环境：权重已缓存在 huggingface-cache 卷，启用 HF 离线模式跳过
+      # Hub 元数据请求（否则启动时反复重试导致 /health 迟迟不就绪）
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     volumes:
       - ../config.yaml:/app/config.yaml:ro
       - huggingface-cache:/models-cache

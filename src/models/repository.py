@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 from sqlalchemy import and_, case, delete, desc, func, or_, select, update
+from sqlalchemy.exc import InterfaceError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -464,6 +465,13 @@ class SkillRepository:
             for version in versions_result.scalars().all()
             if version.skill_id
         }
+        # 预加载是扫描前最后一次 DB 访问，之后的扫描（git 操作 + Jenkins 触发）
+        # 可达数小时。若把 open transaction 横跨整个扫描，连接会长时间处于
+        # idle-in-transaction 状态，被 PostgreSQL idle_in_transaction_session_timeout
+        # 或 TCP 超时断开，落库阶段就会抛 "the underlying connection is closed"
+        # 导致整仓扫描结果丢失。这里立即 commit 归还连接，后续取用时 pool_pre_ping
+        # 会自动剔除死连接；expire_on_commit=False 保证下面返回的 ORM 记录仍可用。
+        await self.session.commit()
         return skills, versions
 
     async def get_category_by_source_url(self, source_url: str) -> str | None:
@@ -531,6 +539,49 @@ class SkillRepository:
         )
 
     async def store_skills_and_versions(
+        self,
+        skill_repo_id: uuid.UUID,
+        latest_skills: list[Skill],
+        tagged_skills: list[SkillVersion],
+        *,
+        commit: bool = True,
+    ) -> tuple[list[Skill], list[SkillVersion]]:
+        """Sync skills/versions for one repository, retrying once on a dead connection.
+
+        兜底加固：长扫描期间连接可能被服务端断开（原因见 ``load_scan_records``
+        的注释），落库开头就会抛 ``InterfaceError: the underlying connection is
+        closed``。捕获后换连接整体重放一次：
+
+        - ``session.close()`` 抛弃死连接和半截事务。未提交的写入（含扫描早期
+          flush 的 branch/local_path 更新）本就随死连接丢失，只能回退；已加载
+          的 ORM 对象变为 detached 但属性值保留，调用方后续访问不会触发
+          async lazy load。session 复用时自动从连接池取新连接（pool_pre_ping
+          剔除死连接）。
+        - 重放复用同一 session，保持调用方 ``commit=False`` 时的单事务语义
+          （与后续 SecurityAudit / Repo 更新一次 commit）。
+        - 方法体按查询结果重新 diff，重放幂等。仅重试一次，再次失败照常上抛。
+        """
+        try:
+            return await self._store_skills_and_versions_once(
+                skill_repo_id, latest_skills, tagged_skills, commit=commit,
+            )
+        except InterfaceError as exc:
+            logger.warning(
+                'store_skills_and_versions hit connection error (%s); '
+                'retrying once on a fresh connection',
+                exc,
+            )
+            try:
+                await self.session.close()
+            except Exception:
+                # 死连接上 close 本身也可能失败；连接已被连接池标记失效，
+                # 继续重放即可（第二次失败会正常上抛）
+                pass
+            return await self._store_skills_and_versions_once(
+                skill_repo_id, latest_skills, tagged_skills, commit=commit,
+            )
+
+    async def _store_skills_and_versions_once(
         self,
         skill_repo_id: uuid.UUID,
         latest_skills: list[Skill],

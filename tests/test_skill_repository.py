@@ -177,6 +177,93 @@ class TestSkillRepositoryUnit:
         assert session.execute.await_count == 2
         session.add.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_store_skills_retries_once_on_dead_connection(self):
+        """InterfaceError（连接被服务端断开）时换连接整体重放一次后成功。"""
+        from sqlalchemy.exc import InterfaceError
+
+        from src.models.repository import SkillRepository
+
+        dead = InterfaceError(
+            "SELECT skills.id, ...",
+            (),
+            Exception("the underlying connection is closed"),
+        )
+        empty_skills = MagicMock()
+        empty_skills.scalars.return_value.all.return_value = []
+        empty_versions = MagicMock()
+        empty_versions.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        # 第一次落库首查即死连接；重放走完 skills/skill_versions 两次预加载
+        session.execute.side_effect = [
+            dead,
+            empty_skills,
+            empty_versions,
+        ]
+
+        result = await SkillRepository(session).store_skills_and_versions(
+            uuid.uuid4(),
+            [],
+            [],
+            commit=False,
+        )
+
+        assert result == ([], [])
+        # 死连接被 close，重放复用同一 session（由连接池换新连接）
+        session.close.assert_awaited_once()
+        assert session.execute.await_count == 3
+        session.flush.assert_awaited_once()
+        session.commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_retry_respects_commit_flag(self):
+        """重放与首跑同样遵循 commit 开关（true 时一次 commit）。"""
+        from sqlalchemy.exc import InterfaceError
+
+        from src.models.repository import SkillRepository
+
+        dead = InterfaceError("SELECT", (), Exception("connection closed"))
+        empty_skills = MagicMock()
+        empty_skills.scalars.return_value.all.return_value = []
+        empty_versions = MagicMock()
+        empty_versions.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        session.execute.side_effect = [dead, empty_skills, empty_versions]
+
+        await SkillRepository(session).store_skills_and_versions(
+            uuid.uuid4(),
+            [],
+            [],
+            commit=True,
+        )
+
+        session.flush.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_raises_when_retry_also_fails(self):
+        """仅重试一次：重放再次遇到 InterfaceError 时照常上抛。"""
+        from sqlalchemy.exc import InterfaceError
+
+        from src.models.repository import SkillRepository
+
+        session = AsyncMock()
+        # side_effect 直接设为异常实例：每次调用都抛出
+        session.execute.side_effect = InterfaceError(
+            "SELECT", (), Exception("connection closed"),
+        )
+
+        with pytest.raises(InterfaceError):
+            await SkillRepository(session).store_skills_and_versions(
+                uuid.uuid4(),
+                [],
+                [],
+            )
+
+        # 首跑首查失败 → close → 重放首查再次失败，不再重试
+        assert session.execute.await_count == 2
+        session.close.assert_awaited_once()
+
     def test_list_with_skill_id_prefix_filters_by_repo(self):
         from sqlalchemy import select
         from sqlalchemy.dialects import postgresql

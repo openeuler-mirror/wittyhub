@@ -77,22 +77,14 @@ wittyhub install <skill_id> -y
 
 ## 四、安装位置
 
-- 默认：自动识别当前 Agent（Trae / Trae CN、豆包、Claude Code、Cursor、OpenCode、Gemini CLI、OpenClaw、WorkBuddy、QoderWork 等），只安装到当前 Agent 读取的目录，不会写入其他 Agent 的目录
-- 默认作用域是项目级（加 `-g` 改为用户级）；Cursor、Codex、OpenCode、Gemini CLI 等 Agent 本身就以 `.agents/skills/` 作为自己的目录，写入该目录属于正常行为，不是通用兜底
-- 豆包、QoderWork 只读取用户级目录，CLI 会自动切换为全局安装
-- 若 CLI 报错 `Unsupported agent`，说明当前客户端未被识别：根据你所在的客户端改用 `--agent <agent名>` 显式指定后重试，不要改用其它方式绕过
+- 默认：自动识别当前 Agent（Trae/Claude Code/Cursor 等）并安装到其 skills 目录，同时安装到项目通用目录 `.agents/skills/`（多数 Agent 会扫描此目录）
 - 手动指定：`wittyhub install <skill_id> --agent <agent名>` 或 `--agent '*'`（装到全部已检测 Agent）
-- 常用 Agent 名与 Skills 路径（未标注时默认项目级，`-g` 时为用户级）：
-  - Trae / Trae CN: `trae` / `trae-cn` → 项目 `.trae/skills/`；全局 `~/.trae/skills/` / `~/.trae-cn/skills/`
-  - 豆包: `doubao` → 仅用户级：macOS `~/Library/Application Support/Doubao/Default/.doubao/agent_mode/workspace/.user_skills/`；Windows `%LOCALAPPDATA%\Doubao\User Data\Default\.doubao\agent_mode\workspace\.user_skills\`；Linux 暂无官方客户端
-  - Claude Code: `claude-code` → 项目 `.claude/skills/`；全局 `~/.claude/skills/`
-  - Cursor: `cursor` → 项目 `.agents/skills/`；全局 `~/.cursor/skills/`
-  - OpenCode: `opencode` → 项目 `.agents/skills/`；全局 `~/.config/opencode/skills/`
-  - Gemini CLI: `gemini-cli` → 项目 `.agents/skills/`；全局 `~/.gemini/skills/`
-  - OpenClaw: `openclaw` → 项目 `skills/`；全局 `~/.openclaw/skills/`
-  - WorkBuddy: `workbuddy` → 项目 `.workbuddy/skills/`；全局 `~/.workbuddy/skills/`
-  - QoderWork: `qoderwork` → 仅用户级 `~/.qoderwork/skills/`
-  - Codex: `codex` → 项目 `.agents/skills/`；全局 `~/.codex/skills/`
+- 常用 AI Client 的 Skills 路径（手动核对用）：
+  - Claude Code: `~/.claude/skills/`
+  - Cursor: `~/.cursor/skills/`
+  - Codex: `~/.codex/skills/`
+  - Gemini CLI: `~/.gemini/skills/`
+  - 通用/项目级: `.agents/skills/`
 
 ## 五、注意事项
 

@@ -464,6 +464,13 @@ class SkillRepository:
             for version in versions_result.scalars().all()
             if version.skill_id
         }
+        # 预加载是扫描前最后一次 DB 访问，之后的扫描（git 操作 + Jenkins 触发）
+        # 可达数小时。若把 open transaction 横跨整个扫描，连接会长时间处于
+        # idle-in-transaction 状态，被 PostgreSQL idle_in_transaction_session_timeout
+        # 或 TCP 超时断开，落库阶段就会抛 "the underlying connection is closed"
+        # 导致整仓扫描结果丢失。这里立即 commit 归还连接，后续取用时 pool_pre_ping
+        # 会自动剔除死连接；expire_on_commit=False 保证下面返回的 ORM 记录仍可用。
+        await self.session.commit()
         return skills, versions
 
     async def get_category_by_source_url(self, source_url: str) -> str | None:

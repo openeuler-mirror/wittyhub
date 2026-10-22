@@ -206,7 +206,7 @@ def test_cli_rejects_invalid_batch_size(value):
 def test_default_batch_size_limits_embedding_request_size():
     """默认批次大小为 32：ReadTimeout 频繁出现后调小，控制单请求文本体量。
 
-    调大前先评估 embedding 服务对大 batch 的 60s 超时表现（二分重试是
+    调大前先评估 embedding 服务对大 batch 的 120s 超时表现（二分重试是
     兜底，不是常态化路径）。
     """
     assert embedding_indexer.BATCH_SIZE == 32

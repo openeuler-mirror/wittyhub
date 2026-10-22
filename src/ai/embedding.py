@@ -28,7 +28,7 @@ class LocalEmbeddingService(EmbeddingProvider):
         self.host = host
         self.model = model
         self._dimension = dimension
-        self._client = httpx.AsyncClient(timeout=60.0)
+        self._client = httpx.AsyncClient(timeout=120.0)
 
     async def encode(self, texts: list[str]) -> list[list[float]]:
         response = await self._client.post(

@@ -22,7 +22,7 @@ COPY alembic.ini ./
 COPY deploy/api/entrypoint.sh /usr/local/bin/wittyhub-api-entrypoint
 COPY skillcrawler ./skillcrawler
 
-RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
+RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=500 -e .
 
 RUN groupadd --gid "${APP_GID}" wittyhub \
     && useradd --uid "${APP_UID}" --gid wittyhub --create-home --shell /usr/sbin/nologin wittyhub \

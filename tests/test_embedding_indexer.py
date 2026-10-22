@@ -197,6 +197,91 @@ async def test_reindex_single_skill_reports_not_found_and_unlocks(monkeypatch):
     assert lock_session.execute.await_count == 2
 
 
+@pytest.mark.asyncio
+async def test_encode_and_store_bisects_on_timeout(monkeypatch):
+    """ReadTimeout（确定性失败）时二分重试，子批成功后全部入库。"""
+    import httpx
+
+    async def generate(texts):
+        if len(texts) > 1:
+            raise httpx.ReadTimeout("timed out")
+        return [[0.0] * 768]
+
+    monkeypatch.setattr(embedding_indexer, "generate_embeddings", generate)
+    monkeypatch.setattr(
+        embedding_indexer, "_write_embeddings", AsyncMock(side_effect=len)
+    )
+
+    stats = ReindexStats()
+    await embedding_indexer._encode_and_store(
+        [target(f"skill-{index}") for index in range(4)], stats
+    )
+
+    assert stats.indexed == 4
+    assert stats.failed_batches == 0
+    assert stats.failed_rows == 0
+
+
+@pytest.mark.asyncio
+async def test_encode_and_store_isolates_bad_row(monkeypatch):
+    """响应校验失败（ValueError）二分隔离坏行，其余行正常入库。"""
+
+    async def generate(texts):
+        if any("bad" in text for text in texts):
+            # 坏行污染批次：返回错误维度触发校验失败
+            return [[0.0] * 10 for _ in texts]
+        return [[0.0] * 768 for _ in texts]
+
+    monkeypatch.setattr(embedding_indexer, "generate_embeddings", generate)
+    monkeypatch.setattr(
+        embedding_indexer, "_write_embeddings", AsyncMock(side_effect=len)
+    )
+
+    stats = ReindexStats()
+    await embedding_indexer._encode_and_store(
+        [target("skill-good"), target("skill-bad", "bad row")], stats
+    )
+
+    assert stats.indexed == 1
+    assert stats.failed_batches == 1
+    assert stats.failed_rows == 1
+
+
+@pytest.mark.asyncio
+async def test_encode_and_store_does_not_bisect_non_definitive_failure(monkeypatch):
+    """服务不可达等非确定性失败不二分，整批计失败保持原有语义。"""
+
+    generate_mock = AsyncMock(side_effect=RuntimeError("connection refused"))
+    monkeypatch.setattr(embedding_indexer, "generate_embeddings", generate_mock)
+
+    stats = ReindexStats()
+    await embedding_indexer._encode_and_store(
+        [target("skill-a"), target("skill-b")], stats
+    )
+
+    assert stats.failed_batches == 1
+    assert stats.failed_rows == 2
+    assert generate_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_encode_and_store_single_row_timeout_counts_one_failure(monkeypatch):
+    """单行仍超时（坏行）时只计一次失败，不进入无限二分。"""
+    import httpx
+
+    monkeypatch.setattr(
+        embedding_indexer,
+        "generate_embeddings",
+        AsyncMock(side_effect=httpx.ReadTimeout("timed out")),
+    )
+
+    stats = ReindexStats()
+    await embedding_indexer._encode_and_store([target("skill-a")], stats)
+
+    assert stats.failed_batches == 1
+    assert stats.failed_rows == 1
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "1001"])
 def test_cli_rejects_invalid_batch_size(value):
     with pytest.raises(argparse.ArgumentTypeError, match="1 到 1000"):

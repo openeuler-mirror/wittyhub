@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # advisory lock 的 bigint key（pg_advisory_lock 单参数版）
 _REINDEX_LOCK_KEY = 742_301_990_122  # hashtext('wittyhub:embedding_reindex') 量级的固定值
 
-BATCH_SIZE = 100
+BATCH_SIZE = 32
 
 
 @dataclass

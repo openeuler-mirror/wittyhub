@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -80,6 +81,26 @@ def configure_logging() -> None:
     )
 
 
+async def _backfill_embeddings() -> None:
+    """启动时后台补跑缺失 embedding，失败不影响服务启动。
+
+    与 discover 末尾的增量补嵌入同一入口（embed_missing），并发安全：
+    通过 pg_advisory_lock 与全量重建脚本互斥，锁被占用时直接跳过。
+    """
+    logger = structlog.get_logger()
+    try:
+        from src.ai.embedding_indexer import LockBusyError, embed_missing
+
+        stats = await embed_missing()
+        logger.info("Startup embedding backfill: %s", stats.as_dict())
+    except LockBusyError:
+        logger.info(
+            "Startup embedding backfill skipped: reindex lock held by another task"
+        )
+    except Exception:
+        logger.exception("Startup embedding backfill failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = structlog.get_logger()
@@ -97,8 +118,18 @@ async def lifespan(app: FastAPI):
 
         discover_scheduler = await start_discover_scheduler()
 
+    # 启动时补跑嵌入：增量补嵌入原本只挂在 discover 末尾，而重启后调度会跳过
+    # 当天已过触发点、不补跑（compute_next_run 规则），导致新入库 skill 的
+    # embedding 长时间缺失、语义检索搜不到（如 vsag-rabitq-optimization）。
+    # 启动时后台补一次即可自愈，不必等下轮 discover（最长 24h）。
+    embed_task = None
+    if settings.ai.enable_semantic_search:
+        embed_task = asyncio.create_task(_backfill_embeddings())
+
     yield
 
+    if embed_task is not None:
+        embed_task.cancel()
     if discover_scheduler is not None:
         await discover_scheduler.stop()
     if collector is not None:

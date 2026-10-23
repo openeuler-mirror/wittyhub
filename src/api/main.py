@@ -1,6 +1,7 @@
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
@@ -32,6 +33,16 @@ def configure_logging() -> None:
             )
         )
         root_logger.addHandler(root_handler)
+    # 文件日志：与 skillcrawler/main.py 口径一致，落在
+    # storage.local_path/logs/ 下，便于排查线上问题（stdout 会被容器回收）。
+    if not any(isinstance(h, logging.FileHandler) for h in root_logger.handlers):
+        log_dir = Path(settings.storage.local_path).expanduser().resolve() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_dir / "api.log", encoding="utf-8")
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        root_logger.addHandler(file_handler)
     for handler in root_logger.handlers:
         handler.setLevel(level)
 

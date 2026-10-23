@@ -1,31 +1,29 @@
 """Optional query translation for cross-language skill retrieval."""
 
+import logging
 import re
 from collections import OrderedDict
 import time
 
 import httpx
 
+from src.ai.llm import chat_completion, close_llm_service
 from src.core.config import get_settings
+
+_logger = logging.getLogger(__name__)
 
 TRANSLATION_CACHE_TTL_SECONDS = 600.0
 TRANSLATION_CACHE_MAX_ENTRIES = 256
 _cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
-_client: httpx.AsyncClient | None = None
 
 
 def contains_chinese(text: str) -> bool:
     return bool(re.search(r"[\u3400-\u9fff]", text))
 
 
-def _get_client() -> httpx.AsyncClient:
-    global _client
-    if _client is None:
-        _client = httpx.AsyncClient(timeout=30.0)
-    return _client
-
-
-async def translate_query_to_english(query: str) -> str | None:
+async def translate_query_to_english(
+    query: str, timeout: float | None = None,
+) -> str | None:
     normalized = query.strip()
     if not normalized or not contains_chinese(normalized):
         return None
@@ -40,33 +38,39 @@ async def translate_query_to_english(query: str) -> str | None:
     settings = get_settings()
     if not settings.model.base_url or not settings.model.api_key:
         return None
-    payload = {
-        "model": settings.model.name,
-        "temperature": 0,
-        "max_tokens": 128,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Translate the user's Chinese search query into concise English. "
-                    "Return only the translation, with no explanation."
-                ),
-            },
-            {"role": "user", "content": normalized},
-        ],
-    }
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Translate the user's Chinese search query into concise English. "
+                "Return only the translation, with no explanation."
+            ),
+        },
+        {"role": "user", "content": normalized},
+    ]
     try:
-        response = await _get_client().post(
-            f"{settings.model.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {settings.model.api_key}"},
-            json=payload,
-            timeout=settings.model.timeout,
-        )
-        response.raise_for_status()
-        translated = response.json()["choices"][0]["message"]["content"].strip()
+        # 统一走 src.ai.llm：enable_thinking=False 等口径与 skill 分类一致
+        translated = await chat_completion(messages, timeout=timeout)
         if not translated or len(translated) > 500:
             return None
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+    except httpx.TimeoutException:
+        _logger.warning(
+            "LLM 翻译超时 (timeout=%ss, provider=%s, model=%s, query=%r)",
+            timeout or settings.model.timeout,
+            settings.model.provider or "-",
+            settings.model.name,
+            normalized[:50],
+        )
+        return None
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+        _logger.warning(
+            "LLM 翻译失败 (provider=%s, model=%s, query=%r): %s",
+            settings.model.provider or "-",
+            settings.model.name,
+            normalized[:50],
+            exc,
+        )
         return None
 
     _cache[normalized] = (now, translated)
@@ -77,7 +81,5 @@ async def translate_query_to_english(query: str) -> str | None:
 
 
 async def close_translation_service() -> None:
-    global _client
-    if _client is not None:
-        await _client.aclose()
-        _client = None
+    """关闭共享 LLM HTTP 客户端（与 skill 分类共用）。"""
+    await close_llm_service()

@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
@@ -32,6 +34,16 @@ def configure_logging() -> None:
             )
         )
         root_logger.addHandler(root_handler)
+    # 文件日志：与 skillcrawler/main.py 口径一致，落在
+    # storage.local_path/logs/ 下，便于排查线上问题（stdout 会被容器回收）。
+    if not any(isinstance(h, logging.FileHandler) for h in root_logger.handlers):
+        log_dir = Path(settings.storage.local_path).expanduser().resolve() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_dir / "api.log", encoding="utf-8")
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        root_logger.addHandler(file_handler)
     for handler in root_logger.handlers:
         handler.setLevel(level)
 
@@ -69,6 +81,26 @@ def configure_logging() -> None:
     )
 
 
+async def _backfill_embeddings() -> None:
+    """启动时后台补跑缺失 embedding，失败不影响服务启动。
+
+    与 discover 末尾的增量补嵌入同一入口（embed_missing），并发安全：
+    通过 pg_advisory_lock 与全量重建脚本互斥，锁被占用时直接跳过。
+    """
+    logger = structlog.get_logger()
+    try:
+        from src.ai.embedding_indexer import LockBusyError, embed_missing
+
+        stats = await embed_missing()
+        logger.info("Startup embedding backfill: %s", stats.as_dict())
+    except LockBusyError:
+        logger.info(
+            "Startup embedding backfill skipped: reindex lock held by another task"
+        )
+    except Exception:
+        logger.exception("Startup embedding backfill failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = structlog.get_logger()
@@ -86,8 +118,18 @@ async def lifespan(app: FastAPI):
 
         discover_scheduler = await start_discover_scheduler()
 
+    # 启动时补跑嵌入：增量补嵌入原本只挂在 discover 末尾，而重启后调度会跳过
+    # 当天已过触发点、不补跑（compute_next_run 规则），导致新入库 skill 的
+    # embedding 长时间缺失、语义检索搜不到（如 vsag-rabitq-optimization）。
+    # 启动时后台补一次即可自愈，不必等下轮 discover（最长 24h）。
+    embed_task = None
+    if settings.ai.enable_semantic_search:
+        embed_task = asyncio.create_task(_backfill_embeddings())
+
     yield
 
+    if embed_task is not None:
+        embed_task.cancel()
     if discover_scheduler is not None:
         await discover_scheduler.stop()
     if collector is not None:

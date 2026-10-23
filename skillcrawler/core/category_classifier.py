@@ -4,11 +4,11 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 from skillcrawler.config import load_skill_categories
+from src.ai.llm import chat_completion_sync
 from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -143,54 +143,23 @@ class DeepSeekCategoryClassifier:
         )
 
     def _call_deepseek(self, prompt: str) -> str:
-        payload: dict[str, Any] = {
-            "model": self.model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You classify skills into one predefined category.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            "temperature": 0,
-            # 默认关闭 thinking：Qwen3/推理系列默认先输出长思维链，分类任务
-            # 用不上还拖慢批量扫描。硅基流动仅识别顶层 enable_thinking
-            #（chat_template_kwargs 写法无效）；不识别该参数的模型会忽略它。
-            "enable_thinking": False,
-        }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        started_at = time.perf_counter()
-        status: int | str = "request_error"
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                status = response.status_code
-                response.raise_for_status()
-                data = response.json()
-        finally:
-            _logger.debug(
-                "Category model timing: model=%s status=%s elapsed=%.3fs",
-                self.model_name,
-                status,
-                time.perf_counter() - started_at,
-            )
-
-        return (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
+        # 统一走 src.ai.llm：请求体、enable_thinking、鉴权、响应解析、耗时
+        # 日志都收敛在一处，与搜索翻译共享同一口径（此前两处各写一遍，
+        # 翻译漏掉关闭思考被 Qwen3 长思维链拖慢到 30-45s）。
+        messages = [
+            {
+                "role": "system",
+                "content": "You classify skills into one predefined category.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ]
+        return chat_completion_sync(
+            messages,
+            temperature=0,
+            timeout=self.timeout,
         )
 
     def _normalize_category(self, value: object) -> str | None:

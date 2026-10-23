@@ -9,7 +9,7 @@ python skillcrawler/main.py discover
 
 2. 后台自动调度（API 服务内置 `discover_scheduler` 定时任务，每天 / 每周固定触发一轮全量 discover）。
 
-两者共用同一执行路径；差异（仓库列表来源、是否补建 embedding）见 §2.1。
+两者共用同一执行路径（扫描结束后均补建缺失 embedding）；差异（仓库列表来源）见 §2.1。
 
 内容覆盖两种入口、仓库来源、Git 同步、Skill 发现、版本扫描、分类、安全检测、索引创建、数据库写入和错误处理。
 
@@ -191,10 +191,10 @@ start_scan(...)
   `result_dir`（默认 `<storage.local_path>/logs`）下的 `discover-<时间戳>.json`，
   结果分类口径与 CLI discover 一致，输出结构见 §11.1。
 
-> **注意**：CLI `skillcrawler/main.py discover` **不含**补建 embedding 这一步——
-> 手动 CLI 扫描只做同步/发现/分类/安全检测/入库。CLI 扫完后若需立即补索引，
-> 手动执行 `python scripts/reindex_embeddings.py`（或等下一轮自动调度 /
-> API 重启补跑）。
+> **注意**：CLI `skillcrawler/main.py discover` 同样在扫描结束后补建缺失
+> embedding（`_backfill_embeddings_after_discover()`），逻辑与自动调度一致：
+> 语义搜索未启用或锁被全量重建占用时跳过，失败只记日志不影响退出码。
+> 若需强制全量重建，手动执行 `python scripts/reindex_embeddings.py`。
 
 ### 2.2 仓库配置读取
 

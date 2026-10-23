@@ -612,13 +612,42 @@ def build_configured_discover_requests(
     return requests, platform_keys
 
 
+async def _backfill_embeddings_after_discover() -> None:
+    """扫描结束后补建缺失 embedding（索引创建），与调度器同逻辑。
+
+    只为 `embedding IS NULL` 且 `risk_score` 就绪的行生成向量，使其立即可被
+    语义搜索命中；与全量重建脚本 `scripts/reindex_embeddings.py` 通过
+    `pg_advisory_lock` 互斥，锁被占用时跳过（全量本身覆盖一切）。语义搜索
+    未启用时跳过。失败只记录日志不重试，漏掉的行由下轮 discover 或 API
+    启动时的 `_backfill_embeddings()` 自愈。
+    """
+    if not get_settings().ai.enable_semantic_search:
+        logger.info("Incremental embedding skipped: semantic search disabled")
+        return
+
+    from src.ai.embedding_indexer import LockBusyError, embed_missing
+
+    try:
+        stats = await embed_missing()
+        logger.info("Incremental embedding after discover: %s", stats.as_dict())
+    except LockBusyError:
+        logger.info(
+            "Incremental embedding skipped: reindex lock held by another task"
+        )
+    except Exception:
+        logger.exception("Incremental embedding after discover failed")
+
+
 async def _run_discover(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
     if args.url:
-        return await _run_discover_single_skill_yaml(manager, args)
-    return await _run_discover_from_config(manager, args)
+        exit_code = await _run_discover_single_skill_yaml(manager, args)
+    else:
+        exit_code = await _run_discover_from_config(manager, args)
+    await _backfill_embeddings_after_discover()
+    return exit_code
 
 
 async def _run_discover_single_skill_yaml(

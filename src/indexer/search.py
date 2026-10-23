@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import re
 
-from sqlalchemy import desc, func, literal_column, select, text, or_
+from sqlalchemy import case, desc, func, literal_column, select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
@@ -13,6 +13,29 @@ from src.models.orm import DownloadHistory, Skill
 # Hybrid search ranks a stable, bounded candidate pool so total and pagination
 # do not change as the caller moves between pages.
 HYBRID_CANDIDATE_LIMIT = 200
+
+
+def _escape_like(value: str) -> str:
+    """转义 LIKE 通配符，配合 escape='\\' 使用。"""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def name_match_level(name: str | None, query: str) -> int:
+    """name 与查询词的匹配强度：3=完全一致，2=前缀匹配，1=包含，0=无关。
+
+    用于把精确/前缀匹配的结果钉在最前，避免被下载量等排序稀释。
+    """
+    n = (name or "").strip().lower()
+    q = (query or "").strip().lower()
+    if not n or not q:
+        return 0
+    if n == q:
+        return 3
+    if n.startswith(q):
+        return 2
+    if q in n:
+        return 1
+    return 0
 
 
 def reciprocal_rank_fusion(*ranked_lists: list[dict], k: int = 60) -> list[dict]:
@@ -127,11 +150,60 @@ class SearchService:
             str(item.get("created_at") or ""),
         )
 
+    @staticmethod
+    def _dedupe_key(item: dict[str, Any]) -> str:
+        """去重键：同名 + 同描述视为同一 skill（跨仓库镜像副本），合并为一条。
+
+        相比按 skill_id 去重（skills 表 skill_id 唯一，实为空操作），本口径
+        能合并镜像副本（如 detect 在 launchdarkly 的 agent-skills/ai-tooling/
+        experimental-agent-skills 各一份），同时保留同名不同描述的不同 skill
+        （如多个 skill-creator 各有各的描述）。
+        """
+        name = str(item.get("name") or "").strip().lower()
+        description = str(item.get("description") or "").strip()
+        if name and description:
+            return f"{name}\x00{description}"
+        # name/description 缺失时回退到 skill_id，避免误合并无关项
+        return str(item.get("skill_id") or "").strip().lower()
+
+    @staticmethod
+    def _truncate_by_relative_gap(
+        results: list[dict[str, Any]],
+        gap_threshold: float = 0.01,
+        min_keep: int = 3,
+        max_keep: int = 15,
+    ) -> list[dict[str, Any]]:
+        """相对差距截断：在相似度出现明显断崖处切掉噪声尾。
+
+        从第 min_keep 条之后开始，遇到与上一条相似度差距 >= gap_threshold 的
+        断崖即截断；若始终无断崖（向量距离平滑衰减、噪声与相关项难以区分），
+        则退回 max_keep 条数上限，避免返回大量低相关结果。
+
+        阈值取值依据：目标与「相关项」差距大（~0.14），但「相关项」与「噪声」
+        差距小（~0.01-0.02），故只能用小阈值切掉紧贴的噪声尾，同时靠 min_keep
+        兜底不误伤目标、max_keep 兜底限制无断崖场景的结果数。
+        """
+        if len(results) <= min_keep:
+            return results
+        keep = min_keep
+        for i in range(min_keep, len(results)):
+            if keep >= max_keep:
+                break
+            prev_sim = results[i - 1].get("similarity")
+            cur_sim = results[i].get("similarity")
+            if prev_sim is None or cur_sim is None:
+                keep = i + 1
+                continue
+            if prev_sim - cur_sim >= gap_threshold:
+                break
+            keep = i + 1
+        return results[:keep]
+
     def _dedupe_skill_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[str, dict[str, Any]] = {}
 
         for index, item in enumerate(results):
-            dedupe_key = str(item.get("skill_id") or "").strip().lower()
+            dedupe_key = self._dedupe_key(item)
             if not dedupe_key:
                 continue
 
@@ -174,17 +246,28 @@ class SearchService:
         if embedding and mode == "semantic":
             vector_results = await self._vector_search(
                 embedding=embedding,
-                limit=HYBRID_CANDIDATE_LIMIT if has_sort else limit,
-                offset=0 if has_sort else offset,
+                # 去重前多取候选：镜像副本可能很多（如同一 skill 在组织多个仓库
+                # 各有一份），只取 limit 条去重后会不足一页
+                limit=HYBRID_CANDIDATE_LIMIT,
+                offset=0,
                 category=category,
                 platform=platform,
                 tags=tags,
                 security_level=security_level,
             )
+            # 语义路径同样去重镜像副本 + 精确匹配置顶（此前直接 return 会漏掉）
+            deduped = self._dedupe_skill_results(vector_results.get("results", []))
+            deduped = self._pin_exact_matches(deduped, query)
+            # 相对差距截断去噪：在相似度断崖处切掉噪声尾（保留最少 3 条兜底）
+            deduped = self._truncate_by_relative_gap(deduped)
             if not has_sort:
-                return vector_results
+                return {
+                    **vector_results,
+                    "results": deduped[offset:offset + limit],
+                    "total": len(deduped),
+                }
             return await self._sorted_search_response(
-                vector_results.get("results", []),
+                deduped,
                 query=query, mode="semantic", offset=offset, limit=limit,
                 sort_by=sort_by, sort_period=sort_period,
             )
@@ -211,7 +294,12 @@ class SearchService:
                 tags=tags,
                 security_level=security_level,
             )
-            ranked_lists = [text_results.get("results", []), vector_results.get("results", [])]
+            # 融合前截断向量腿：此时仍按距离单调排序，截断才有意义。
+            # RRF 融合后 similarity 已乱序，对融合结果做差距截断无效。
+            vector_list = self._truncate_by_relative_gap(
+                vector_results.get("results", []),
+            )
+            ranked_lists = [text_results.get("results", []), vector_list]
             if translated_query:
                 translated_text = await self._text_search(
                     query=translated_query, limit=HYBRID_CANDIDATE_LIMIT,
@@ -225,9 +313,13 @@ class SearchService:
                     offset=0, category=category, platform=platform, tags=tags,
                     security_level=security_level,
                 )
-                ranked_lists.append(translated_vector.get("results", []))
+                ranked_lists.append(self._truncate_by_relative_gap(
+                    translated_vector.get("results", []),
+                ))
             combined = reciprocal_rank_fusion(*ranked_lists)
             deduped = self._dedupe_skill_results(combined)
+            # A：先对完整候选集置顶精确匹配，再分页（否则翻页无效）
+            deduped = self._pin_exact_matches(deduped, query)
             if has_sort:
                 return await self._sorted_search_response(
                     deduped,
@@ -263,6 +355,30 @@ class SearchService:
                 "mode": "text",
             }
 
+    @staticmethod
+    def _pin_exact_matches(
+        results: list[dict[str, Any]], query: str
+    ) -> list[dict[str, Any]]:
+        """A：name 完全一致/前缀匹配的结果强制置顶，且相对顺序保持不变。
+
+        与 sort_by 无关——即便按下载量/时间排序，精确命中的 skill 也钉在最前，
+        避免 0 下载的新 skill 被排到翻页之后。
+        """
+        if not query.strip():
+            return results
+        exact: list[dict[str, Any]] = []
+        prefix: list[dict[str, Any]] = []
+        rest: list[dict[str, Any]] = []
+        for item in results:
+            level = name_match_level(item.get("name"), query)
+            if level == 3:
+                exact.append(item)
+            elif level == 2:
+                prefix.append(item)
+            else:
+                rest.append(item)
+        return exact + prefix + rest
+
     async def _sorted_search_response(
         self,
         candidates: list[dict[str, Any]],
@@ -285,6 +401,8 @@ class SearchService:
         else:
             ordered = self._sort_candidates(candidates, sort_by)
             total = len(ordered)
+        # A：显式排序后再次置顶精确匹配，避免排序把精确命中挤到翻页之后
+        ordered = self._pin_exact_matches(ordered, query)
         return {
             "results": ordered[offset:offset + limit],
             "total": total,
@@ -383,12 +501,39 @@ class SearchService:
             search_text = search_text + " " + func.coalesce(Skill.content, "")
         search_config = literal_column("'zhcfg'::regconfig")
 
-        rank_expression = func.ts_rank(
-            func.to_tsvector(search_config, search_text),
-            func.plainto_tsquery(search_config, query),
-        )
-
         ts_query = func.plainto_tsquery(search_config, query)
+        # C：name 权重提升。name 单独的 ts_rank 权重高于 name+description 合并
+        # 文本，避免 description 里的偶然词汇（如 "skill"）稀释 name 的命中。
+        # 注意保持函数 IMMUTABLE（migration 009/010 的 GIN 索引基于此表达式）。
+        name_text = func.coalesce(Skill.name, "")
+        rank_expression = (
+            func.ts_rank(
+                func.to_tsvector(search_config, name_text),
+                ts_query,
+            ) * 3.0
+            + func.ts_rank(
+                func.to_tsvector(search_config, search_text),
+                ts_query,
+            )
+        )
+        # name 里的字面量命中（如连字符整体命中）额外加权：
+        # plainto_tsquery 会把 "spack-develop-skill" 拆成多个 token，
+        # 单靠 ts_rank 会被所有含 "skill" 的结果稀释。
+        escaped_query = _escape_like(query)
+        name_literal_rank = case(
+            (func.lower(name_text) == query.lower(), 3.0),
+            (
+                func.lower(name_text).like(f"{escaped_query.lower()}%", escape="\\"),
+                2.0,
+            ),
+            (
+                func.lower(name_text).like(f"%{escaped_query.lower()}%", escape="\\"),
+                1.0,
+            ),
+            else_=0.0,
+        )
+        rank_expression = rank_expression + name_literal_rank * 10.0
+
         search_predicate = (
             (func.to_tsvector(search_config, search_text).op("@@")(ts_query)) |
             (Skill.name.ilike(f"%{query}%")) |
@@ -485,7 +630,11 @@ class SearchService:
         platform: str | None = None,
         tags: list[str] | None = None,
         security_level: list[str] | None = None,
-        min_similarity: float = 0.47,
+        # 兜底地板阈值：只排除完全不相关的垃圾结果，真正的去噪由
+        # _truncate_by_relative_gap 的相对差距截断负责。
+        # 注意随相似度公式联动：余弦值 cos=1-d²/2 整体低于旧的 1/(1+d)，
+        # 旧 0.47（距离≤1.128）换算成余弦约 0.36，故地板下移到 0.35。
+        min_similarity: float = 0.35,
     ) -> dict[str, Any]:
         embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
 
@@ -549,7 +698,10 @@ class SearchService:
         results = []
         for row in rows:
             distance = float(row.distance)
-            similarity = 1 / (1 + distance)
+            # 向量已归一化（norm=1），L2 距离 d 与余弦相似度精确换算 cos=1-d²/2。
+            # 相比旧的 1/(1+d)，余弦值区分度更高（强匹配 0.66 vs 噪声 0.50），
+            # 让「目标 vs 噪声」的断崖更明显，便于相对差距截断。
+            similarity = max(-1.0, min(1.0, 1.0 - (distance * distance) / 2.0))
             if similarity < min_similarity:
                 continue
             results.append({

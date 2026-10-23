@@ -1,15 +1,17 @@
 # `skillcrawler discover` 逻辑说明
+本文档基于当前仓库代码，说明 discover 流程的完整执行逻辑，入口有两种：
 
-> 命令用法、参数和示例见 [`skillcrawler/README.md`](../../skillcrawler/README.md)。
-> 本文档只描述实现细节：Git 同步、Tag 拉取、commit 去重、安全检测集成、数据库写入、错误处理。
-
-本文档基于当前仓库代码，说明以下命令的完整执行逻辑：
-
+1. CLI 命令（手动执行）：
 ```bash
 python skillcrawler/main.py discover
 ```
+> 命令用法、参数和示例见 [`skillcrawler/README.md`](../../skillcrawler/README.md)。
 
-内容覆盖命令入口、仓库来源、Git 同步、Skill 发现、版本扫描、分类、安全检测、数据库写入和错误处理。
+2. 后台自动调度（API 服务内置 `discover_scheduler` 定时任务，每天 / 每周固定触发一轮全量 discover）。
+
+两者共用同一执行路径；差异（仓库列表来源、是否补建 embedding）见 §2.1。
+
+内容覆盖两种入口、仓库来源、Git 同步、Skill 发现、版本扫描、分类、安全检测、索引创建、数据库写入和错误处理。
 
 | 序号 | 章节 |
 |---|---|
@@ -33,6 +35,7 @@ python skillcrawler/main.py discover
 - 定位模块实现代码：第 1.1 节关键代码索引。
 - 排查 Git 同步 / Tag 拉取问题：第 3、6 节。
 - 排查安全检测问题：第 9 节。
+- 排查索引创建问题：第 2.1 节。
 - 查数据表字段 / 写入行为：第 10 节（含 10.1 数据模型约定）。
 - 查删除与统计自愈（批量删除、统计值维护）：第 12 节。
 - 查错误处理和退出码：第 13 节。
@@ -41,10 +44,11 @@ python skillcrawler/main.py discover
 
 ```mermaid
 flowchart TD
-    A[入口:discover命令/自动更新] --> B{解析 discover 参数}
+    A1["入口1: CLI 命令<br/>skillcrawler/main.py discover"] --> B{解析 discover 参数}
 
-    B -->|"默认 / -p"| C["从 catalog 构造仓库请求列表<br/>（按 URL 去重）"]
-    B -->|--url| D["构造单仓库请求<br/>gitcode.com/openeuler/* → community"]
+    B -->|"默认 / -p <platform>"| C["从 openEuler-skills 仓库（catalog）<br/>各平台 skill.yaml 构造请求列表<br/>（全部平台或指定平台，按 URL 去重）"]
+    B -->|--url <skill.yaml>| D["只读取指定 skill.yaml<br/>构造其登记的请求"]
+    A2["入口2: 后台自动调度<br/>discover_scheduler 定时任务"] --> C
     C --> E[逐仓串行循环]
     D --> E
     E --> F[clone / fetch 仓库]
@@ -52,21 +56,21 @@ flowchart TD
     F1 -->|无| F2{"DB 有仓库记录?"}
     F2 -->|无| F3["结果 no_skill<br/>保留 clone 目录"]
     F2 -->|有| F4["删除仓库记录及关联数据（立即 commit）<br/>结果 removed"]
-    F1 -->|有| F5["创建或读取仓库记录<br/>新建 status=init 立即 commit"]
+    F1 -->|有| F5["创建或读取仓库记录<br/>创建仓库记录时设置status=init"]
     F5 --> F6{"已有记录且<br/>HEAD commit == repository_commit_id?"}
     F6 -->|是| F7{"安全审计启用且<br/>存在 NULL risk_score?"}
     F7 -->|否| F8["结果 unchanged"]
     F7 -->|是| F9["为未评分记录重提 Jenkins 检测<br/>立即 commit，结果 security_retried"]
-    F6 -->|否| F10["状态设为 discovering（单独 commit）"]
+    F6 -->|否| F10["需要扫描：状态设为 discovering"]
     F10 --> Z[扫描仓库]
 
     subgraph SCAN[扫描仓库内部]
         direction TB
         S1["收集 Git 元数据<br/>HEAD + 两阶段拉取最近 N 个 Tag"] --> S2[构造版本快照]
         S2 --> S3["记录 branch / local_path（flush 不 commit）"]
-        S3 --> S4["预加载已有 Skills / SkillVersions<br/>（category 缓存 + 安全结果复用源）"]
-        S4 --> S5["扫描 latest Skills<br/>（每个 Skill：分类 → 三层安全复用判定）"]
-        S5 --> S6["扫描 Tag SkillVersions<br/>（共享 security_cache）"]
+        S3 --> S4["预加载已有 Skills / SkillVersions<br/>（取上次的 category 和安全检测结果，供复用）"]
+        S4 --> S5["扫描 latest Skills<br/>（每个 Skill：如果上次已有分类和安全检测结果：<br/>优先复用已有结果，否则新提交 Jenkins）"]
+        S5 --> S6["扫描 Tag SkillVersions<br/>（复用 latest Skill 的结果：<br/>分类按 skill_id 直接复用，<br/>安全检测按 tree hash 一致才复用）"]
     end
     Z --> S1
 
@@ -78,7 +82,9 @@ flowchart TD
     F4 --> W
     F8 --> W
     F9 --> W
-    W --> Y[下一仓库<br/>全部完成后输出结果表和 summary]
+    W --> Y[下一仓库]
+    Y -->|全部仓库完成| Y2["embedding（索引创建）<br/>embed_missing：embedding IS NULL 且 risk_score 就绪"]
+    Y2 --> Y3["输出结果表和 summary<br/>（counters 说明 + skill 统计 + 索引创建结果，见 §11.1）"]
 ```
 
 ### 1.1 关键代码索引
@@ -132,20 +138,18 @@ start_scan(...)
 ├── load_scan_records(repo.id)                           # DB：已有 skills + versions
 ├── _scan_latest_skills
 │   ├── get_skill_tree_hashes(..., 'HEAD')               # 1 次批量 rev-parse
-│   └── per skill：git show → build_skill_id → 分类 → 安全复用判定
+│   └── per skill：git show → build_skill_id → 分类 → 确定安全检测结果（优先复用）
 └── _scan_tagged_skills（per tag）
     ├── list_skill_paths_for_ref(..., ref)               # 1 次 ls-tree -r 独立发现该 Tag 的 SKILL.md
     ├── get_skill_tree_hashes(..., ref)                  # 1 次批量 rev-parse
-    └── per skill：git show → 分类 → 安全复用判定
+    └── per skill：git show → 分类 → 确定安全检测结果（优先复用）
 ```
 
 ## 2. skill仓库来源
 ### 2.1 触发来源
 > 命令示例和参数约束见 [`skillcrawler/README.md`](../../skillcrawler/README.md)。
 
-触发方式有两种：
-1. CLI 命令（`discover`；`--url <skill.yaml>` 时只读取指定 skill.yaml，不读全量配置）
-2. API 侧自动调度（`discover_scheduler` 定时任务）
+触发方式有两种：CLI 命令和后台定时任务
 
 触发后读取skill仓库配置，根据配置构造 discover 请求列表。
 - 先同步`https://gitcode.com/openeuler/openEuler-skills` 到
@@ -155,6 +159,7 @@ start_scan(...)
   同时收集两种登记方式——`skill_repos` 整仓仓库与 `skills[].skill_url`
   单 Skill 贡献（见 §2.3）。CLI 与自动调度共用该入口，两边收集范围一致。
 
+1. CLI 命令（`discover`；`--url <skill.yaml>` 时只读取指定 skill.yaml，不读全量配置）
 **命令模式**（手动执行 `skillcrawler discover`）。不同模式的 commit 去重行为相同，
 仓库列表来源不同：
 
@@ -164,6 +169,7 @@ start_scan(...)
 | `discover -p enterprise` | 配置中的指定列表 | 是 | 只读取指定平台列表 |
 | `discover --url <skill.yaml>` | 单个 skill.yaml | 是 | 只扫描该文件登记的 `skill_repos` / `skills[]`，不读全量配置 |
 
+2. 后台自动调度（`discover_scheduler` 定时任务）
 **自动调度**（API 服务内置定时任务：服务启动时按 `discover_scheduler.enabled`
 决定是否拉起，实现见[`src/api/services/discover_scheduler.py`](../../src/api/services/discover_scheduler.py)）：
 
@@ -174,9 +180,21 @@ start_scan(...)
 - 调度基于纯 asyncio（sleep 到下一个触发点），每轮执行完毕后才计算下一个触发点，
   克隆扫描耗时较长时下一轮自动顺延，不会叠加执行；单轮整体异常只记录日志，
   不终止调度循环；
-- 每轮结果（每仓 outcome / 耗时 / 汇总计数）写入 `result_dir`
-  （默认 `<storage.local_path>/logs`）下的 `discover-<时间戳>.json`，
-  结果分类口径与 CLI discover 一致。
+- **每轮扫描结束后补建缺失 embedding（索引创建）**：调
+  `embed_missing()`（实现见 [`src/ai/embedding_indexer.py`](../../src/ai/embedding_indexer.py)），
+  只为 `embedding IS NULL` 且 `risk_score` 就绪的行生成向量，使其立即可被语义
+  搜索命中；与全量重建脚本 `scripts/reindex_embeddings.py` 通过
+  `pg_advisory_lock` 互斥，锁被占用时跳过本轮（全量本身覆盖一切）。失败不重试，
+  漏掉的行由下轮 discover 或 API 启动时的 `_backfill_embeddings()` 自愈（见
+  [`src/api/main.py`](../../src/api/main.py)）；
+- 每轮结果（每仓 outcome / 耗时 / 汇总计数 / skill 统计 / 索引创建结果）写入
+  `result_dir`（默认 `<storage.local_path>/logs`）下的 `discover-<时间戳>.json`，
+  结果分类口径与 CLI discover 一致，输出结构见 §11.1。
+
+> **注意**：CLI `skillcrawler/main.py discover` **不含**补建 embedding 这一步——
+> 手动 CLI 扫描只做同步/发现/分类/安全检测/入库。CLI 扫完后若需立即补索引，
+> 手动执行 `python scripts/reindex_embeddings.py`（或等下一轮自动调度 /
+> API 重启补跑）。
 
 ### 2.2 仓库配置读取
 
@@ -595,8 +613,8 @@ flowchart TD
     A[读取 frontmatter 和正文] --> B[生成 source_url 和 skill_id]
     B --> C[读取本 ref 已批量计算的目录 tree hash]
     C --> D[解析 author/source/platform]
-    D --> E[分类 category]
-    E --> F{相同 tree hash 且已有 risk_score?}
+    D --> E["分类 category<br/>（按 skill_id 优先复用 category_cache：<br/>DB 已有分类 / 本轮已分类直接复用）"]
+    E --> F{安全检测结果复用判定<br/>（相同 tree hash 且已有 risk_score?）}
     F -->|是| G[复用 risk_score 和 audit metadata]
     F -->|否| H[触发 Jenkins SkillSpector]
     G --> I[运行时标记 audit_triggered=false]
@@ -884,6 +902,65 @@ skill仓库扫描结果：
 | `removed` | 已有仓库不再包含可扫描 Skill，删除 DB 仓库记录 |
 | `no_skill` | 新仓库没有可扫描 Skill，不创建 DB 仓库记录 |
 | `failed` | 当前仓库处理失败 |
+
+### 11.1 每轮结果文件输出
+
+自动调度每轮结束把结果写入 `result_dir`（默认 `<storage.local_path>/logs`）下的
+`discover-<时间戳>.json`，结构如下（实现见 [`src/api/services/discover_scheduler.py`](../../src/api/services/discover_scheduler.py)）：
+
+| 字段 | 说明 |
+|---|---|
+| `counters` | 仓库级统计，各项含义见下表（与 §11 结果类型口径一致） |
+| `skill_stats` | skill 级统计（口径：`skills` 表 latest Skill，不含 Tag 版本） |
+| `embedding_run` | 本轮索引创建（`embed_missing`）的执行结果，见 §11.1.3 |
+| `repos` | 每仓明细：`url` / `outcome` / `skill_num` / `duration_seconds`，失败仓另含 `error` |
+
+`counters` / `skill_stats`（含 `security_audit`、`index_creation` 子对象）/
+`embedding_run` 的每个字段均内嵌 `<key>_note` 文字说明（如 `created` → `created_note`），
+随文件输出便于离线解读：
+
+#### 11.1.1 counters 各项含义
+
+| 项 | 说明 |
+|---|---|
+| `created` | 新建仓库记录并完成扫描 |
+| `rediscovered` | 已有仓库 commit 变化并完成重扫 |
+| `security_retried` | commit 未变化，但为 NULL risk_score 记录重新提交安全检测 |
+| `unchanged` | HEAD commit 与数据库相同，跳过扫描 |
+| `removed` | 已有仓库不再包含可扫描 Skill，删除 DB 仓库记录 |
+| `no_skill` | 新仓库没有可扫描 Skill，不创建 DB 仓库记录 |
+| `failed` | 当前仓库处理失败（clone/fetch 或扫描异常），详见 `repos[].error` |
+
+#### 11.1.2 skill_stats 结构
+
+| 字段 | 说明 |
+|---|---|
+| `total_skills` | skills 表 Skill 总数 |
+| `category_distribution` | 分类分布 `{category: count}`，按数量降序；NULL / 空 / `other` / `others` 统一归入 `others` |
+| `security_audit.audited` | 安全检测完成（`risk_score` 非空）的 Skill 数 |
+| `security_audit.pending` | 异步检测进行中（`security_audits` 有 `skillspector_collected` 为空的记录）的 Skill 数 |
+| `security_audit.failed` | 安全检测失败：`risk_score` 为空且无异步检测进行中（触发失败或终态无报告） |
+| `security_audit.failed_skills` | 失败明细（`skill_id` / `name` / `source_url`），最多 50 条，超出由 `failed_skills_truncated` 标记 |
+
+#### 11.1.3 索引创建结果（embedding_run）
+
+`embedding_run` 字段是本轮补建缺失 embedding（§1 流程图 Y2 节点）的执行结果：
+
+| 情形 | 输出 |
+|---|---|
+| 正常执行 | `ReindexStats.as_dict()`：`total` / `indexed` / `failed_batches` / `failed_rows` / `skipped_empty` / `stale_skipped`（见 [`src/ai/embedding_indexer.py`](../../src/ai/embedding_indexer.py)） |
+| 锁被全量重建占用 | `{"skipped": "reindex lock held by another task"}` |
+| 语义搜索未启用 / 执行异常 | 字段为 `null`，异常见日志 |
+
+`skill_stats.index_creation` 是索引状态的存量口径（全库），四项为互斥三分法，
+`indexed + missing + not_required` 恒等于 `total`：
+
+| 字段 | 说明 |
+|---|---|
+| `total` | skills 表 Skill 总数 |
+| `indexed` | 已建 embedding 的 Skill 数（不论是否已审计） |
+| `missing` | 已审计但 embedding 缺失的 Skill 数（**索引创建失败**，等下轮 discover 或 API 启动补跑自愈） |
+| `not_required` | 未审计且未建索引（`risk_score` 与 `embedding` 均为空）的 Skill 数，暂不建索引属预期状态 |
 
 ## 12. 删除与统计自愈
 

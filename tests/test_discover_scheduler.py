@@ -413,7 +413,7 @@ class TestStartDiscoverScheduler:
 class TestSkillStatsWithNotes:
     def test_nested_sections_get_notes(self):
         """skill_stats 各层字段（含 security_audit / index_creation）均补 <key>_note。"""
-        from src.api.services.discover_scheduler import _skill_stats_with_notes
+        from skillcrawler.main import skill_stats_with_notes
 
         raw = {
             "total_skills": 9008,
@@ -432,7 +432,7 @@ class TestSkillStatsWithNotes:
                 "not_required": 8,
             },
         }
-        merged = _skill_stats_with_notes(raw)
+        merged = skill_stats_with_notes(raw)
 
         # category_distribution 是数据字典（{category: count}），不参与递归说明断言
         data_only_keys = {"category_distribution"}

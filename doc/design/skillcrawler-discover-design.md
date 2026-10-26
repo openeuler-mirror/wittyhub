@@ -191,10 +191,14 @@ start_scan(...)
   `result_dir`（默认 `<storage.local_path>/logs`）下的 `discover-<时间戳>.json`，
   结果分类口径与 CLI discover 一致，输出结构见 §11.1。
 
-> **注意**：CLI `skillcrawler/main.py discover` 同样在扫描结束后补建缺失
-> embedding（`_backfill_embeddings_after_discover()`），逻辑与自动调度一致：
-> 语义搜索未启用或锁被全量重建占用时跳过，失败只记日志不影响退出码。
-> 若需强制全量重建，手动执行 `python scripts/reindex_embeddings.py`。
+> **注意**：CLI `skillcrawler/main.py discover` 与自动调度对齐——扫描结束后
+> 同样补建缺失 embedding（`_backfill_embeddings_after_discover()`），并写入
+> 同一结构的 `discover-<时间戳>.json` 结果文件（构建与保存由
+> [`skillcrawler/main.py`](../../skillcrawler/main.py) 的
+> `build_discover_result_document()` / `save_discover_result_file()` 提供，
+> 两个入口共用同一实现，输出完全一致）。语义搜索未启用或锁被全量重建占用
+> 时跳过补建，失败只记日志不影响退出码；若需强制全量重建，手动执行
+> `python scripts/reindex_embeddings.py`。
 
 ### 2.2 仓库配置读取
 

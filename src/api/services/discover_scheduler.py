@@ -12,7 +12,6 @@ SkillManager.discover_configured_skill_repository。
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -20,7 +19,13 @@ from pathlib import Path
 from typing import Any
 
 from skillcrawler.core.skill_manager import SkillManager
-from skillcrawler.main import build_configured_discover_requests
+from skillcrawler.main import (
+    build_configured_discover_requests,
+    build_discover_result_document,
+    classify_discover_result,
+    collect_skill_stats,
+    save_discover_result_file,
+)
 from skillcrawler.config import load_contributor_profiles, sync_openEuler_skills_repo
 from src.core.config import DiscoverSchedulerConfig
 from src.core.database import AsyncSessionLocal
@@ -31,6 +36,12 @@ logger = logging.getLogger(__name__)
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # 北京时间（UTC+8）：调度配置与计算统一按 UTC，日志换算成北京时间展示
 BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+# security_audits 中「异步检测仍在进行」的判定条件等共享定义见
+# skillcrawler/main.py（collect_skill_stats）；结果 JSON 的 counters /
+# skill_stats / embedding_run 构建与 <key>_note 说明同样由该模块提供，
+# CLI 与自动调度共用同一实现，口径完全一致。
 
 
 def _beijing_hhmm(time_str: str) -> str:
@@ -223,7 +234,7 @@ class DiscoverScheduler:
 
                 elapsed = time.monotonic() - repo_started
                 repo_durations.append((label, elapsed))
-                outcome = self._classify_result(result)
+                outcome = classify_discover_result(result)
                 counters[outcome] += 1
                 repo_details.append(
                     {
@@ -254,6 +265,7 @@ class DiscoverScheduler:
         # 增量补嵌入：只为本轮新入库（embedding IS NULL 且 risk_score 就绪）的
         # skill 生成向量，使其立即可被语义搜索命中。锁被全量重建脚本持有时跳过
         # （全量本身会覆盖一切）；失败不重试，漏掉的行由下轮 discover 自愈。
+        embed_stats_dict: dict[str, Any] | None = None
         try:
             from src.core.config import get_settings as _get_settings
 
@@ -262,16 +274,25 @@ class DiscoverScheduler:
 
                 try:
                     embed_stats = await embed_missing()
+                    embed_stats_dict = embed_stats.as_dict()
                     logger.info(
-                        "Incremental embedding after discover: %s",
-                        embed_stats.as_dict(),
+                        "Incremental embedding after discover: %s", embed_stats_dict
                     )
                 except LockBusyError:
+                    embed_stats_dict = {"skipped": "reindex lock held by another task"}
                     logger.info(
                         "Incremental embedding skipped: reindex lock held by another task"
                     )
         except Exception:
             logger.exception("Incremental embedding after discover failed")
+
+        # skill 级统计：分类分布 / 安全检测结果 / 索引创建状态
+        skill_stats: dict[str, Any] | None = None
+        try:
+            async with AsyncSessionLocal() as session:
+                skill_stats = await collect_skill_stats(session)
+        except Exception:
+            logger.exception("Failed to collect skill stats after discover")
 
         run_elapsed = time.monotonic() - run_started
         avg_elapsed = run_elapsed / total if total else 0.0
@@ -289,21 +310,19 @@ class DiscoverScheduler:
             slowest_text,
         )
 
-        self._save_result_file(
-            {
-                "started_at": run_started_wall.isoformat(timespec="seconds"),
-                "finished_at": datetime.now().isoformat(timespec="seconds"),
-                "total_repos": total,
-                "config_keys": config_keys,
-                "counters": counters,
-                "total_seconds": round(run_elapsed, 3),
-                "avg_seconds_per_repo": round(avg_elapsed, 3),
-                "slowest_repos": [
-                    {"url": label, "seconds": round(duration, 3)}
-                    for label, duration in slowest
-                ],
-                "repos": repo_details,
-            }
+        # 结果文档构建与保存由 skillcrawler.main 提供（CLI discover 共用）
+        save_discover_result_file(
+            build_discover_result_document(
+                started_at=run_started_wall,
+                run_started=run_started,
+                total_repos=total,
+                config_keys=config_keys,
+                counters=counters,
+                repo_details=repo_details,
+                embed_stats_dict=embed_stats_dict,
+                skill_stats=skill_stats,
+            ),
+            result_dir=self._config.result_dir,
         )
         return counters
 
@@ -355,46 +374,6 @@ class DiscoverScheduler:
             logger.warning("Failed to sync contributor profiles", exc_info=True)
             return 0
         return synced
-
-    def _resolve_result_dir(self) -> Path:
-        """结果保存目录：优先 result_dir 配置，否则 storage.local_path/logs。"""
-        configured = self._config.result_dir.strip()
-        if configured:
-            return Path(configured).expanduser()
-        from src.core.config import get_settings
-
-        return Path(get_settings().storage.local_path) / "logs"
-
-    def _save_result_file(self, document: dict[str, Any]) -> Path | None:
-        """把一轮结果写入 JSON 文件；失败仅记录 warning，不影响主流程。"""
-        try:
-            result_dir = self._resolve_result_dir()
-            result_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            path = result_dir / f"discover-{timestamp}.json"
-            path.write_text(
-                json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            logger.info("Discover result saved to %s", path)
-            return path
-        except Exception:
-            logger.warning("Failed to save discover result file", exc_info=True)
-            return None
-
-    @staticmethod
-    def _classify_result(result: Any) -> str:
-        """与 CLI discover 相同的口径对结果分类（基于 manager 标记的私有标志）。"""
-        if result is None:
-            return "no_skill"
-        if getattr(result, "_removed_existing", False):
-            return "removed"
-        if getattr(result, "_security_retry_candidates", 0):
-            return "security_retried"
-        if getattr(result, "_unchanged", False):
-            return "unchanged"
-        if getattr(result, "_created_new", False):
-            return "created"
-        return "rediscovered"
 
 
 async def start_discover_scheduler() -> DiscoverScheduler | None:

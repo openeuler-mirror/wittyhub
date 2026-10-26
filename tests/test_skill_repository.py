@@ -98,6 +98,7 @@ class TestSkillRepositoryUnit:
             commit_id="old-commit",
             tree_hash="old-tree",
             download_count=12,
+            risk_score=77,
         )
         scanned = SimpleNamespace(
             skill_repo_id=repo_id,
@@ -138,6 +139,8 @@ class TestSkillRepositoryUnit:
         assert "UPDATE skills SET" in str(compiled)
         assert "updated_at=" in str(compiled)
         assert compiled.params["download_count"] == 12
+        # 已审计的分数保留：不被新解析对象的 risk_score=10 覆盖
+        assert compiled.params["risk_score"] == 77
         session.add.assert_not_called()
 
     @pytest.mark.asyncio

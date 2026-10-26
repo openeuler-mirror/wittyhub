@@ -634,6 +634,7 @@ class SkillRepository:
                     **self._build_summary_update_values(
                         skill,
                         download_count=existing_skill.download_count,
+                        risk_score=existing_skill.risk_score,
                     )
                 )
             )
@@ -677,6 +678,7 @@ class SkillRepository:
                     **self._build_summary_update_values(
                         version,
                         download_count=existing_version.download_count,
+                        risk_score=existing_version.risk_score,
                     )
                 )
             )
@@ -705,7 +707,14 @@ class SkillRepository:
         representative: Skill | SkillVersion,
         *,
         download_count: int,
+        risk_score: Any,
     ) -> dict[str, Any]:
+        """内容变化时的整行更新值。
+
+        ``download_count`` / ``risk_score`` 保留已有值：前者由 popularity 任务
+        维护、后者由安全审计（Jenkins 收集器）回写，均不是本次扫描的产物，
+        用新解析对象的默认值（None）覆盖会丢失已完成的审计分数。
+        """
         return {
             "skill_repo_id": representative.skill_repo_id,
             "skill_id": representative.skill_id,
@@ -723,7 +732,7 @@ class SkillRepository:
             "platform": representative.platform,
             "extra_metadata": representative.extra_metadata,
             "content": representative.content,
-            "risk_score": representative.risk_score,
+            "risk_score": risk_score,
             "download_count": download_count,
             "rating": representative.rating,
             "updated_at": datetime.now(timezone.utc),

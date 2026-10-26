@@ -289,12 +289,13 @@ def test_cli_rejects_invalid_batch_size(value):
 
 
 def test_default_batch_size_limits_embedding_request_size():
-    """默认批次大小为 32：ReadTimeout 频繁出现后调小，控制单请求文本体量。
+    """默认批次大小为 16：批越大单次请求内存峰值越高。
 
-    调大前先评估 embedding 服务对大 batch 的 120s 超时表现（二分重试是
-    兜底，不是常态化路径）。
+    32 批量时部署环境 embedding 服务 OOM 崩溃重启、连接被拒导致批次批量
+    失败，调小到 16 降低内存峰值。调大前先评估 embedding 服务内存表现
+    （二分重试是兜底，不是常态化路径）。
     """
-    assert embedding_indexer.BATCH_SIZE == 32
+    assert embedding_indexer.BATCH_SIZE == 16
 
 
 @pytest.mark.asyncio

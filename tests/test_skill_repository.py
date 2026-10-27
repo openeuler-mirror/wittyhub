@@ -2486,7 +2486,43 @@ class TestDeepSeekCategoryClassifier:
         sleep_mock.assert_called_once()
 
     def test_classify_degrades_to_frontmatter_after_transient_exhausted(self):
-        """网络故障重试耗尽后原样沿用 frontmatter category，不再 fatal 中断扫描。"""
+        """网络故障重试耗尽后沿用合法的 frontmatter category（归一化后），不 fatal 中断扫描。"""
+        import httpx
+
+        from skillcrawler.core.category_classifier import (
+            CATEGORY_RETRY_ATTEMPTS,
+            DeepSeekCategoryClassifier,
+        )
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=httpx.ReadTimeout("The read operation timed out"),
+            ) as call_mock,
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_normalize_category",
+                # 第一次调用（入口校验）判非法以进入 LLM 路径，
+                # 第二次调用（降级校验）归一为合法标准分类
+                side_effect=[None, "Development and Build"],
+            ),
+            patch("skillcrawler.core.category_classifier.time.sleep"),
+        ):
+            category = classifier.classify(
+                skill_file=Path("SKILL.md"),
+                metadata={"category": "development and build"},
+                content="body",
+                source_url="https://x",
+            )
+
+        # 合法值经 _normalize_category 归一到类别表标准写法后沿用
+        assert category == "Development and Build"
+        assert call_mock.call_count == CATEGORY_RETRY_ATTEMPTS
+
+    def test_classify_degrades_to_none_when_frontmatter_category_invalid(self):
+        """frontmatter category 不在类别表内时降级返回 None，留待下轮重新分类。"""
         import httpx
 
         from skillcrawler.core.category_classifier import (
@@ -2510,8 +2546,7 @@ class TestDeepSeekCategoryClassifier:
                 source_url="https://x",
             )
 
-        # 原样沿用 frontmatter 值（不强校验标准分类）
-        assert category == "Some Random Category"
+        assert category is None
         assert call_mock.call_count == CATEGORY_RETRY_ATTEMPTS
 
     def test_classify_fatal_on_non_transient_error(self):

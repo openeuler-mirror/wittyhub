@@ -59,7 +59,19 @@ class DeepSeekCategoryClassifier:
         for attempt in range(1, CATEGORY_RETRY_ATTEMPTS + 1):
             try:
                 response_text = self._call_deepseek(prompt)
-                return self._normalize_category(response_text)
+                category = self._normalize_category(response_text)
+                if category is not None:
+                    _logger.info(
+                        "DeepSeek category classification success for %s: %s",
+                        skill_file, category,
+                    )
+                else:
+                    _logger.warning(
+                        "DeepSeek category classification returned unrecognized "
+                        "value for %s: %r",
+                        skill_file, response_text,
+                    )
+                return category
             except Exception as exc:
                 if not self._is_transient_error(exc):
                     message = f"DeepSeek category classification failed for {skill_file}: {exc}"

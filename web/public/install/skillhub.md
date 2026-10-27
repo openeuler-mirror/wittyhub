@@ -62,7 +62,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 - `-a <agent>`：不追加其他 Agent；写入位置见第四节。除 `universal` 外，各 Agent 写入自己的用户级目录
 - `-g`：安装到用户级（全局）目录，跨项目可用；路径见第四节
 - `--copy`：直接复制到目标目录，不创建 `.agents/skills/` 软链中转（目标目录本身是 `.agents/skills/` 的 Agent 除外）
-- `<agent>` 必须替换为当前 Agent 的 CLI 标识（不是显示名），常用对照表（子集，CLI 共支持 70+ 个 Agent）：
+- `<agent>` 必须替换为当前 Agent 的 CLI 标识（不是显示名）。常用对照表如下，未列出的客户端请查「完整 Agent 标识」：
 
 | 当前 Agent | `<agent>` |
 |------------|-----------|
@@ -78,14 +78,85 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 | WorkBuddy | `workbuddy` |
 | QoderWork | `qoderwork` |
 | Gemini CLI | `gemini-cli` |
-| 其他或无法确认 | `universal`（安装到用户级公共 `.agents/skills/`） |
+| 其他已支持客户端 | 见下方「完整 Agent 标识」 |
+| 确实无法确认 | `universal`（用户级公共 `.agents/skills/`，可能被多个客户端共享） |
+
+**完整 Agent 标识**（上表未列出的客户端，按显示名查找；不要因为上表没有就直接用 `universal`）：
+
+```text
+AiderDesk = aider-desk
+Amp = amp
+Antigravity = antigravity
+Antigravity CLI = antigravity-cli
+AstrBot = astrbot
+Autohand Code CLI = autohand-code
+Augment = augment
+IBM Bob = bob
+Cline = cline
+CodeArts Agent = codearts-agent
+CodeBuddy = codebuddy
+Codemaker = codemaker
+Code Studio = codestudio
+Command Code = command-code
+Continue = continue
+Cortex Code = cortex
+Crush = crush
+Deep Agents = deepagents
+Devin for Terminal = devin
+Dexto = dexto
+Droid = droid
+Eve = eve
+Firebender = firebender
+ForgeCode = forgecode
+GitHub Copilot = github-copilot
+Goose = goose
+Hermes Agent = hermes-agent
+inference.sh = inference-sh
+Jazz = jazz
+Junie = junie
+iFlow CLI = iflow-cli
+Kilo Code = kilo
+Kimi Code CLI = kimi-code-cli
+Kiro CLI = kiro-cli
+Kode = kode
+Lingma = lingma
+Loaf = loaf
+MCPJam = mcpjam
+Mistral Vibe = mistral-vibe
+Moxby = moxby
+Mux = mux
+OpenHands = openhands
+Ona = ona
+Pi = pi
+Qoder = qoder
+Qoder CN = qoder-cn
+Qwen Code = qwen-code
+Replit = replit
+Reasonix = reasonix
+Rovo Dev = rovodev
+Roo Code = roo
+Tabnine CLI = tabnine-cli
+Terramind = terramind
+Tinycloud = tinycloud
+Warp = warp
+Windsurf = windsurf
+Zed = zed
+Zencoder = zencoder
+Zenflow = zenflow
+Neovate = neovate
+Pochi = pochi
+PromptScript = promptscript
+AdaL = adal
+```
+
+> `eve` / `promptscript` 仅支持项目级安装，不支持 `-g`；如果你的客户端是这两个，请说明无法用本命令安装到用户级。
 
 （等价写法：`wittyhub add <skill_id> -a <agent> --copy -g -y`）
 
 注意：
 
 - 必须使用完整的 skill_id（含 `source_type:` 前缀与冒号），不要自行拼写或改写
-- `-a` 的值必须是 Agent 的 CLI 标识；写成显示名或未知名称会报 `Invalid agents` 并直接退出，不会退回默认安装。上表只是常用子集，完整标识见 [wittyhub-cli README 的 Supported Agents 表](https://gitcode.com/openeuler/wittyhub-cli/blob/master/README.md#supported-agents)；也可运行 `wittyhub list -a <任意无效标识>`，报错输出的 `Valid agents: ...` 会列出全部合法标识
+- `-a` 的值必须是上表或「完整 Agent 标识」中的 CLI 标识；写成显示名或未知名称会报 `Invalid agents` 并直接退出，不会退回默认安装
 - 必须显式带上 `-a <agent>`，不要依赖 CLI 自动识别（部分 Agent 识别不出来，可能装到其他 Agent 目录）
 
 ### 2) 只知道技能名：先查 skill_id 再安装

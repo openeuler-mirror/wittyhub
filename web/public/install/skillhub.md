@@ -84,7 +84,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 注意：
 
 - 必须使用完整的 skill_id（含 `source_type:` 前缀与冒号），不要自行拼写或改写
-- `-a` 的值只能使用上表标识；写成显示名或未知名称会报 `Invalid agents` 并直接退出，不会退回默认安装
+- `-a` 的值只能使用上表标识；写成显示名或未知名称会报 `Invalid agents` 并直接退出，不会退回默认安装。上表只是常用子集，完整标识见 [wittyhub-cli README 的 Supported Agents 表](https://gitcode.com/openeuler/wittyhub-cli/blob/master/README.md#supported-agents)；也可运行 `wittyhub list -a <任意无效标识>`，报错输出的 `Valid agents: ...` 会列出全部合法标识
 - 必须显式带上 `-a <agent>`，不要依赖 CLI 自动识别（部分 Agent 识别不出来，可能装到其他 Agent 目录）
 
 ### 2) 只知道技能名：先查 skill_id 再安装
@@ -124,13 +124,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 | `gemini-cli` | `%USERPROFILE%\.gemini\skills\` | `~/.gemini/skills/` |
 | `universal` | — | `~/.agents/skills/` |
 
-> 路径来源：[Trae](https://docs.trae.ai/ide/skills)、[Cursor](https://cursor.com/docs/skills)、[Codex](https://developers.openai.com/codex/skills/)、[OpenCode](https://opencode.ai/docs/skills/)、[Gemini CLI](https://geminicli.com/docs/cli/skills/)、[Claude Code](https://code.claude.com/docs/en/skills)、[OpenClaw](https://docs.openclaw.ai/tools/skills)、[QoderWork](https://docs.qoder.com/zh/qoderwork/skills)、[WorkBuddy](https://cloud.tencent.com/developer/techpedia/2610/20530)、[豆包路径（杀毒软件白名单文章，间接来源）](https://www.doubao.com/work/docs/zh-cn/articles/157053571150-antivirus-allowlist)。
-
-> 豆包路径来源说明：`doubao-work` 的 macOS 路径为本机安装实测；`doubao` 的路径来自豆包官网「杀毒软件白名单」文章，属于间接来源，并非技能目录的官方说明；客户端升级后请以实际目录为准。
-
-> 豆包 vs 豆包工作（不要混用）：豆包使用 `Doubao/Default/.doubao/agent_mode/workspace/.user_skills/`；豆包工作使用 `DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills/`。两者数据根和 profile 子目录都不同（`.doubao` vs `.doubaowork`）。
-
-> 用户级说明：除 `universal` 写入 `~/.agents/skills/` 外，其余 Agent 均写入各自独立的用户级目录。
+> 豆包与豆包工作不要混用：两者数据根和 profile 子目录不同（`.doubao` vs `.doubaowork`），按上表写入。
 
 > Codex 注意：Codex 官方用户级标准目录是 `~/.agents/skills/`。为满足独占要求，wittyhub 的 `-g` 写入 `~/.codex/skills/`；如果 Codex 未识别该目录，可在 `~/.codex/config.toml` 增加 `[[skills.config]]`（`path` 指向技能目录，`enabled = true`），或改用共享目录。
 

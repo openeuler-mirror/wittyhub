@@ -12,8 +12,11 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list 2>/dev/
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# PyPI 源可按构建环境切换：境内默认华为云（实测同 wheel 下载 1.5s，
+# 阿里云 295s），境外构建加 --build-arg PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple
 RUN pip install --no-cache-dir --default-timeout=600 --retries 3 \
-    --index-url https://mirrors.aliyun.com/pypi/simple \
+    --index-url "${PIP_INDEX_URL}" \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     "torch==2.13.0+cpu" \
     fastapi \

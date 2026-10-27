@@ -653,9 +653,10 @@ flowchart TD
 模型分类调用失败按错误类型分流（`category_classifier.py`）：
 
 - **瞬时故障**（httpx 传输层错误：读超时、连接被重置；HTTP 429 / 5xx）：
-  最多重试 `CATEGORY_RETRY_ATTEMPTS=3` 次（间隔 2s）；重试耗尽后**降级**——
-  原样沿用 `metadata.category`（与分类器不可用时的回退一致），不中断扫描。
-  网络抖动不再导致整仓回滚。
+  最多重试 `CATEGORY_RETRY_ATTEMPTS=2` 次（间隔 2s）；重试耗尽后**降级**——
+  `metadata.category` 经 `_normalize_category` 校验（在类别表内，大小写不敏感，
+  归一为标准写法）合法则沿用；非法或缺失则返回 `None`（落库为空，
+  下轮扫描重新分类），不中断扫描。网络抖动不再导致整仓回滚。
 - **配置 / 凭据类错误**（4xx、响应解析失败等非瞬时异常）：抛出
   `CategoryClassificationError`，保持 fatal 语义。该异常在
   [skill_manager.py](../../skillcrawler/core/skill_manager.py) 的 except 块中被捕获后：

@@ -73,16 +73,27 @@ class DeepSeekCategoryClassifier:
                     )
                     time.sleep(CATEGORY_RETRY_BACKOFF_SECONDS)
                     continue
-                # 重试耗尽的网络故障降级：原样沿用 frontmatter category。
+                # 重试耗尽的网络故障降级：frontmatter category 合法（在类别表
+                # 内，经 _normalize_category 归一）则沿用；非法或缺失返回 None，
+                # 落库为空、下轮扫描重新分类，避免非法值被缓存固化。
                 # 网络抖动是常态，为一个 skill 的分类把整仓扫描回滚代价过高；
                 # 真正的配置/凭据类错误仍走 CategoryClassificationError 保
                 # 持 fatal 语义。
-                _logger.warning(
-                    "DeepSeek category classification degraded to frontmatter "
-                    "category for %s: %s",
-                    skill_file, exc,
-                )
-                return declared_category
+                fallback = self._normalize_category(declared_category)
+                if fallback is None and declared_category is not None:
+                    _logger.warning(
+                        "DeepSeek category classification degraded: frontmatter "
+                        "category %r of %s is not a valid category, leave empty "
+                        "for reclassification: %s",
+                        declared_category, skill_file, exc,
+                    )
+                else:
+                    _logger.warning(
+                        "DeepSeek category classification degraded to frontmatter "
+                        "category for %s: %s",
+                        skill_file, exc,
+                    )
+                return fallback
         return None
 
     @staticmethod

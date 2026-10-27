@@ -29,7 +29,8 @@ class _HealthProbeFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            path = record.args[1]  # uvicorn.access: (method, path, http_version)
+            # uvicorn.access 参数顺序: (client_addr, method, path, http_version, status)
+            path = record.args[2].split("?")[0]
         except (AttributeError, IndexError, TypeError):
             return True
         return path not in self._PROBE_PATHS

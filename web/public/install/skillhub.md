@@ -34,10 +34,13 @@ npm install -g wittyhub@latest
 ## 二、验证安装
 
 ```bash
-wittyhub --help   # 应显示 add / install / find / list / audit 等命令
+wittyhub --version   # 需 >= 0.0.8
+wittyhub --help      # 应显示 add / install / find / list / audit 等命令
 ```
 
 ## 三、安装技能（统一使用 skill_id）
+
+> 以下命令需要 **wittyhub CLI ≥ 0.0.8**；低于该版本请先执行 `npm install -g wittyhub@latest`，否则会因不支持 `doubao` 等 Agent 报错。
 
 技能的统一标识是 **skill_id**，新格式为：
 
@@ -100,7 +103,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 
 若 CLI 未输出审计结果（接口异常时 CLI 会静默跳过），不要自行重试或补做分析，也不要因此阻塞安装。
 
-## 四、安装位置（已按官方文档核实）
+## 四、安装位置（官方文档 / 本机实测）
 
 - 统一使用 `-a <agent> --copy -g`：安装到当前 Agent 的用户级（全局）目录，跨项目可用
 - `~/.agents/skills/` 是用户级公共目录，多个 Agent 共享，不是某个 Agent 独占；`~` 在 Windows 下即 `%USERPROFILE%`
@@ -109,7 +112,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 |---|---|---|
 | `trae` | `%USERPROFILE%\.trae\skills\` | `~/.trae/skills/` |
 | `trae-cn` | `%USERPROFILE%\.trae-cn\skills\` | `~/.trae-cn/skills/` |
-| `doubao` | `%LOCALAPPDATA%\Doubao\User Data\Default\.doubao\agent_mode\workspace\.user_skills\` | macOS `~/Library/Application Support/Doubao/Default/.doubao/agent_mode/workspace/.user_skills/`；Linux 无官方客户端 |
+| `doubao` | `%LOCALAPPDATA%\Doubao\User Data\Default\.doubao\agent_mode\workspace\.user_skills\` | macOS `~/Library/Application Support/Doubao/Default/.doubao/agent_mode/workspace/.user_skills/`（官方白名单文章，间接来源）；Linux 无官方客户端 |
 | `doubao-work` | `%LOCALAPPDATA%\DoubaoWork\User Data\Default\.doubaowork\agent_mode\workspace\.user_skills\` | macOS `~/Library/Application Support/DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills/`（本机实测）；Linux 无官方客户端 |
 | `claude-code` | `%USERPROFILE%\.claude\skills\` | `~/.claude/skills/` |
 | `cursor` | `%USERPROFILE%\.cursor\skills\` | `~/.cursor/skills/` |
@@ -121,11 +124,13 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 | `gemini-cli` | `%USERPROFILE%\.gemini\skills\` | `~/.gemini/skills/` |
 | `universal` | — | `~/.agents/skills/` |
 
-> 路径来源：[Trae](https://docs.trae.ai/ide/skills)、[Cursor](https://cursor.com/docs/skills)、[Codex](https://developers.openai.com/codex/skills/)、[OpenCode](https://opencode.ai/docs/skills/)、[Gemini CLI](https://geminicli.com/docs/cli/skills/)、[Claude Code](https://code.claude.com/docs/en/skills)、[OpenClaw](https://docs.openclaw.ai/tools/skills)、[QoderWork](https://docs.qoder.com/zh/qoderwork/skills)、[WorkBuddy](https://cloud.tencent.com/developer/techpedia/2610/20530)、[豆包 / 豆包工作](https://www.doubao.com/work/docs/zh-cn/articles/157053571150-antivirus-allowlist)。
+> 路径来源：[Trae](https://docs.trae.ai/ide/skills)、[Cursor](https://cursor.com/docs/skills)、[Codex](https://developers.openai.com/codex/skills/)、[OpenCode](https://opencode.ai/docs/skills/)、[Gemini CLI](https://geminicli.com/docs/cli/skills/)、[Claude Code](https://code.claude.com/docs/en/skills)、[OpenClaw](https://docs.openclaw.ai/tools/skills)、[QoderWork](https://docs.qoder.com/zh/qoderwork/skills)、[WorkBuddy](https://cloud.tencent.com/developer/techpedia/2610/20530)、[豆包路径（杀毒软件白名单文章，间接来源）](https://www.doubao.com/work/docs/zh-cn/articles/157053571150-antivirus-allowlist)。
+
+> 豆包路径来源说明：`doubao-work` 的 macOS 路径为本机安装实测；`doubao` 的路径来自豆包官网「杀毒软件白名单」文章，属于间接来源，并非技能目录的官方说明；客户端升级后请以实际目录为准。
 
 > 豆包 vs 豆包工作（不要混用）：豆包使用 `Doubao/Default/.doubao/agent_mode/workspace/.user_skills/`；豆包工作使用 `DoubaoWork/Default/.doubaowork/agent_mode/workspace/.user_skills/`。两者数据根和 profile 子目录都不同（`.doubao` vs `.doubaowork`）。
 
-> 用户级说明：除 `universal` 写入 `~/.agents/skills/` 外，其余 Agent 均写入各自独立的用户级目录；`doubao-work` 已按本机实测路径写入 `DoubaoWork/.../.doubaowork/.../.user_skills/`。
+> 用户级说明：除 `universal` 写入 `~/.agents/skills/` 外，其余 Agent 均写入各自独立的用户级目录。
 
 > Codex 注意：Codex 官方用户级标准目录是 `~/.agents/skills/`。为满足独占要求，wittyhub 的 `-g` 写入 `~/.codex/skills/`；如果 Codex 未识别该目录，可在 `~/.codex/config.toml` 增加 `[[skills.config]]`（`path` 指向技能目录，`enabled = true`），或改用共享目录。
 

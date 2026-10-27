@@ -36,8 +36,9 @@ logger = logging.getLogger(__name__)
 _REINDEX_LOCK_KEY = 742_301_990_122  # hashtext('wittyhub:embedding_reindex') 量级的固定值
 
 # 批量编码大小：批越大单次请求内存峰值越高（批内全部文本的向量同时在内存中），
-# 部署环境内存受限时优先调小，降低 embedding 服务 OOM 崩溃风险
-BATCH_SIZE = 16
+# 且服务端推理耗时随条数线性增长（实测 ~25s 固定开销 + ~7s/条，CPU 受限环境）。
+# 8 条单批约 80s，配合客户端 200s 超时留足余量，避免整批被超时放弃。
+BATCH_SIZE = 8
 
 
 @dataclass

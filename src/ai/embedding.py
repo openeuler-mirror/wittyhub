@@ -28,7 +28,10 @@ class LocalEmbeddingService(EmbeddingProvider):
         self.host = host
         self.model = model
         self._dimension = dimension
-        self._client = httpx.AsyncClient(timeout=120.0)
+        # 200s：实测 batch=16 在 CPU 受限的部署环境单批约 130s（~25s 固定开销
+        # + ~7s/条），120s 会导致整批被客户端放弃、服务端算力白白浪费，
+        # 二分重试才能降级成功。配合 BATCH_SIZE=8（单批约 80s）留足余量。
+        self._client = httpx.AsyncClient(timeout=200.0)
 
     async def encode(self, texts: list[str]) -> list[list[float]]:
         response = await self._client.post(

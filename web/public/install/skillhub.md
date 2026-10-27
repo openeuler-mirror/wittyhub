@@ -28,6 +28,7 @@ curl -fsSL https://skillhub.openeuler.org/install/install.sh | bash
 npm install -g wittyhub@latest
 ```
 
+- 需 wittyhub CLI ≥ 0.0.8：`wittyhub --version` 低于 0.0.8 时先升级，否则 `doubao` 等新标识会报 `Invalid agents`
 - 无全局安装权限时，用 `npx wittyhub@latest` 代替 `wittyhub` 命令
 - 沙箱限网时，需以允许联网的权限执行以上命令
 
@@ -61,7 +62,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 - `-a <agent>`：不追加其他 Agent；写入位置见第四节。除 `universal` 外，各 Agent 写入自己的用户级目录
 - `-g`：安装到用户级（全局）目录，跨项目可用；路径见第四节
 - `--copy`：直接复制到目标目录，不创建 `.agents/skills/` 软链中转（目标目录本身是 `.agents/skills/` 的 Agent 除外）
-- `<agent>` 必须替换为当前 Agent 的 CLI 标识（不是显示名），对照表：
+- `<agent>` 必须替换为当前 Agent 的 CLI 标识（不是显示名），常用对照表（子集，CLI 共支持 70+ 个 Agent）：
 
 | 当前 Agent | `<agent>` |
 |------------|-----------|
@@ -84,7 +85,7 @@ wittyhub install <skill_id> -a <agent> --copy -g -y
 注意：
 
 - 必须使用完整的 skill_id（含 `source_type:` 前缀与冒号），不要自行拼写或改写
-- `-a` 的值只能使用上表标识；写成显示名或未知名称会报 `Invalid agents` 并直接退出，不会退回默认安装。上表只是常用子集，完整标识见 [wittyhub-cli README 的 Supported Agents 表](https://gitcode.com/openeuler/wittyhub-cli/blob/master/README.md#supported-agents)；也可运行 `wittyhub list -a <任意无效标识>`，报错输出的 `Valid agents: ...` 会列出全部合法标识
+- `-a` 的值必须是 Agent 的 CLI 标识；写成显示名或未知名称会报 `Invalid agents` 并直接退出，不会退回默认安装。上表只是常用子集，完整标识见 [wittyhub-cli README 的 Supported Agents 表](https://gitcode.com/openeuler/wittyhub-cli/blob/master/README.md#supported-agents)；也可运行 `wittyhub list -a <任意无效标识>`，报错输出的 `Valid agents: ...` 会列出全部合法标识
 - 必须显式带上 `-a <agent>`，不要依赖 CLI 自动识别（部分 Agent 识别不出来，可能装到其他 Agent 目录）
 
 ### 2) 只知道技能名：先查 skill_id 再安装

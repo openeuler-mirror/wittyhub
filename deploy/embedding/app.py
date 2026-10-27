@@ -1,21 +1,49 @@
 """
 Simple embedding service using sentence-transformers
 """
+import logging
 import math
 import os
+import time
 from pathlib import Path
 from typing import List
 
 import yaml
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import torch
 from sentence_transformers import SentenceTransformer
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger("embedding")
+
 app = FastAPI(title="Embedding Service")
+
+# 探针/监控高频打点不记访问日志，避免刷屏（/health 每 30s 一次、Prometheus 同理）
+_SILENT_PATHS = {"/health", "/metrics"}
+
+
+@app.middleware("http")
+async def log_access(request: Request, call_next):
+    if request.url.path in _SILENT_PATHS:
+        return await call_next(request)
+    started = time.monotonic()
+    response = await call_next(request)
+    logger.info(
+        "access: %s %s from %s -> %d (%.3fs)",
+        request.method,
+        request.url.path,
+        request.client.host if request.client else "unknown",
+        response.status_code,
+        time.monotonic() - started,
+    )
+    return response
 
 config_path = Path(os.getenv("WITTYHUB_CONFIG", "/app/config.yaml"))
 if config_path.exists():
@@ -54,8 +82,12 @@ class EmbedResponse(BaseModel):
 @app.post("/v1/embeddings")
 async def create_embeddings(request: EmbedRequest) -> JSONResponse:
     if model is None:
+        logger.error("embed: rejected, model not loaded")
         raise HTTPException(status_code=503, detail="Model not loaded")
 
+    batch_size = len(request.input)
+    total_chars = sum(len(text) for text in request.input)
+    started = time.monotonic()
     try:
         embeddings = model.encode(
             request.input,
@@ -79,12 +111,25 @@ async def create_embeddings(request: EmbedRequest) -> JSONResponse:
                 "index": i
             })
 
+        logger.info(
+            "embed: batch=%d chars=%d -> %d vectors (%.3fs)",
+            batch_size,
+            total_chars,
+            len(data),
+            time.monotonic() - started,
+        )
         return JSONResponse(content={
             "model": request.model,
             "data": data
         })
 
     except Exception as e:
+        logger.exception(
+            "embed: batch=%d chars=%d failed after %.3fs",
+            batch_size,
+            total_chars,
+            time.monotonic() - started,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 

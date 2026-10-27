@@ -199,13 +199,13 @@ async def _write_embeddings(
 async def _encode_and_store(
     targets: list[EmbeddingTarget], stats: ReindexStats
 ) -> None:
-    """编码并写库一个批次；确定性失败按二分递归重试，隔离坏行。
+    """编码并写库一个批次；批处理失败按二分递归重试，隔离坏行。
 
-    确定性失败（ReadTimeout / 响应形状异常）只在批量体量大时发生：
-    整批文本合计超过 embedding 服务 120s 超时，或个别坏行导致响应校验
-    失败污染整批。此时若整批跳过，下一轮增量按相同排序会凑出同样的批次、
-    再次失败，形成永久缺口。二分后子批体量减半（可到单行），保证本轮推进，
-    坏行被隔离成单行失败。
+    需要拆半的失败（超时 / 响应形状异常）只在批量体量大时发生：
+    整批文本合计超过 embedding 服务客户端超时（200s），或个别坏行导致
+    响应校验失败污染整批。此时若整批跳过，下一轮增量按相同排序会凑出
+    同样的批次、再次失败，形成永久缺口。二分后子批体量减半（可到单行），
+    保证本轮推进，坏行被隔离成单行失败。
 
     targets 按 skill_id 升序（_fetch_batch 的 keyset 排序），二分切割后
     子批保持有序，与 update_embeddings_batch 的排序写口径一致。
@@ -225,36 +225,57 @@ async def _encode_and_store(
         stats.indexed += updated
         stats.stale_skipped += len(pairs) - updated
     except Exception as exc:
-        if len(targets) == 1 or not _is_definitive_encode_failure(exc):
+        if len(targets) == 1 or not _is_retriable_encode_failure(exc):
             stats.failed_batches += 1
             stats.failed_rows += len(targets)
             logger.exception(
-                "embedding 批次失败 (skill_id=%s, size=%d)，跳过",
+                "embedding 批次失败，跳过 (skill_id=%s, size=%d, chars=%d, error=%s)",
                 targets[0].skill_id,
                 len(targets),
+                _total_chars(targets),
+                _format_encode_error(exc),
             )
             return
         mid = len(targets) // 2
         logger.warning(
-            "embedding 批次确定性失败 (skill_id=%s, size=%d, %s)，二分重试",
+            "embedding 批次失败，二分重试（多半是这批文本太多/太长，服务端"
+            "处理不过来）(skill_id=%s, size=%d, chars=%d, error=%s, halve=%d/%d)",
             targets[0].skill_id,
             len(targets),
-            exc,
+            _total_chars(targets),
+            _format_encode_error(exc),
+            mid,
+            len(targets) - mid,
         )
         await _encode_and_store(targets[:mid], stats)
         await _encode_and_store(targets[mid:], stats)
 
 
-def _is_definitive_encode_failure(exc: Exception) -> bool:
-    """判定编码阶段的确定性失败（值得二分缩小体量重试）。
+def _total_chars(targets: list[EmbeddingTarget]) -> int:
+    """批次文本总字符量，用于日志定位体量相关问题。"""
+    return sum(len(target.text) for target in targets)
+
+
+def _format_encode_error(exc: Exception) -> str:
+    """把异常转为可读文本：类型名 + 消息。
+
+    httpx.TimeoutException 等异常的 str() 为空串，直接 %s 打印只剩一个逗号，
+    无法判断失败类型；统一为 "TypeName: message" 形式，消息为空时仅保留类型。
+    """
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
+def _is_retriable_encode_failure(exc: Exception) -> bool:
+    """判定编码阶段可拆半重试的失败（值得缩小批次体量再试）。
 
     - httpx.TimeoutException（ReadTimeout/WriteTimeout/ConnectTimeout 等）：
-      文本量越大越容易触发，二分可解；
+      文本量越大越容易触发，拆半可解；
     - ValueError：响应校验失败（数量/维度/非有限值），多由个别坏行引发，
-      二分隔离出坏行后其余行可正常入库。
+      拆半隔离出坏行后其余行可正常入库。
 
     服务不可达（ConnectError）、HTTPStatusError、写库失败等与输入体量无关，
-    二分只会放大失败面，保持整批跳过、由下轮增量自愈。
+    拆半只会放大失败面，保持整批跳过、由下轮增量自愈。
     """
     if isinstance(exc, httpx.TimeoutException):
         return True

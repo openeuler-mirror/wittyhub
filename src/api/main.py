@@ -18,6 +18,23 @@ from src.core.rate_limit import limiter
 settings = get_settings()
 
 
+class _HealthProbeFilter(logging.Filter):
+    """过滤健康探针的访问日志（/api/v1/health 及裸 /health）。
+
+    uvicorn access 记录的 msg 形如 'GET /api/v1/health HTTP/1.1'，
+    探针每 10~30s 一次，全量保留会淹没有用信息。
+    """
+
+    _PROBE_PATHS = ("/health", "/api/v1/health")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            path = record.args[1]  # uvicorn.access: (method, path, http_version)
+        except (AttributeError, IndexError, TypeError):
+            return True
+        return path not in self._PROBE_PATHS
+
+
 def configure_logging() -> None:
     level_name = settings.logging.level.strip().upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -52,6 +69,13 @@ def configure_logging() -> None:
         uvicorn_logger.setLevel(level)
         for handler in uvicorn_logger.handlers:
             handler.setLevel(level)
+
+    # 健康探针（K8s liveness/readiness、compose healthcheck）每 10~30s 打一次
+    # /api/v1/health，access 日志被刷屏淹没有用信息；探针请求不记访问日志，
+    # 探针频率本身由部署侧 periodSeconds 控制。
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _HealthProbeFilter) for f in access_logger.filters):
+        access_logger.addFilter(_HealthProbeFilter())
 
     for registered_logger in logging.Logger.manager.loggerDict.values():
         if not isinstance(registered_logger, logging.Logger):

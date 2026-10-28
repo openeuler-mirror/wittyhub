@@ -28,7 +28,10 @@ class LocalEmbeddingService(EmbeddingProvider):
         self.host = host
         self.model = model
         self._dimension = dimension
-        self._client = httpx.AsyncClient(timeout=60.0)
+        # 200s：实测 batch=8 在 CPU 受限的部署环境单批约 80s（~25s 固定开销
+        # + ~7s/条），留出倍级余量；批再大则可能逼近超时、整批被客户端放弃，
+        # 需二分重试降级。配合 BATCH_SIZE=8 使用。
+        self._client = httpx.AsyncClient(timeout=200.0)
 
     async def encode(self, texts: list[str]) -> list[list[float]]:
         response = await self._client.post(
@@ -120,9 +123,16 @@ async def close_embedding_service() -> None:
         await service.close()
 
 
+# 检索文本长度上限：BGE 模型只取前 512 tokens（约 500~2000 字符），
+# 超长文本（几十万字符的长篇文档）全部发送只会拖慢服务端 tokenize
+# 直至超时，对向量没有贡献。8000 为保守值，兼容将来更长上下文的模型。
+MAX_EMBEDDING_TEXT_CHARS = 8000
+
+
 def prepare_skill_text(skill: dict[str, Any] | Any) -> str:
     """
-    组合 skill 的 name、description、content 生成用于 embedding 的文本
+    组合 skill 的 name、description、content 生成用于 embedding 的文本，
+    超过 MAX_EMBEDDING_TEXT_CHARS 的部分截断（模型侧本就不读取）。
     """
     parts = []
     if hasattr(skill, "name"):
@@ -138,7 +148,7 @@ def prepare_skill_text(skill: dict[str, Any] | Any) -> str:
             parts.append(skill["description"])
         if skill.get("content"):
             parts.append(skill["content"])
-    return " ".join(parts)
+    return " ".join(parts)[:MAX_EMBEDDING_TEXT_CHARS]
 
 
 def prepare_search_query(query: str) -> str:

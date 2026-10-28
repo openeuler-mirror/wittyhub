@@ -12,15 +12,20 @@ SkillManager.discover_configured_skill_repository。
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from skillcrawler.core.skill_manager import SkillManager
-from skillcrawler.main import build_configured_discover_requests
+from skillcrawler.main import (
+    build_configured_discover_requests,
+    build_discover_result_document,
+    classify_discover_result,
+    collect_skill_stats,
+    save_discover_result_file,
+)
 from skillcrawler.config import load_contributor_profiles, sync_openEuler_skills_repo
 from src.core.config import DiscoverSchedulerConfig
 from src.core.database import AsyncSessionLocal
@@ -29,6 +34,23 @@ from src.models.repository import ContributorRepository, SkillRepoRepository, Sk
 logger = logging.getLogger(__name__)
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+# 北京时间（UTC+8）：调度配置与计算统一按 UTC，日志换算成北京时间展示
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+# security_audits 中「异步检测仍在进行」的判定条件等共享定义见
+# skillcrawler/main.py（collect_skill_stats）；结果 JSON 的 counters /
+# skill_stats / embedding_run 构建与 <key>_note 说明同样由该模块提供，
+# CLI 与自动调度共用同一实现，口径完全一致。
+
+
+def _beijing_hhmm(time_str: str) -> str:
+    """把配置里的 UTC HH:MM 换算成北京时间 HH:MM；解析失败时原样返回。"""
+    try:
+        hour, minute = _parse_hhmm(time_str)
+    except ValueError:
+        return time_str
+    return f"{(hour + 8) % 24:02d}:{minute:02d}"
 
 
 def _parse_hhmm(value: str) -> tuple[int, int]:
@@ -48,7 +70,7 @@ def compute_next_run(
     minute: int,
     weekday: str,
 ) -> datetime:
-    """计算下一次触发时刻（本地时区）。
+    """计算下一次触发时刻（UTC）。
 
     daily：今天已过触发点则取明天同一时刻；
     weekly：取下一个指定 weekday 的触发时刻（今天已过则顺延一周）。
@@ -94,9 +116,10 @@ class DiscoverScheduler:
         self._running = True
         self._task = asyncio.create_task(self._loop())
         logger.info(
-            "DiscoverScheduler started (interval=%s, time=%s, weekday=%s)",
+            "DiscoverScheduler started (interval=%s, trigger=(UTC:%s == 北京时间:%s), weekday=%s)",
             interval,
             self._config.time,
+            _beijing_hhmm(self._config.time),
             self._config.weekday,
         )
 
@@ -117,9 +140,17 @@ class DiscoverScheduler:
         weekday = self._config.weekday.strip().lower()
 
         while self._running:
-            next_run = compute_next_run(datetime.now(), interval, hour, minute, weekday)
-            wait_seconds = (next_run - datetime.now()).total_seconds()
-            logger.info("Next scheduled discover run at %s (in %.0fs)", next_run, wait_seconds)
+            # 触发时刻按 UTC 计算（config.yaml 的 time 为 UTC HH:MM）
+            next_run = compute_next_run(
+                datetime.now(timezone.utc), interval, hour, minute, weekday,
+            )
+            wait_seconds = (next_run - datetime.now(timezone.utc)).total_seconds()
+            logger.info(
+                "Next scheduled discover run at %s 北京时间 (UTC %s, in %.0fs)",
+                next_run.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M"),
+                next_run.strftime("%Y-%m-%d %H:%M"),
+                wait_seconds,
+            )
             try:
                 await asyncio.sleep(wait_seconds)
             except asyncio.CancelledError:
@@ -141,8 +172,11 @@ class DiscoverScheduler:
         结束时汇总平均耗时与最慢的仓库，便于排查慢仓库。
         每轮结果（含每仓明细）写入 result_dir 下的 JSON 文件。
         """
-        repository_path = sync_openEuler_skills_repo()
-        requests, config_keys = build_configured_discover_requests(
+        # catalog 同步是 git 操作、请求构建是全量 YAML 解析，均放线程池执行，
+        # 网络挂起或 catalog 较大时不阻塞事件循环（API / 健康检查保持可用）
+        repository_path = await asyncio.to_thread(sync_openEuler_skills_repo)
+        requests, config_keys = await asyncio.to_thread(
+            build_configured_discover_requests,
             repository_path=repository_path,
         )
         total = len(requests)
@@ -200,7 +234,7 @@ class DiscoverScheduler:
 
                 elapsed = time.monotonic() - repo_started
                 repo_durations.append((label, elapsed))
-                outcome = self._classify_result(result)
+                outcome = classify_discover_result(result)
                 counters[outcome] += 1
                 repo_details.append(
                     {
@@ -231,6 +265,7 @@ class DiscoverScheduler:
         # 增量补嵌入：只为本轮新入库（embedding IS NULL 且 risk_score 就绪）的
         # skill 生成向量，使其立即可被语义搜索命中。锁被全量重建脚本持有时跳过
         # （全量本身会覆盖一切）；失败不重试，漏掉的行由下轮 discover 自愈。
+        embed_stats_dict: dict[str, Any] | None = None
         try:
             from src.core.config import get_settings as _get_settings
 
@@ -239,16 +274,25 @@ class DiscoverScheduler:
 
                 try:
                     embed_stats = await embed_missing()
+                    embed_stats_dict = embed_stats.as_dict()
                     logger.info(
-                        "Incremental embedding after discover: %s",
-                        embed_stats.as_dict(),
+                        "Incremental embedding after discover: %s", embed_stats_dict
                     )
                 except LockBusyError:
+                    embed_stats_dict = {"skipped": "reindex lock held by another task"}
                     logger.info(
                         "Incremental embedding skipped: reindex lock held by another task"
                     )
         except Exception:
             logger.exception("Incremental embedding after discover failed")
+
+        # skill 级统计：分类分布 / 安全检测结果 / 索引创建状态
+        skill_stats: dict[str, Any] | None = None
+        try:
+            async with AsyncSessionLocal() as session:
+                skill_stats = await collect_skill_stats(session)
+        except Exception:
+            logger.exception("Failed to collect skill stats after discover")
 
         run_elapsed = time.monotonic() - run_started
         avg_elapsed = run_elapsed / total if total else 0.0
@@ -266,21 +310,19 @@ class DiscoverScheduler:
             slowest_text,
         )
 
-        self._save_result_file(
-            {
-                "started_at": run_started_wall.isoformat(timespec="seconds"),
-                "finished_at": datetime.now().isoformat(timespec="seconds"),
-                "total_repos": total,
-                "config_keys": config_keys,
-                "counters": counters,
-                "total_seconds": round(run_elapsed, 3),
-                "avg_seconds_per_repo": round(avg_elapsed, 3),
-                "slowest_repos": [
-                    {"url": label, "seconds": round(duration, 3)}
-                    for label, duration in slowest
-                ],
-                "repos": repo_details,
-            }
+        # 结果文档构建与保存由 skillcrawler.main 提供（CLI discover 共用）
+        save_discover_result_file(
+            build_discover_result_document(
+                started_at=run_started_wall,
+                run_started=run_started,
+                total_repos=total,
+                config_keys=config_keys,
+                counters=counters,
+                repo_details=repo_details,
+                embed_stats_dict=embed_stats_dict,
+                skill_stats=skill_stats,
+            ),
+            result_dir=self._config.result_dir,
         )
         return counters
 
@@ -298,7 +340,9 @@ class DiscoverScheduler:
         （以扫描结果为准，新插入行默认 0）。
         """
         try:
-            profiles = load_contributor_profiles(repository_path)
+            profiles = await asyncio.to_thread(
+                load_contributor_profiles, repository_path,
+            )
         except Exception:
             logger.warning(
                 "Failed to load contributor profiles from %s", repository_path, exc_info=True
@@ -330,46 +374,6 @@ class DiscoverScheduler:
             logger.warning("Failed to sync contributor profiles", exc_info=True)
             return 0
         return synced
-
-    def _resolve_result_dir(self) -> Path:
-        """结果保存目录：优先 result_dir 配置，否则 storage.local_path/logs。"""
-        configured = self._config.result_dir.strip()
-        if configured:
-            return Path(configured).expanduser()
-        from src.core.config import get_settings
-
-        return Path(get_settings().storage.local_path) / "logs"
-
-    def _save_result_file(self, document: dict[str, Any]) -> Path | None:
-        """把一轮结果写入 JSON 文件；失败仅记录 warning，不影响主流程。"""
-        try:
-            result_dir = self._resolve_result_dir()
-            result_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            path = result_dir / f"discover-{timestamp}.json"
-            path.write_text(
-                json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            logger.info("Discover result saved to %s", path)
-            return path
-        except Exception:
-            logger.warning("Failed to save discover result file", exc_info=True)
-            return None
-
-    @staticmethod
-    def _classify_result(result: Any) -> str:
-        """与 CLI discover 相同的口径对结果分类（基于 manager 标记的私有标志）。"""
-        if result is None:
-            return "no_skill"
-        if getattr(result, "_removed_existing", False):
-            return "removed"
-        if getattr(result, "_security_retry_candidates", 0):
-            return "security_retried"
-        if getattr(result, "_unchanged", False):
-            return "unchanged"
-        if getattr(result, "_created_new", False):
-            return "created"
-        return "rediscovered"
 
 
 async def start_discover_scheduler() -> DiscoverScheduler | None:

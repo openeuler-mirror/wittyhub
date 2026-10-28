@@ -9,7 +9,7 @@
 - 增量运行中，全量 fail-fast 提示稍后重试
 - 同一任务内部全量结束后的 NULL 尾扫复用已持有的锁
 
-批次三段式短事务（避免 embedding HTTP 60s 超时期间占用连接池）：
+批次三段式短事务（避免 embedding HTTP 120s 超时期间占用连接池）：
   ① 短会话读 (skill_id, 文本字段) → 关闭
   ② 无 DB 连接调 embedding 服务批量编码
   ③ 短会话按 skill_id 排序批量 UPDATE → commit → 关闭（排序写消除并发批间死锁）
@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+import httpx
 from sqlalchemy import text
 
 from src.ai.embedding import generate_embeddings, prepare_skill_text
@@ -34,7 +35,10 @@ logger = logging.getLogger(__name__)
 # advisory lock 的 bigint key（pg_advisory_lock 单参数版）
 _REINDEX_LOCK_KEY = 742_301_990_122  # hashtext('wittyhub:embedding_reindex') 量级的固定值
 
-BATCH_SIZE = 100
+# 批量编码大小：批越大单次请求内存峰值越高（批内全部文本的向量同时在内存中），
+# 且服务端推理耗时随条数线性增长（实测 ~25s 固定开销 + ~7s/条，CPU 受限环境）。
+# 8 条单批约 80s，配合客户端 200s 超时留足余量，避免整批被超时放弃。
+BATCH_SIZE = 8
 
 
 @dataclass
@@ -192,6 +196,92 @@ async def _write_embeddings(
         return await repo.update_embeddings_batch(ordered)
 
 
+async def _encode_and_store(
+    targets: list[EmbeddingTarget], stats: ReindexStats
+) -> None:
+    """编码并写库一个批次；批处理失败按二分递归重试，隔离坏行。
+
+    需要拆半的失败（超时 / 响应形状异常）只在批量体量大时发生：
+    整批文本合计超过 embedding 服务客户端超时（200s），或个别坏行导致
+    响应校验失败污染整批。此时若整批跳过，下一轮增量按相同排序会凑出
+    同样的批次、再次失败，形成永久缺口。二分后子批体量减半（可到单行），
+    保证本轮推进，坏行被隔离成单行失败。
+
+    targets 按 skill_id 升序（_fetch_batch 的 keyset 排序），二分切割后
+    子批保持有序，与 update_embeddings_batch 的排序写口径一致。
+    """
+    try:
+        embeddings = await generate_embeddings([target.text for target in targets])
+        _validate_embeddings(
+            embeddings,
+            expected_count=len(targets),
+            expected_dimension=get_settings().ai.embedding_dimension,
+        )
+        pairs = [
+            (target, embedding)
+            for target, embedding in zip(targets, embeddings, strict=True)
+        ]
+        updated = await _write_embeddings(pairs)
+        stats.indexed += updated
+        stats.stale_skipped += len(pairs) - updated
+    except Exception as exc:
+        if len(targets) == 1 or not _is_retriable_encode_failure(exc):
+            stats.failed_batches += 1
+            stats.failed_rows += len(targets)
+            logger.exception(
+                "embedding 批次失败，跳过 (skill_id=%s, size=%d, chars=%d, error=%s)",
+                targets[0].skill_id,
+                len(targets),
+                _total_chars(targets),
+                _format_encode_error(exc),
+            )
+            return
+        mid = len(targets) // 2
+        logger.warning(
+            "embedding 批次失败，二分重试（多半是这批文本太多/太长，服务端"
+            "处理不过来）(skill_id=%s, size=%d, chars=%d, error=%s, halve=%d/%d)",
+            targets[0].skill_id,
+            len(targets),
+            _total_chars(targets),
+            _format_encode_error(exc),
+            mid,
+            len(targets) - mid,
+        )
+        await _encode_and_store(targets[:mid], stats)
+        await _encode_and_store(targets[mid:], stats)
+
+
+def _total_chars(targets: list[EmbeddingTarget]) -> int:
+    """批次文本总字符量，用于日志定位体量相关问题。"""
+    return sum(len(target.text) for target in targets)
+
+
+def _format_encode_error(exc: Exception) -> str:
+    """把异常转为可读文本：类型名 + 消息。
+
+    httpx.TimeoutException 等异常的 str() 为空串，直接 %s 打印只剩一个逗号，
+    无法判断失败类型；统一为 "TypeName: message" 形式，消息为空时仅保留类型。
+    """
+    message = str(exc).strip()
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
+def _is_retriable_encode_failure(exc: Exception) -> bool:
+    """判定编码阶段可拆半重试的失败（值得缩小批次体量再试）。
+
+    - httpx.TimeoutException（ReadTimeout/WriteTimeout/ConnectTimeout 等）：
+      文本量越大越容易触发，拆半可解；
+    - ValueError：响应校验失败（数量/维度/非有限值），多由个别坏行引发，
+      拆半隔离出坏行后其余行可正常入库。
+
+    服务不可达（ConnectError）、HTTPStatusError、写库失败等与输入体量无关，
+    拆半只会放大失败面，保持整批跳过、由下轮增量自愈。
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    return isinstance(exc, ValueError)
+
+
 async def _run_batches(
     only_missing: bool,
     stats: ReindexStats,
@@ -211,30 +301,7 @@ async def _run_batches(
         to_encode = [target for target in rows if target.text.strip()]
         stats.skipped_empty += len(rows) - len(to_encode)
         if to_encode:
-            try:
-                embeddings = await generate_embeddings(
-                    [target.text for target in to_encode]
-                )
-                _validate_embeddings(
-                    embeddings,
-                    expected_count=len(to_encode),
-                    expected_dimension=get_settings().ai.embedding_dimension,
-                )
-                pairs = [
-                    (target, embedding)
-                    for target, embedding in zip(to_encode, embeddings, strict=True)
-                ]
-                updated = await _write_embeddings(pairs)
-                stats.indexed += updated
-                stats.stale_skipped += len(pairs) - updated
-            except Exception:
-                stats.failed_batches += 1
-                stats.failed_rows += len(to_encode)
-                logger.exception(
-                    "embedding 批次失败 (after_skill_id=%s, only_missing=%s)，跳过",
-                    after_skill_id,
-                    only_missing,
-                )
+            await _encode_and_store(to_encode, stats)
 
         if progress_cb:
             progress_cb(stats)

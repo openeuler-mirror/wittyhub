@@ -62,14 +62,19 @@ class TestConfigIntegration:
         assert settings.discover_scheduler.weekday == "sun"
 
     def test_config_yaml_section_parsed(self):
-        # 直接验证 from_yaml 的解析路径（config.yaml 当前为 enabled=true, time=00:00）
+        # 验证 from_yaml 的解析路径；不绑定 config.yaml 的具体取值
+        # （调度时刻等运维随时可改，断言具体值会随配置漂移误报）
+        import re
+
         from src.core.config import Settings
 
         settings = Settings.from_yaml("config.yaml")
-        assert settings.discover_scheduler.enabled is True
-        assert settings.discover_scheduler.interval == "daily"
-        assert settings.discover_scheduler.time == "00:00"
-        assert settings.discover_scheduler.weekday == "sun"
+        assert isinstance(settings.discover_scheduler.enabled, bool)
+        assert settings.discover_scheduler.interval in ("daily", "weekly")
+        assert re.fullmatch(r"\d{2}:\d{2}", settings.discover_scheduler.time)
+        assert settings.discover_scheduler.weekday in (
+            "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+        )
 
     def test_invalid_interval_rejected_on_start(self):
         config = DiscoverSchedulerConfig(enabled=True, interval="hourly")
@@ -191,14 +196,30 @@ class TestRunDiscoverOnce:
         assert document["total_repos"] == 3
         assert document["counters"] == {
             "created": 1,
+            "created_note": "新建仓库记录并完成扫描",
             "rediscovered": 0,
+            "rediscovered_note": "已有仓库 commit 变化并完成重扫",
             "security_retried": 0,
+            "security_retried_note": "commit 未变化，但为 NULL risk_score 记录重新提交安全检测",
             "unchanged": 1,
+            "unchanged_note": "HEAD commit 与数据库相同，跳过扫描",
             "removed": 1,
+            "removed_note": "已有仓库不再包含可扫描 Skill，删除 DB 仓库记录",
             "no_skill": 0,
+            "no_skill_note": "新仓库没有可扫描 Skill，不创建 DB 仓库记录",
             "failed": 0,
+            "failed_note": "当前仓库处理失败（clone/fetch 或扫描异常），详见 repos[].error",
         }
         assert document["config_keys"] == ["community"]
+        # 各区块每项为 <key> + <key>_note（统计查询失败时 skill_stats 为 null）
+        assert document["skill_stats"] is None
+        embed_run = document["embedding_run"]
+        assert embed_run["indexed"] == 0
+        assert embed_run["indexed_note"] == "本轮成功写入 embedding 的行数"
+        assert embed_run["total_note"] == "本轮扫描到的待编码行数"
+        assert all(
+            embed_run[f"{key}_note"] for key in embed_run if not key.endswith("_note")
+        )
         assert "started_at" in document
         assert "finished_at" in document
         assert "total_seconds" in document
@@ -387,3 +408,48 @@ class TestStartDiscoverScheduler:
             scheduler = await start_discover_scheduler()
         assert scheduler is not None
         await scheduler.stop()
+
+
+class TestSkillStatsWithNotes:
+    def test_nested_sections_get_notes(self):
+        """skill_stats 各层字段（含 security_audit / index_creation）均补 <key>_note。"""
+        from skillcrawler.main import skill_stats_with_notes
+
+        raw = {
+            "total_skills": 9008,
+            "category_distribution": {"others": 12},
+            "security_audit": {
+                "audited": 8996,
+                "pending": 0,
+                "failed": 0,
+                "failed_skills": [],
+                "failed_skills_truncated": False,
+            },
+            "index_creation": {
+                "total": 9008,
+                "indexed": 9000,
+                "missing": 0,
+                "not_required": 8,
+            },
+        }
+        merged = skill_stats_with_notes(raw)
+
+        # category_distribution 是数据字典（{category: count}），不参与递归说明断言
+        data_only_keys = {"category_distribution"}
+
+        def assert_every_key_noted(node):
+            for key, value in node.items():
+                if key.endswith("_note") or key in data_only_keys:
+                    continue
+                if isinstance(value, dict):
+                    assert node.get(f"{key}_note"), f"{key} 缺说明"
+                    assert_every_key_noted(value)
+                else:
+                    assert node.get(f"{key}_note"), f"{key} 缺说明"
+
+        assert_every_key_noted(merged)
+        # 数值原样保留，说明挂在对应 <key>_note 上
+        assert merged["total_skills"] == 9008
+        assert merged["security_audit"]["audited"] == 8996
+        assert merged["index_creation"]["not_required"] == 8
+        assert merged["index_creation"]["not_required_note"].startswith("未审计且未建索引")

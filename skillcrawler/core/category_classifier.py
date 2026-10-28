@@ -4,11 +4,11 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 from skillcrawler.config import load_skill_categories
+from src.ai.llm import chat_completion_sync
 from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -73,16 +73,27 @@ class DeepSeekCategoryClassifier:
                     )
                     time.sleep(CATEGORY_RETRY_BACKOFF_SECONDS)
                     continue
-                # 重试耗尽的网络故障降级：原样沿用 frontmatter category。
+                # 重试耗尽的网络故障降级：frontmatter category 合法（在类别表
+                # 内，经 _normalize_category 归一）则沿用；非法或缺失返回 None，
+                # 落库为空、下轮扫描重新分类，避免非法值被缓存固化。
                 # 网络抖动是常态，为一个 skill 的分类把整仓扫描回滚代价过高；
                 # 真正的配置/凭据类错误仍走 CategoryClassificationError 保
                 # 持 fatal 语义。
-                _logger.warning(
-                    "DeepSeek category classification degraded to frontmatter "
-                    "category for %s: %s",
-                    skill_file, exc,
-                )
-                return declared_category
+                fallback = self._normalize_category(declared_category)
+                if fallback is None and declared_category is not None:
+                    _logger.warning(
+                        "DeepSeek category classification degraded: frontmatter "
+                        "category %r of %s is not a valid category, leave empty "
+                        "for reclassification: %s",
+                        declared_category, skill_file, exc,
+                    )
+                else:
+                    _logger.warning(
+                        "DeepSeek category classification degraded to frontmatter "
+                        "category for %s: %s",
+                        skill_file, exc,
+                    )
+                return fallback
         return None
 
     @staticmethod
@@ -143,50 +154,23 @@ class DeepSeekCategoryClassifier:
         )
 
     def _call_deepseek(self, prompt: str) -> str:
-        payload: dict[str, Any] = {
-            "model": self.model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You classify skills into one predefined category.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            "temperature": 0,
-        }
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        started_at = time.perf_counter()
-        status: int | str = "request_error"
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                status = response.status_code
-                response.raise_for_status()
-                data = response.json()
-        finally:
-            _logger.debug(
-                "Category model timing: model=%s status=%s elapsed=%.3fs",
-                self.model_name,
-                status,
-                time.perf_counter() - started_at,
-            )
-
-        return (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
+        # 统一走 src.ai.llm：请求体、enable_thinking、鉴权、响应解析、耗时
+        # 日志都收敛在一处，与搜索翻译共享同一口径（此前两处各写一遍，
+        # 翻译漏掉关闭思考被 Qwen3 长思维链拖慢到 30-45s）。
+        messages = [
+            {
+                "role": "system",
+                "content": "You classify skills into one predefined category.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ]
+        return chat_completion_sync(
+            messages,
+            temperature=0,
+            timeout=self.timeout,
         )
 
     def _normalize_category(self, value: object) -> str | None:

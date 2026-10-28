@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 from sqlalchemy import and_, case, delete, desc, func, or_, select, update
+from sqlalchemy.exc import InterfaceError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -164,8 +165,9 @@ class SkillRepoRepository:
 
         skills / skill_versions 通过外键 CASCADE 自动删除，但
         security_audits 和 download_history 使用 resource_type + resource_id
-        软关联（无外键），需要先按仓库收集 skill UUID 批量清理，
-        否则留下孤儿数据。对账删除等批量场景用本方法减少往返。
+        软关联（无外键），需要先按仓库收集 skill 与 skill_versions 的 UUID
+        批量清理（security_audits 对 tag 版本同样按 resource_type='skill'
+        + 版本 UUID 落记录），否则留下孤儿数据。
         """
         if not repository_ids:
             return 0
@@ -176,15 +178,20 @@ class SkillRepoRepository:
             repo_ids,
         )
 
-        # 一次查出所有待删仓库下的 skill UUID，用于清理软关联表
+        # 一次查出所有待删仓库下的 skill / skill_versions UUID，用于清理软关联表
         skill_ids_result = await self.session.execute(
             select(Skill.id).where(Skill.skill_repo_id.in_(repo_ids))
         )
         skill_ids = [row[0] for row in skill_ids_result.all()]
+        version_ids_result = await self.session.execute(
+            select(SkillVersion.id).where(SkillVersion.skill_repo_id.in_(repo_ids))
+        )
+        version_ids = [row[0] for row in version_ids_result.all()]
 
         related_deleted = 0
-        if skill_ids:
-            related_deleted = await SkillRepository(self.session).delete_skill_related_records(skill_ids)
+        resource_ids = [*skill_ids, *version_ids]
+        if resource_ids:
+            related_deleted = await SkillRepository(self.session).delete_skill_related_records(resource_ids)
 
         result = await self.session.execute(
             delete(SkillRepoModel).where(SkillRepoModel.id.in_(repo_ids))
@@ -458,6 +465,13 @@ class SkillRepository:
             for version in versions_result.scalars().all()
             if version.skill_id
         }
+        # 预加载是扫描前最后一次 DB 访问，之后的扫描（git 操作 + Jenkins 触发）
+        # 可达数小时。若把 open transaction 横跨整个扫描，连接会长时间处于
+        # idle-in-transaction 状态，被 PostgreSQL idle_in_transaction_session_timeout
+        # 或 TCP 超时断开，落库阶段就会抛 "the underlying connection is closed"
+        # 导致整仓扫描结果丢失。这里立即 commit 归还连接，后续取用时 pool_pre_ping
+        # 会自动剔除死连接；expire_on_commit=False 保证下面返回的 ORM 记录仍可用。
+        await self.session.commit()
         return skills, versions
 
     async def get_category_by_source_url(self, source_url: str) -> str | None:
@@ -532,6 +546,49 @@ class SkillRepository:
         *,
         commit: bool = True,
     ) -> tuple[list[Skill], list[SkillVersion]]:
+        """Sync skills/versions for one repository, retrying once on a dead connection.
+
+        兜底加固：长扫描期间连接可能被服务端断开（原因见 ``load_scan_records``
+        的注释），落库开头就会抛 ``InterfaceError: the underlying connection is
+        closed``。捕获后换连接整体重放一次：
+
+        - ``session.close()`` 抛弃死连接和半截事务。未提交的写入（含扫描早期
+          flush 的 branch/local_path 更新）本就随死连接丢失，只能回退；已加载
+          的 ORM 对象变为 detached 但属性值保留，调用方后续访问不会触发
+          async lazy load。session 复用时自动从连接池取新连接（pool_pre_ping
+          剔除死连接）。
+        - 重放复用同一 session，保持调用方 ``commit=False`` 时的单事务语义
+          （与后续 SecurityAudit / Repo 更新一次 commit）。
+        - 方法体按查询结果重新 diff，重放幂等。仅重试一次，再次失败照常上抛。
+        """
+        try:
+            return await self._store_skills_and_versions_once(
+                skill_repo_id, latest_skills, tagged_skills, commit=commit,
+            )
+        except InterfaceError as exc:
+            logger.warning(
+                'store_skills_and_versions hit connection error (%s); '
+                'retrying once on a fresh connection',
+                exc,
+            )
+            try:
+                await self.session.close()
+            except Exception:
+                # 死连接上 close 本身也可能失败；连接已被连接池标记失效，
+                # 继续重放即可（第二次失败会正常上抛）
+                pass
+            return await self._store_skills_and_versions_once(
+                skill_repo_id, latest_skills, tagged_skills, commit=commit,
+            )
+
+    async def _store_skills_and_versions_once(
+        self,
+        skill_repo_id: uuid.UUID,
+        latest_skills: list[Skill],
+        tagged_skills: list[SkillVersion],
+        *,
+        commit: bool = True,
+    ) -> tuple[list[Skill], list[SkillVersion]]:
         existing_result = await self.session.execute(
             select(Skill)
             .where(Skill.skill_repo_id == skill_repo_id)
@@ -577,6 +634,7 @@ class SkillRepository:
                     **self._build_summary_update_values(
                         skill,
                         download_count=existing_skill.download_count,
+                        risk_score=existing_skill.risk_score,
                     )
                 )
             )
@@ -620,6 +678,7 @@ class SkillRepository:
                     **self._build_summary_update_values(
                         version,
                         download_count=existing_version.download_count,
+                        risk_score=existing_version.risk_score,
                     )
                 )
             )
@@ -648,7 +707,14 @@ class SkillRepository:
         representative: Skill | SkillVersion,
         *,
         download_count: int,
+        risk_score: Any,
     ) -> dict[str, Any]:
+        """内容变化时的整行更新值。
+
+        ``download_count`` / ``risk_score`` 保留已有值：前者由 popularity 任务
+        维护、后者由安全审计（Jenkins 收集器）回写，均不是本次扫描的产物，
+        用新解析对象的默认值（None）覆盖会丢失已完成的审计分数。
+        """
         return {
             "skill_repo_id": representative.skill_repo_id,
             "skill_id": representative.skill_id,
@@ -666,7 +732,7 @@ class SkillRepository:
             "platform": representative.platform,
             "extra_metadata": representative.extra_metadata,
             "content": representative.content,
-            "risk_score": representative.risk_score,
+            "risk_score": risk_score,
             "download_count": download_count,
             "rating": representative.rating,
             "updated_at": datetime.now(timezone.utc),
@@ -889,11 +955,16 @@ class SkillRepository:
         return int(audit_result.rowcount or 0) + int(history_result.rowcount or 0)
 
     async def delete(self, skill_id: str) -> bool:
-        # 先查出 skill 的 UUID，用于清理软关联表
+        # 先查出 skill 与其 tag 版本的 UUID，用于清理软关联表
+        # （security_audits 对 tag 版本同样按 resource_type='skill' + 版本 UUID 落记录）
         id_result = await self.session.execute(
             select(Skill.id).where(Skill.skill_id == skill_id)
         )
         skill_uuid = id_result.scalar_one_or_none()
+        version_ids_result = await self.session.execute(
+            select(SkillVersion.id).where(SkillVersion.skill_id == skill_id)
+        )
+        version_ids = [row[0] for row in version_ids_result.all()]
 
         version_result = await self.session.execute(
             delete(SkillVersion).where(SkillVersion.skill_id == skill_id)
@@ -904,8 +975,9 @@ class SkillRepository:
         await self.session.flush()
 
         # 清理 security_audits 和 download_history 中的孤儿数据
-        if skill_uuid:
-            await self.delete_skill_related_records([skill_uuid])
+        related_ids = [*([skill_uuid] if skill_uuid else []), *version_ids]
+        if related_ids:
+            await self.delete_skill_related_records(related_ids)
 
         return (version_result.rowcount or 0) > 0 or (summary_result.rowcount or 0) > 0
 

@@ -14,6 +14,7 @@ import bannerBgLight from '@/assets/bg/card-bg.png'
 import bannerBgDark from '@/assets/bg/card-bg-dark.png'
 import viewGridSvg from '@/assets/icons/view-grid.svg?raw'
 import viewListSvg from '@/assets/icons/view-list.svg?raw'
+import closeSvg from '@/assets/icons/close.svg?raw'
 import emptyStateSvg from '@/assets/icons/empty-state.svg?raw'
 
 const skillStore = useSkillStore()
@@ -301,7 +302,7 @@ function onPaginationChange(
         <div class="search-box-wrapper" style="max-width:660px; width:100%; margin:0 auto">
           <OInput
             v-model="searchInput"
-            placeholder="搜索 Skill"
+            placeholder="搜索Skill：使用关键词匹配或自然语言描述"
             size="large"
             round="4px"
             clearable
@@ -347,9 +348,7 @@ function onPaginationChange(
                 aria-label="删除搜索历史"
                 @mousedown.stop.prevent="removeSearchHistory(item)"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m7.41 6 5.09 5.09L17.59 6 19 7.41 13.91 12.5 19 17.59 17.59 19 12.5 13.91 7.41 19 6Z" fill="currentColor" />
-                </svg>
+                <span class="search-history-remove-icon" v-html="closeSvg" aria-hidden="true"></span>
               </button>
             </div>
           </div>
@@ -593,8 +592,18 @@ function onPaginationChange(
   background-color: var(--o-color-control2-light);
 }
 
-.search-history-clock,
-.search-history-remove svg {
+.search-history-clock {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.search-history-remove-icon {
+  display: flex;
+}
+
+/* v-html 注入的 svg 不带 scoped 属性，需 :deep() 才能命中 */
+.search-history-remove :deep(svg) {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
@@ -624,6 +633,25 @@ function onPaginationChange(
   height: 32px;
   margin-left: var(--o-gap-2);
   flex-shrink: 0;
+  /* 默认隐藏：悬停历史项时淡入，减少视觉噪音与误触；
+     pointer-events:none 保证隐藏时不可点，但仍可 Tab 聚焦 */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--o-duration-m1) var(--o-easing-standard);
+}
+
+.search-history-item:hover .search-history-remove,
+.search-history-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 触屏设备没有 hover，删除按钮保持常显 */
+@media (hover: none) {
+  .search-history-remove {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* Hero 标题： size=40 weight=SemiBold color=#000000 */

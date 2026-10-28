@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 from dataclasses import dataclass, field
@@ -149,6 +150,9 @@ class SkillManager:
         # DB 删除成功后再清本地 clone 目录，失败时保持本地与 DB 一致
         await self.skill_repo_repository.delete_skill_repository(stored.id)
         self._cleanup_local_clone(stored.local_path)
+        # 删除后自愈统计值（contributors.skill_count / skill_repos.skill_num），
+        # 内部容错，失败仅告警不影响删除结果
+        await self._reconcile_skill_statistics()
 
     async def get_repository_by_id(self, repository_id: str) -> SkillRepoModel:
         repository = await self.skill_repo_repository.get_skill_repository_by_id(repository_id)
@@ -178,14 +182,16 @@ class SkillManager:
         normalized = self._normalize_repository_request(request)
         repo_name = self._derive_repo_name(normalized)
         clone_dir = self._local_repository_path(repo_name)
-        self._sync_git_repository(
+        # git 同步（clone/fetch）放到线程池执行，网络挂起时不再阻塞事件循环
+        await asyncio.to_thread(
+            self._sync_git_repository,
             clone_dir=clone_dir,
             clone_url=normalize_clone_url_for_git(normalized.url),
             branch=normalized.branch,
             repo_url=normalized.url,
         )
 
-        skill_paths = self._list_skill_paths(clone_dir)
+        skill_paths = await asyncio.to_thread(self._list_skill_paths, clone_dir)
         # URL 方式贡献（skill_paths 非空）只收录登记的 SKILL.md，其余不入库
         skill_path_filter: set[str] | None = None
         if normalized.skill_paths:
@@ -227,7 +233,9 @@ class SkillManager:
             # 登记（platform='community'），即使 git 提交未变化，也必须迁移其
             # 列表来源字段（platform/source）。
             repository = await self._sync_catalog_source(repository, normalized)
-            if self._is_commit_unchanged(repository, clone_dir):
+            if await asyncio.to_thread(
+                self._is_commit_unchanged, repository, clone_dir,
+            ):
                 candidates, triggered = await self._retry_unscored_security_audits(repository)
                 if candidates:
                     setattr(repository, "_security_retry_candidates", candidates)
@@ -416,7 +424,8 @@ class SkillManager:
         skill_path_filter: set[str] | None = None,
     ) -> tuple[list[Skill], list[SkillVersion], str | None]:
         clone_url = normalize_clone_url_for_git(repo.url)
-        repository_git_metadata = self._git_ops.collect_repository_git_metadata(
+        repository_git_metadata = await asyncio.to_thread(
+            self._git_ops.collect_repository_git_metadata,
             clone_dir,
             clone_url,
             repo.url,
@@ -429,7 +438,9 @@ class SkillManager:
 
         detected_branch: str | None = None
         if repo.branch is None:
-            detected_branch = self._git_ops.get_cloned_repo_branch(clone_dir)
+            detected_branch = await asyncio.to_thread(
+                self._git_ops.get_cloned_repo_branch, clone_dir,
+            )
         repo = await self.skill_repo_repository.update_skill_repository(
             repo.id,
             branch=detected_branch,

@@ -98,6 +98,7 @@ class TestSkillRepositoryUnit:
             commit_id="old-commit",
             tree_hash="old-tree",
             download_count=12,
+            risk_score=77,
         )
         scanned = SimpleNamespace(
             skill_repo_id=repo_id,
@@ -138,6 +139,8 @@ class TestSkillRepositoryUnit:
         assert "UPDATE skills SET" in str(compiled)
         assert "updated_at=" in str(compiled)
         assert compiled.params["download_count"] == 12
+        # 已审计的分数保留：不被新解析对象的 risk_score=10 覆盖
+        assert compiled.params["risk_score"] == 77
         session.add.assert_not_called()
 
     @pytest.mark.asyncio
@@ -176,6 +179,93 @@ class TestSkillRepositoryUnit:
 
         assert session.execute.await_count == 2
         session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_retries_once_on_dead_connection(self):
+        """InterfaceError（连接被服务端断开）时换连接整体重放一次后成功。"""
+        from sqlalchemy.exc import InterfaceError
+
+        from src.models.repository import SkillRepository
+
+        dead = InterfaceError(
+            "SELECT skills.id, ...",
+            (),
+            Exception("the underlying connection is closed"),
+        )
+        empty_skills = MagicMock()
+        empty_skills.scalars.return_value.all.return_value = []
+        empty_versions = MagicMock()
+        empty_versions.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        # 第一次落库首查即死连接；重放走完 skills/skill_versions 两次预加载
+        session.execute.side_effect = [
+            dead,
+            empty_skills,
+            empty_versions,
+        ]
+
+        result = await SkillRepository(session).store_skills_and_versions(
+            uuid.uuid4(),
+            [],
+            [],
+            commit=False,
+        )
+
+        assert result == ([], [])
+        # 死连接被 close，重放复用同一 session（由连接池换新连接）
+        session.close.assert_awaited_once()
+        assert session.execute.await_count == 3
+        session.flush.assert_awaited_once()
+        session.commit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_retry_respects_commit_flag(self):
+        """重放与首跑同样遵循 commit 开关（true 时一次 commit）。"""
+        from sqlalchemy.exc import InterfaceError
+
+        from src.models.repository import SkillRepository
+
+        dead = InterfaceError("SELECT", (), Exception("connection closed"))
+        empty_skills = MagicMock()
+        empty_skills.scalars.return_value.all.return_value = []
+        empty_versions = MagicMock()
+        empty_versions.scalars.return_value.all.return_value = []
+        session = AsyncMock()
+        session.execute.side_effect = [dead, empty_skills, empty_versions]
+
+        await SkillRepository(session).store_skills_and_versions(
+            uuid.uuid4(),
+            [],
+            [],
+            commit=True,
+        )
+
+        session.flush.assert_awaited_once()
+        session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_store_skills_raises_when_retry_also_fails(self):
+        """仅重试一次：重放再次遇到 InterfaceError 时照常上抛。"""
+        from sqlalchemy.exc import InterfaceError
+
+        from src.models.repository import SkillRepository
+
+        session = AsyncMock()
+        # side_effect 直接设为异常实例：每次调用都抛出
+        session.execute.side_effect = InterfaceError(
+            "SELECT", (), Exception("connection closed"),
+        )
+
+        with pytest.raises(InterfaceError):
+            await SkillRepository(session).store_skills_and_versions(
+                uuid.uuid4(),
+                [],
+                [],
+            )
+
+        # 首跑首查失败 → close → 重放首查再次失败，不再重试
+        assert session.execute.await_count == 2
+        session.close.assert_awaited_once()
 
     def test_list_with_skill_id_prefix_filters_by_repo(self):
         from sqlalchemy import select
@@ -632,7 +722,10 @@ repositories:
         skill_dir = repository / "skills" / "a"
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
-        skill_file.write_text(f"{VALID_SKILL_BODY}\n", encoding="utf-8")
+        skill_file.write_text(
+            f"---\nname: a\ndescription: Tree-hash fixture skill.\n---\n{VALID_SKILL_BODY}\n",
+            encoding="utf-8",
+        )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill a")
         skill_dir_tree_hash = _git(repository, "rev-parse", "HEAD:skills/a")
@@ -687,7 +780,7 @@ repositories:
         tagged_dir = repository / "skill"
         tagged_dir.mkdir(parents=True)
         (tagged_dir / "SKILL.md").write_text(
-            f"---\nname: tagged-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: tagged-skill\ndescription: Tagged fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add tagged skill")
@@ -703,7 +796,7 @@ repositories:
         head_dir = repository / "skills" / "skill-1"
         head_dir.mkdir(parents=True)
         (head_dir / "SKILL.md").write_text(
-            f"---\nname: head-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: head-skill\ndescription: Head fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add head skill")
@@ -765,7 +858,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: dup-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: dup-skill\ndescription: Duplicate fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -828,7 +921,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: stable-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: stable-skill\ndescription: Stable fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -907,7 +1000,7 @@ repositories:
         skill_dir = repository / "skills" / "skill-1"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: versioned-skill\nversion: 1.2.3\n---\n{VALID_SKILL_BODY}\n",
+            f"---\nname: versioned-skill\ndescription: Versioned fixture skill.\nversion: 1.2.3\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -916,7 +1009,7 @@ repositories:
         _git(repository, "tag", "v1")
 
         (skill_dir / "SKILL.md").write_text(
-            f"---\nname: versioned-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: versioned-skill\ndescription: Versioned fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "drop metadata version")
@@ -981,7 +1074,7 @@ repositories:
         skill1_dir = repository / "skills" / "skill-1"
         skill1_dir.mkdir(parents=True)
         (skill1_dir / "SKILL.md").write_text(
-            f"---\nname: plain-skill\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: plain-skill\ndescription: Plain fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill-1")
@@ -992,7 +1085,7 @@ repositories:
         skill3_dir = repository / "skills" / "skill-3"
         skill3_dir.mkdir(parents=True)
         (skill3_dir / "SKILL.md").write_text(
-            f"---\nname: self-versioned-skill\n---\n{VALID_SKILL_BODY}\n",
+            f"---\nname: self-versioned-skill\ndescription: Self-versioned fixture skill.\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -1002,7 +1095,7 @@ repositories:
 
         # commit 3 (HEAD): skill-3 声明 version: 1.0.1
         (skill3_dir / "SKILL.md").write_text(
-            f"---\nname: self-versioned-skill\nversion: 1.0.1\n---\n{VALID_SKILL_BODY}\n",
+            f"---\nname: self-versioned-skill\ndescription: Self-versioned fixture skill.\nversion: 1.0.1\n---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
         )
         _git(repository, "add", ".")
@@ -1078,6 +1171,7 @@ repositories:
         (skill_dir / "SKILL.md").write_text(
             "---\n"
             "name: my-skill\n"
+            "description: Category-cache fixture skill.\n"
             "category: Engineering and Compilation\n"
             f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
@@ -1134,6 +1228,7 @@ repositories:
         (skill_dir / "SKILL.md").write_text(
             "---\n"
             "name: my-skill\n"
+            "description: Category-cache fixture skill.\n"
             "category: Some Random Category\n"
             f"---\n{VALID_SKILL_BODY}\n",
             encoding="utf-8",
@@ -1186,7 +1281,7 @@ repositories:
         skill_dir.mkdir(parents=True)
         skill_file = skill_dir / "SKILL.md"
         skill_file.write_text(
-            f"---\nname: example\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+            f"---\nname: example\ndescription: Example fixture skill.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
         )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add skill")
@@ -1241,6 +1336,58 @@ repositories:
         assert skills[0].tree_hash == skill_tree_hash
         assert skills[0].risk_score == 12
         assert getattr(skills[0], "_security_audit_triggered") is False
+
+    async def test_skill_scanner_requires_name_and_description(self, tmp_path):
+        """可扫描 Skill 门禁：frontmatter 必须同时有 name 与 description。"""
+        from skillcrawler.core.git_operations import GitOperations
+        from skillcrawler.core.skill_scanner import SkillScanner
+
+        repository = tmp_path / "repository"
+        repository.mkdir()
+        _git(repository, "init")
+        _git(repository, "config", "user.email", "tests@example.com")
+        _git(repository, "config", "user.name", "WittyHub Tests")
+
+        fixtures = {
+            "with-both": (
+                f"---\nname: with-both\ndescription: A complete skill.\n---\n{VALID_SKILL_BODY}\n"
+            ),
+            "no-description": f"---\nname: no-description\n---\n{VALID_SKILL_BODY}\n",
+            "no-name": f"---\ndescription: Only description.\n---\n{VALID_SKILL_BODY}\n",
+            "empty-description": (
+                f"---\nname: empty-description\ndescription: ''\n---\n{VALID_SKILL_BODY}\n"
+            ),
+        }
+        for name, text in fixtures.items():
+            skill_dir = repository / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(text, encoding="utf-8")
+        _git(repository, "add", ".")
+        _git(repository, "commit", "-m", "add skills")
+        head_commit = _git(repository, "rev-parse", "HEAD")
+
+        skill_repository = MagicMock()
+        skill_repository.load_scan_records = AsyncMock(return_value=({}, {}))
+        scanner = SkillScanner(
+            git_ops=GitOperations(),
+            skill_repository=skill_repository,
+            category_classifier=None,
+        )
+        repo = SimpleNamespace(
+            id=uuid.uuid4(),
+            source="gitcode",
+            url="https://gitcode.com/acme/widgets",
+            branch="master",
+            platform=None,
+        )
+
+        skills, _ = await scanner.start_scan(
+            repo=repo,
+            repo_root=repository,
+            repository_git_metadata={"commit_id": head_commit},
+        )
+
+        assert {skill.skill_id for skill in skills} == {"gitcode:acme/widgets/with-both"}
 
     async def test_configured_discover_force_does_not_skip_commit_unchanged_check(self):
         from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
@@ -1917,6 +2064,106 @@ class TestExtractDeclaredVersion:
         assert extract_declared_version({"metadata": {"author": "x"}}) is None
 
 
+class TestExtractDeclaredTags:
+    """frontmatter tags 归一化：逗号分隔字符串 / YAML 列表 / 嵌套 metadata 块。"""
+
+    def _parse(self, text: str) -> dict:
+        from skillcrawler.core.skill_parser import parse_skill_frontmatter_text
+
+        meta, _ = parse_skill_frontmatter_text(text)
+        return meta
+
+    def test_comma_separated_string_split(self):
+        """datadog-labs 风格：metadata 块下逗号分隔字符串，拆成多个 tag。"""
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\n"
+            "name: setup-sourcemaps\n"
+            "description: Upload sourcemaps.\n"
+            "metadata:\n"
+            '  tags: "browser-sdk, sourcemaps, rum"\n'
+            "---\n"
+            "# body\n"
+        )
+        assert extract_declared_tags(meta) == ["browser-sdk", "sourcemaps", "rum"]
+
+    def test_inline_list_tags(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\nname: s\ndescription: d\ntags: [python, \"fast api\"]\n---\nbody\n"
+        )
+        assert extract_declared_tags(meta) == ["python", "fast api"]
+
+    def test_space_separated_string_split(self):
+        """NVIDIA blueprint 风格：metadata 块下空格分隔字符串，拆成多个 tag。"""
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\n"
+            "name: vss-setup-behavior-analytics\n"
+            "description: Deploy standalone service.\n"
+            "metadata:\n"
+            '  tags: "nvidia blueprint operational deployment behavior-analytics"\n'
+            "---\n"
+            "# body\n"
+        )
+        assert extract_declared_tags(meta) == [
+            "nvidia", "blueprint", "operational", "deployment", "behavior-analytics",
+        ]
+
+    def test_block_list_preserves_multi_word_tags(self):
+        """YAML 列表项是结构化声明，项内空格属于 tag 名，不拆分。"""
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\n"
+            "name: s\n"
+            "description: d\n"
+            "tags:\n"
+            "  - Extended Context\n"
+            "  - NeMo Curator\n"
+            "---\n"
+            "# body\n"
+        )
+        assert extract_declared_tags(meta) == ["Extended Context", "NeMo Curator"]
+
+    def test_block_list_tags(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\nname: s\ndescription: d\ntags:\n  - python\n  - asyncio\n---\nbody\n"
+        )
+        assert extract_declared_tags(meta) == ["python", "asyncio"]
+
+    def test_single_string_and_dedupe(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = self._parse(
+            "---\nname: s\ndescription: d\ntags: \"python, python , , asyncio\"\n---\nbody\n"
+        )
+        assert extract_declared_tags(meta) == ["python", "asyncio"]
+
+    def test_top_level_wins_over_nested_dict(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = {"tags": "a, b", "metadata": {"tags": "x, y"}}
+        assert extract_declared_tags(meta) == ["a", "b"]
+
+    def test_nested_dict_tags_fallback(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        meta = {"name": "s", "metadata": {"tags": "x, y"}}
+        assert extract_declared_tags(meta) == ["x", "y"]
+
+    def test_missing_tags_returns_none(self):
+        from skillcrawler.core.skill_parser import extract_declared_tags
+
+        assert extract_declared_tags({"name": "s"}) is None
+        assert extract_declared_tags({"tags": " , "}) is None
+
+
 class TestGitOperationsTags:
     def _init_repository(self, path: Path) -> None:
         path.mkdir(parents=True)
@@ -2239,7 +2486,43 @@ class TestDeepSeekCategoryClassifier:
         sleep_mock.assert_called_once()
 
     def test_classify_degrades_to_frontmatter_after_transient_exhausted(self):
-        """网络故障重试耗尽后原样沿用 frontmatter category，不再 fatal 中断扫描。"""
+        """网络故障重试耗尽后沿用合法的 frontmatter category（归一化后），不 fatal 中断扫描。"""
+        import httpx
+
+        from skillcrawler.core.category_classifier import (
+            CATEGORY_RETRY_ATTEMPTS,
+            DeepSeekCategoryClassifier,
+        )
+
+        classifier = self._make_classifier()
+        with (
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_call_deepseek",
+                side_effect=httpx.ReadTimeout("The read operation timed out"),
+            ) as call_mock,
+            patch.object(
+                DeepSeekCategoryClassifier,
+                "_normalize_category",
+                # 第一次调用（入口校验）判非法以进入 LLM 路径，
+                # 第二次调用（降级校验）归一为合法标准分类
+                side_effect=[None, "Development and Build"],
+            ),
+            patch("skillcrawler.core.category_classifier.time.sleep"),
+        ):
+            category = classifier.classify(
+                skill_file=Path("SKILL.md"),
+                metadata={"category": "development and build"},
+                content="body",
+                source_url="https://x",
+            )
+
+        # 合法值经 _normalize_category 归一到类别表标准写法后沿用
+        assert category == "Development and Build"
+        assert call_mock.call_count == CATEGORY_RETRY_ATTEMPTS
+
+    def test_classify_degrades_to_none_when_frontmatter_category_invalid(self):
+        """frontmatter category 不在类别表内时降级返回 None，留待下轮重新分类。"""
         import httpx
 
         from skillcrawler.core.category_classifier import (
@@ -2263,8 +2546,7 @@ class TestDeepSeekCategoryClassifier:
                 source_url="https://x",
             )
 
-        # 原样沿用 frontmatter 值（不强校验标准分类）
-        assert category == "Some Random Category"
+        assert category is None
         assert call_mock.call_count == CATEGORY_RETRY_ATTEMPTS
 
     def test_classify_fatal_on_non_transient_error(self):
@@ -2419,6 +2701,117 @@ class TestSearchService:
         assert service._text_search.await_args.kwargs["offset"] == 0
         assert service._vector_search.await_args.kwargs["limit"] == HYBRID_CANDIDATE_LIMIT
         assert service._vector_search.await_args.kwargs["offset"] == 0
+
+
+class TestAsyncNonBlocking:
+    """扫描链路的同步阻塞调用（git/LLM）必须放线程池，不冻结事件循环。"""
+
+    async def test_discover_scan_does_not_block_event_loop(self):
+        import asyncio
+        import time
+
+        from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
+
+        manager = SkillManager(MagicMock(), AsyncMock())
+        started = time.perf_counter()
+
+        def slow_sync_git(*_args, **_kwargs):
+            # 模拟网络挂起的同步 git 调用（如 github 不可达时的 fetch）
+            time.sleep(0.4)
+
+        probe_elapsed: list[float] = []
+
+        async def probe():
+            await asyncio.sleep(0.1)
+            probe_elapsed.append(time.perf_counter() - started)
+
+        with (
+            patch.object(SkillManager, "_sync_git_repository", slow_sync_git),
+            patch.object(SkillManager, "_list_skill_paths", return_value=[]),
+        ):
+            await asyncio.gather(
+                manager.discover_configured_skill_repository(
+                    SkillRepositoryRequest(url="https://github.com/acme/agent-skills")
+                ),
+                probe(),
+            )
+
+        # 若 git 调用阻塞事件循环，probe 只能等 0.4s 后才完成
+        assert probe_elapsed and probe_elapsed[0] < 0.3
+
+
+class TestDeleteCleanup:
+    """删除仓库/技能时的软关联清理与统计自愈。"""
+
+    async def test_delete_skill_repositories_cleans_skill_and_version_soft_links(self):
+        from src.models.repository import SkillRepoRepository
+
+        skill_one, skill_two, version_one = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(all=lambda: [(skill_one,), (skill_two,)]),
+                SimpleNamespace(all=lambda: [(version_one,)]),
+                SimpleNamespace(rowcount=1),
+            ]
+        )
+        related_mock = AsyncMock(return_value=3)
+        with patch(
+            "src.models.repository.SkillRepository.delete_skill_related_records",
+            related_mock,
+        ):
+            deleted = await SkillRepoRepository(session).delete_skill_repositories(
+                [uuid.uuid4()]
+            )
+
+        assert deleted == 1
+        # 软关联清理收到 skill 与 skill_versions 两类 UUID 的并集
+        assert set(related_mock.await_args.args[0]) == {
+            skill_one, skill_two, version_one,
+        }
+
+    async def test_skill_delete_cleans_version_soft_links(self):
+        from src.models.repository import SkillRepository
+
+        skill_uuid, version_one, version_two = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: skill_uuid),
+                SimpleNamespace(all=lambda: [(version_one,), (version_two,)]),
+                SimpleNamespace(rowcount=2),
+                SimpleNamespace(rowcount=1),
+            ]
+        )
+        related_mock = AsyncMock()
+        with patch(
+            "src.models.repository.SkillRepository.delete_skill_related_records",
+            related_mock,
+        ):
+            result = await SkillRepository(session).delete("gitcode:acme/widgets/one")
+
+        assert result is True
+        assert set(related_mock.await_args.args[0]) == {
+            skill_uuid, version_one, version_two,
+        }
+
+    async def test_delete_skill_repository_reconciles_statistics(self):
+        from skillcrawler.core.skill_manager import SkillManager
+
+        manager = SkillManager(MagicMock(), AsyncMock())
+        stored = SimpleNamespace(id=uuid.uuid4(), local_path=None)
+        reconcile_mock = AsyncMock()
+        with (
+            patch.object(
+                SkillManager,
+                "get_repository_by_id",
+                AsyncMock(return_value=stored),
+            ),
+            patch.object(SkillManager, "_reconcile_skill_statistics", reconcile_mock),
+        ):
+            await manager.delete_skill_repository(str(stored.id))
+
+        reconcile_mock.assert_awaited_once()
 
 
 class TestSkillUrlContribution:
@@ -2610,7 +3003,7 @@ class TestSkillUrlContribution:
             skill_dir = repository / "skills" / name
             skill_dir.mkdir(parents=True)
             (skill_dir / "SKILL.md").write_text(
-                f"---\nname: {name}\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
+                f"---\nname: {name}\ndescription: Skill {name} fixture.\n---\n{VALID_SKILL_BODY}\n", encoding="utf-8",
             )
         _git(repository, "add", ".")
         _git(repository, "commit", "-m", "add two skills")

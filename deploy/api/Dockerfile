@@ -22,7 +22,10 @@ COPY alembic.ini ./
 COPY deploy/api/entrypoint.sh /usr/local/bin/wittyhub-api-entrypoint
 COPY skillcrawler ./skillcrawler
 
-RUN pip install -i https://mirrors.aliyun.com/pypi/simple --no-cache-dir --default-timeout=300 -e .
+# PyPI 源可按构建环境切换：境内默认华为云（实测同 wheel 下载 1.5s，
+# 阿里云 295s），境外构建加 --build-arg PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple
+RUN pip install -i "${PIP_INDEX_URL}" --no-cache-dir --default-timeout=500 -e .
 
 RUN groupadd --gid "${APP_GID}" wittyhub \
     && useradd --uid "${APP_UID}" --gid wittyhub --create-home --shell /usr/sbin/nologin wittyhub \

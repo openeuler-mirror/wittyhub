@@ -1345,7 +1345,10 @@ async def start_skillspector_collector() -> SkillspectorCollector | None:
     collector = SkillspectorCollector(
         client=client,
         session_factory=AsyncSessionLocal,
-        poll_interval=30,
+        # 2 分钟一次：Jenkins 构建本身需要数分钟，轮询过密只是空转打日志
+        # （_log_collector_event 每次轮询都有条目），120s 既不延迟结果回写太多，
+        # 又把轮询日志频率降到原来的 1/4
+        poll_interval=120,
     )
     await collector.start()
     logger.info("SkillspectorCollector background task started")

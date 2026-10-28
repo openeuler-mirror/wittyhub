@@ -1,5 +1,8 @@
 from typing import Annotated, Any
 
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +13,12 @@ from src.core.database import get_db
 from src.indexer.search import SearchService
 from src.models.repository import SkillRepository
 
+_logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# 翻译是补充检索腿，超时即跳过：不为它拖慢主结果（部分 LLM provider 单次可达数十秒）
+TRANSLATE_TIMEOUT_SECONDS = 2.0
 
 
 @router.get("/search")
@@ -32,29 +40,56 @@ async def search(
     category_list = category.split(",") if category else None
     security_level_list = security_level.split(",") if security_level else None
     embedding = None
+    translated_query = None
 
     settings = get_settings()
     semantic_enabled = settings.ai.enable_semantic_search
 
     if mode in ("semantic", "hybrid") and semantic_enabled:
-        try:
-            embedding = await generate_query_embedding(q)
-        except Exception:
-            embedding = None
-            mode = "text"
+        # 原查询 embedding 与翻译并行发起，两者耗时取 max 而非相加
+        embed_task = generate_query_embedding(q)
+        translate_task = (
+            asyncio.wait_for(translate_query_to_english(q), timeout=TRANSLATE_TIMEOUT_SECONDS)
+            if mode == "hybrid"
+            else asyncio.sleep(0)
+        )
+        gather_results = await asyncio.gather(
+            embed_task, translate_task, return_exceptions=True,
+        )
+        embedding = (
+            gather_results[0]
+            if not isinstance(gather_results[0], BaseException)
+            else None
+        )
+        translate_result = gather_results[1]
+        if mode == "hybrid" and isinstance(translate_result, asyncio.TimeoutError):
+            _logger.warning(
+                "LLM 翻译超时，跳过翻译腿 (timeout=%ss, query=%r)",
+                TRANSLATE_TIMEOUT_SECONDS,
+                q[:50],
+            )
+            translated_query = None
+        elif isinstance(translate_result, BaseException):
+            _logger.warning(
+                "LLM 翻译异常，跳过翻译腿 (query=%r): %s",
+                q[:50],
+                translate_result,
+            )
+            translated_query = None
+        elif mode == "hybrid":
+            translated_query = translate_result
+        else:
+            translated_query = None
 
     if embedding is None:
         mode = "text"
 
-    translated_query = None
     translated_embedding = None
-    if mode == "hybrid":
-        translated_query = await translate_query_to_english(q)
-        if translated_query:
-            try:
-                translated_embedding = await generate_query_embedding(translated_query)
-            except Exception:
-                translated_embedding = None
+    if translated_query:
+        try:
+            translated_embedding = await generate_query_embedding(translated_query)
+        except Exception:
+            translated_embedding = None
 
     search_service = SearchService(db)
     results = await search_service.search_skills(

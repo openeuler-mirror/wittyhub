@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.ai.category_classifier import DeepSeekCategoryClassifier
-from skillcrawler.core.git_operations import GitOperations
+from src.utils.git_operations import GitOperations
 from src.core.categories import CANONICAL_CATEGORIES
 from src.security.detector import SecurityDetector, SecurityReport
-from skillcrawler.core.skill_parser import (
+from src.utils.skill_parser import (
     as_optional_str,
     as_optional_str_list,
     build_skill_md_url,

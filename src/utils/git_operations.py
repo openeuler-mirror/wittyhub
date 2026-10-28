@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from skillcrawler.core.skill_parser import (
+from src.utils.skill_parser import (
     parse_skill_frontmatter_text,
     should_skip_relative_path,
 )

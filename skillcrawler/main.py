@@ -29,7 +29,7 @@ from skillcrawler.core.popularity import (
     estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
-from skillcrawler.core.skill_parser import normalize_git_clone_url, parse_skill_md_url
+from src.utils.skill_parser import normalize_git_clone_url, parse_skill_md_url
 from src.core.config import get_settings
 from src.core.database import get_db_context
 from src.models.repository import (

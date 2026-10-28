@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from skillcrawler.core.git_operations import GitOperations
+from src.utils.git_operations import GitOperations
 
 OPENEULER_SKILLS_URL = "https://gitcode.com/openeuler/openEuler-skills"
 
@@ -218,7 +218,7 @@ def load_contributor_profiles(repository_path: Path | None = None) -> list[dict[
     ``name`` / ``description`` / ``git_profile`` (git hosting profile) /
     ``website`` (official site) and ``repo_url`` (first registered repo URL).
     """
-    from skillcrawler.core.skill_parser import derive_skill_source
+    from src.utils.skill_parser import derive_skill_source
 
     path = (repository_path or sync_openEuler_skills_repo()).expanduser()
     profiles: list[dict[str, Any]] = []

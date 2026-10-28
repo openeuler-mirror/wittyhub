@@ -18,9 +18,9 @@ from src.ai.category_classifier import (
     CategoryClassificationError,
     DeepSeekCategoryClassifier,
 )
-from skillcrawler.core.git_operations import GitOperations
+from src.utils.git_operations import GitOperations
 from skillcrawler.core.openeuler_sig import build_openeuler_repo_sig_mapping
-from skillcrawler.core.skill_parser import (
+from src.utils.skill_parser import (
     as_optional_str,
     derive_skill_source,
     normalize_clone_url_for_git,

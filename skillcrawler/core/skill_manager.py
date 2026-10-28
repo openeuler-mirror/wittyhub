@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import update
 
 from skillcrawler.config import load_contributor_profiles
-from skillcrawler.core.category_classifier import (
+from src.ai.category_classifier import (
     CategoryClassificationError,
     DeepSeekCategoryClassifier,
 )

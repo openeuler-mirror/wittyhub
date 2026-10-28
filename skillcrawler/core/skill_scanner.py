@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+from src.ai.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
 from src.core.categories import CANONICAL_CATEGORIES
 from src.security.detector import SecurityDetector, SecurityReport

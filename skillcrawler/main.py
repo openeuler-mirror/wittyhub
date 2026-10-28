@@ -22,7 +22,7 @@ from skillcrawler.config import (
     load_single_catalog_entry,
     sync_openEuler_skills_repo,
 )
-from skillcrawler.core.category_classifier import CategoryClassificationError
+from src.ai.category_classifier import CategoryClassificationError
 from skillcrawler.core.popularity import (
     PopularityCollector,
     allocate_skill_downloads,

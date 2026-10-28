@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
 from skillcrawler.core.git_operations import GitOperations
-from src.api.services.categories import CANONICAL_CATEGORIES
+from src.core.categories import CANONICAL_CATEGORIES
 from src.security.detector import SecurityDetector, SecurityReport
 from skillcrawler.core.skill_parser import (
     as_optional_str,

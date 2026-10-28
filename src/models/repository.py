@@ -9,7 +9,7 @@ from sqlalchemy.exc import InterfaceError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.api.services.categories import CANONICAL_CATEGORIES, category_label
+from src.core.categories import CANONICAL_CATEGORIES, category_label
 from src.models.orm import (
     Agent,
     AgentVersion,

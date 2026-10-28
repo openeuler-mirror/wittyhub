@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI):
 
     discover_scheduler = None
     if settings.discover_scheduler.enabled:
-        from src.api.services.discover_scheduler import start_discover_scheduler
+        from src.jobs.discover_scheduler import start_discover_scheduler
 
         discover_scheduler = await start_discover_scheduler()
 

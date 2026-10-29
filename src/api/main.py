@@ -29,7 +29,8 @@ class _HealthProbeFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            path = record.args[1]  # uvicorn.access: (method, path, http_version)
+            # uvicorn.access 参数顺序: (client_addr, method, path, http_version, status)
+            path = record.args[2].split("?")[0]
         except (AttributeError, IndexError, TypeError):
             return True
         return path not in self._PROBE_PATHS
@@ -105,24 +106,22 @@ def configure_logging() -> None:
     )
 
 
-async def _backfill_embeddings() -> None:
-    """启动时后台补跑缺失 embedding，失败不影响服务启动。
+async def _run_remediation_loop() -> None:
+    """启动后立即补一轮衍生字段缺口，之后低频定时补跑，失败不影响服务。
 
-    与 discover 末尾的增量补嵌入同一入口（embed_missing），并发安全：
-    通过 pg_advisory_lock 与全量重建脚本互斥，锁被占用时直接跳过。
+    覆盖三类缺口（security 风险分 / category 分类 / embedding 向量），
+    详见 src/jobs/remediation.py：启动即补可自愈重启期间错过的补跑
+    （discover 调度会跳过当天已过触发点），之后每小时一轮兜住长驻实例
+    期间新增的缺口。单轮内部各任务自持 pg_advisory_lock 互斥。
     """
-    logger = structlog.get_logger()
-    try:
-        from src.ai.embedding_indexer import LockBusyError, embed_missing
+    from src.jobs.remediation import run_remediation_loop
 
-        stats = await embed_missing()
-        logger.info("Startup embedding backfill: %s", stats.as_dict())
-    except LockBusyError:
-        logger.info(
-            "Startup embedding backfill skipped: reindex lock held by another task"
-        )
+    try:
+        await run_remediation_loop()
+    except asyncio.CancelledError:
+        raise
     except Exception:
-        logger.exception("Startup embedding backfill failed")
+        structlog.get_logger().exception("Remediation loop failed")
 
 
 @asynccontextmanager
@@ -138,22 +137,21 @@ async def lifespan(app: FastAPI):
 
     discover_scheduler = None
     if settings.discover_scheduler.enabled:
-        from src.api.services.discover_scheduler import start_discover_scheduler
+        from src.jobs.discover_scheduler import start_discover_scheduler
 
         discover_scheduler = await start_discover_scheduler()
 
-    # 启动时补跑嵌入：增量补嵌入原本只挂在 discover 末尾，而重启后调度会跳过
-    # 当天已过触发点、不补跑（compute_next_run 规则），导致新入库 skill 的
-    # embedding 长时间缺失、语义检索搜不到（如 vsag-rabitq-optimization）。
-    # 启动时后台补一次即可自愈，不必等下轮 discover（最长 24h）。
-    embed_task = None
-    if settings.ai.enable_semantic_search:
-        embed_task = asyncio.create_task(_backfill_embeddings())
+    # 启动时补跑衍生字段缺口（security/category/embedding），之后每小时一轮：
+    # 增量补嵌入原本只挂在 discover 末尾、空分类只在启动补一次，而重启后调度
+    # 会跳过当天已过触发点（compute_next_run 规则），导致新入库 skill 的
+    # embedding 长时间缺失、语义检索搜不到（如 vsag-rabitq-optimization）；
+    # 分类降级落空的行也因 _is_content_unchanged 跳过而永远补不上。
+    # 一个后台任务统一补跑即可自愈，不必等下轮 discover（最长 24h）。
+    remediation_task = asyncio.create_task(_run_remediation_loop())
 
     yield
 
-    if embed_task is not None:
-        embed_task.cancel()
+    remediation_task.cancel()
     if discover_scheduler is not None:
         await discover_scheduler.stop()
     if collector is not None:

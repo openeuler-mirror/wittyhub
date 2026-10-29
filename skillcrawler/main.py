@@ -22,14 +22,14 @@ from skillcrawler.config import (
     load_single_catalog_entry,
     sync_openEuler_skills_repo,
 )
-from skillcrawler.core.category_classifier import CategoryClassificationError
+from src.ai.category_classifier import CategoryClassificationError
 from skillcrawler.core.popularity import (
     PopularityCollector,
     allocate_skill_downloads,
     estimate_repo_downloads,
 )
 from skillcrawler.core.skill_manager import SkillManager, SkillRepositoryRequest
-from skillcrawler.core.skill_parser import normalize_git_clone_url, parse_skill_md_url
+from src.utils.skill_parser import normalize_git_clone_url, parse_skill_md_url
 from src.core.config import get_settings
 from src.core.database import get_db_context
 from src.models.repository import (
@@ -391,14 +391,13 @@ async def _discover_repositories_from_requests(
 ) -> tuple[int, dict[str, Any]]:
     """逐仓库执行 discover，输出表格，返回 (退出码, 本轮运行数据)。
 
-    运行数据供 `_run_discover` 在补建 embedding 后构建结果 JSON（与自动
+    运行数据供 `_run_discover` 在补跑衍生字段缺口后构建结果 JSON（与自动
     调度输出完全对齐）。
     """
     total = len(requests)
     counters = {
         "created": 0,
         "rediscovered": 0,
-        "security_retried": 0,
         "unchanged": 0,
         "removed": 0,
         "no_skill": 0,
@@ -495,20 +494,6 @@ async def _discover_repositories_from_requests(
                     "error": "SKILL.md not found",
                 }
             )
-        elif outcome == "security_retried":
-            candidates = int(getattr(result, "_security_retry_candidates", 0))
-            triggered = int(getattr(result, "_security_retriggered", 0))
-            result_rows.append(
-                {
-                    "#": str(index),
-                    "result": "security_retried",
-                    "status": str(result.skill_discover_status or "-"),
-                    "skills": str(result.skill_num),
-                    "name": _display_skill_repo_name(result),
-                    "url": result.url or label,
-                    "error": f"commit unchanged; triggered {triggered}/{candidates}",
-                }
-            )
         elif outcome == "unchanged":
             result_rows.append(
                 {
@@ -543,12 +528,11 @@ async def _discover_repositories_from_requests(
     _print_failure_details(failure_details)
     print()
     logger.info(
-        "Discover summary: total=%d created=%d rediscovered=%d security_retried=%d "
+        "Discover summary: total=%d created=%d rediscovered=%d "
         "unchanged=%d removed=%d no_skill=%d failed=%d",
         total,
         counters["created"],
         counters["rediscovered"],
-        counters["security_retried"],
         counters["unchanged"],
         counters["removed"],
         counters["no_skill"],
@@ -661,14 +645,13 @@ def build_configured_discover_requests(
 COUNTER_NOTES: dict[str, str] = {
     "created": "新建仓库记录并完成扫描",
     "rediscovered": "已有仓库 commit 变化并完成重扫",
-    "security_retried": "commit 未变化，但为 NULL risk_score 记录重新提交安全检测",
     "unchanged": "HEAD commit 与数据库相同，跳过扫描",
     "removed": "已有仓库不再包含可扫描 Skill，删除 DB 仓库记录",
     "no_skill": "新仓库没有可扫描 Skill，不创建 DB 仓库记录",
     "failed": "当前仓库处理失败（clone/fetch 或扫描异常），详见 repos[].error",
 }
 
-# skill_stats / embedding_run 各项含义，同样以 <key>_note 内嵌输出（与设计文档 §11 口径一致）
+# skill_stats / remediation_run 各项含义，同样以 <key>_note 内嵌输出（与设计文档 §11 口径一致）
 SKILL_STATS_NOTES: dict[str, str] = {
     "total_skills": "skills 表 Skill 总数（latest Skill，不含 Tag 版本）",
     "category_distribution": "分类分布 {category: count}，按数量降序；NULL / 空 / other / others 统一归入 others",
@@ -688,6 +671,19 @@ INDEX_CREATION_NOTES: dict[str, str] = {
     "missing": "已审计但 embedding 缺失的 Skill 数（索引创建失败，等下轮 discover 或 API 启动补跑自愈）",
     "not_required": "未审计且未建索引（risk_score 与 embedding 均为空）的 Skill 数，暂不建索引属预期状态",
 }
+SECURITY_BACKFILL_NOTES: dict[str, str] = {
+    "total": "本轮扫描到的待补审计行数（risk_score 为空且无在途异步检测）",
+    "triggered": "本轮成功重新触发 Jenkins 检测的行数",
+    "failed": "触发失败（未获得 build number）的行数",
+    "skipped": "本轮跳过补审计的原因",
+}
+CATEGORY_BACKFILL_NOTES: dict[str, str] = {
+    "total": "本轮扫描到的空分类行数",
+    "filled": "本轮成功写入分类的行数",
+    "unclassified": "分类器无结果（frontmatter 也无合法值）的行数",
+    "failed": "分类调用抛错的行数",
+    "skipped": "本轮跳过补分类的原因",
+}
 EMBEDDING_RUN_NOTES: dict[str, str] = {
     "total": "本轮扫描到的待编码行数",
     "indexed": "本轮成功写入 embedding 的行数",
@@ -697,6 +693,12 @@ EMBEDDING_RUN_NOTES: dict[str, str] = {
     "stale_skipped": "编码期间内容发生变化或记录消失的行数",
     "skipped": "本轮跳过补建的原因",
 }
+# remediation_run 三个补齐任务各自的 <key>_note 口径
+REMEDIATION_TASK_NOTES: dict[str, dict[str, str]] = {
+    "security": SECURITY_BACKFILL_NOTES,
+    "category": CATEGORY_BACKFILL_NOTES,
+    "embedding": EMBEDDING_RUN_NOTES,
+}
 
 
 def _with_notes(data: dict[str, Any], notes: dict[str, str]) -> dict[str, Any]:
@@ -705,6 +707,23 @@ def _with_notes(data: dict[str, Any], notes: dict[str, str]) -> dict[str, Any]:
     for key, value in data.items():
         merged[key] = value
         merged[f"{key}_note"] = notes.get(key, "")
+    return merged
+
+
+def remediation_run_with_notes(
+    remediation_run: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """remediation_run 输出前为各任务的每个字段补 <key>_note 说明。"""
+    if remediation_run is None:
+        return None
+    merged: dict[str, Any] = {}
+    for task_name, task_stats in remediation_run.items():
+        if isinstance(task_stats, dict):
+            merged[task_name] = _with_notes(
+                task_stats, REMEDIATION_TASK_NOTES.get(task_name, {})
+            )
+        else:
+            merged[task_name] = task_stats
     return merged
 
 
@@ -880,8 +899,6 @@ def classify_discover_result(result: Any) -> str:
         return "no_skill"
     if getattr(result, "_removed_existing", False):
         return "removed"
-    if getattr(result, "_security_retry_candidates", 0):
-        return "security_retried"
     if getattr(result, "_unchanged", False):
         return "unchanged"
     if getattr(result, "_created_new", False):
@@ -928,14 +945,15 @@ def build_discover_result_document(
     config_keys: list[str],
     counters: dict[str, int],
     repo_details: list[dict[str, Any]],
-    embed_stats_dict: dict[str, Any] | None,
+    remediation_run: dict[str, Any] | None,
     skill_stats: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """构建一轮 discover 的结果文档（CLI 与自动调度共用，口径完全一致）。
 
-    skill_stats 由调用方采集传入（查询失败传 None）；counters / skill_stats /
-    embedding_run 的每个字段均内嵌 <key>_note 说明。耗时与最慢仓库统计由
-    repo_details 推导。
+    skill_stats 由调用方采集传入（查询失败传 None）；remediation_run 为
+    security / category / embedding 三个补齐任务的统计（详见
+    src/jobs/remediation.py）。counters / skill_stats / remediation_run
+    的每个字段均内嵌 <key>_note 说明。耗时与最慢仓库统计由 repo_details 推导。
     """
     if skill_stats is not None:
         log_skill_stats(skill_stats)
@@ -957,8 +975,8 @@ def build_discover_result_document(
         "skill_stats": skill_stats_with_notes(skill_stats)
         if skill_stats is not None
         else None,
-        "embedding_run": _with_notes(embed_stats_dict, EMBEDDING_RUN_NOTES)
-        if embed_stats_dict is not None
+        "remediation_run": remediation_run_with_notes(remediation_run)
+        if remediation_run is not None
         else None,
         "total_seconds": round(run_elapsed, 3),
         "avg_seconds_per_repo": round(avg_elapsed, 3),
@@ -970,33 +988,22 @@ def build_discover_result_document(
     }
 
 
-async def _backfill_embeddings_after_discover() -> dict[str, Any] | None:
-    """扫描结束后补建缺失 embedding（索引创建），返回本轮执行结果。
+async def _run_remediations_safe() -> dict[str, Any] | None:
+    """扫描结束后补跑衍生字段缺口（security/category/embedding），返回本轮结果。
 
-    只为 `embedding IS NULL` 且 `risk_score` 就绪的行生成向量，使其立即可被
-    语义搜索命中；与全量重建脚本 `scripts/reindex_embeddings.py` 通过
-    `pg_advisory_lock` 互斥，锁被占用时跳过（全量本身覆盖一切）。语义搜索
-    未启用时跳过（返回 None）。失败只记录日志不重试，漏掉的行由下轮
-    discover 或 API 启动时的 `_backfill_embeddings()` 自愈。
+    统一入口见 ``src/jobs/remediation.py``：各任务自持 pg_advisory_lock
+    互斥（embedding 的锁另与全量重建脚本互斥），单任务失败/跳过只记录在
+    该任务的统计里。失败不重试，漏掉的行由下轮 discover 或 API 侧的
+    低频补齐循环自愈。
     """
-    if not get_settings().ai.enable_semantic_search:
-        logger.info("Incremental embedding skipped: semantic search disabled")
-        return None
-
-    from src.ai.embedding_indexer import LockBusyError, embed_missing
+    from src.jobs.remediation import run_remediations
 
     try:
-        stats = await embed_missing()
-        stats_dict = stats.as_dict()
-        logger.info("Incremental embedding after discover: %s", stats_dict)
-        return stats_dict
-    except LockBusyError:
-        logger.info(
-            "Incremental embedding skipped: reindex lock held by another task"
-        )
-        return {"skipped": "reindex lock held by another task"}
+        results = await run_remediations()
+        logger.info("Remediation after discover: %s", results)
+        return results
     except Exception:
-        logger.exception("Incremental embedding after discover failed")
+        logger.exception("Remediation after discover failed")
         return None
 
 
@@ -1016,7 +1023,7 @@ async def _run_discover(
     manager: "SkillManager",
     args: argparse.Namespace,
 ) -> int:
-    """执行一轮 discover：扫描 → 补建 embedding → 采集统计 → 落结果 JSON。
+    """执行一轮 discover：扫描 → 补跑衍生字段缺口 → 采集统计 → 落结果 JSON。
 
     结果文件结构与自动调度完全一致（build_discover_result_document 共用）。
     """
@@ -1024,7 +1031,7 @@ async def _run_discover(
         exit_code, run_data = await _run_discover_single_skill_yaml(manager, args)
     else:
         exit_code, run_data = await _run_discover_from_config(manager, args)
-    embed_stats_dict = await _backfill_embeddings_after_discover()
+    remediation_run = await _run_remediations_safe()
     skill_stats = await _collect_skill_stats_safe()
     save_discover_result_file(
         build_discover_result_document(
@@ -1034,7 +1041,7 @@ async def _run_discover(
             config_keys=run_data["config_keys"],
             counters=run_data["counters"],
             repo_details=run_data["repo_details"],
-            embed_stats_dict=embed_stats_dict,
+            remediation_run=remediation_run,
             skill_stats=skill_stats,
         )
     )

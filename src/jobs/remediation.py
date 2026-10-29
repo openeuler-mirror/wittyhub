@@ -1,0 +1,130 @@
+"""统一补齐（remediation）：衍生字段缺口的补跑编排。
+
+skills / skill_versions 上的三个衍生字段会在降级路径下缺失（检测触发失败、
+LLM 超时、写库中断），且内容不变时 reconcile 不重扫、缺口不会自行消失。
+本模块把三类补跑统一为「查缺口 → 补写 → 统计」的任务，由 ``run_remediations()``
+依次执行，三个补跑实现各归其域：
+
+- security：``risk_score`` 缺口 → ``src/ai/security_backfill.py``（重新触发
+  检测，评分由 SkillspectorCollector 异步回填）；
+- category：``category`` 缺口 → ``src/ai/category_backfill.py``（分类器补跑）；
+- embedding：``embedding`` 缺口 → ``src/ai/embedding_indexer.py`` 的
+  ``embed_missing``（向量补建）。
+
+三类缺口互不影响（embedding 只看 risk_score 已就绪的存量行）；各任务自持
+pg_advisory_lock（embedding 的锁另与全量重建脚本互斥），单任务锁被占用或
+异常只记入该任务统计，不影响其余任务。
+
+触发点两处：
+
+- ``run_remediation_loop()``：API 启动后立即补一轮，之后每小时一轮，
+  兜住长驻实例期间新增的缺口；
+- 每轮 discover 末尾（skillcrawler CLI 与 DiscoverScheduler）：本轮新
+  入库的缺口行立即补齐，不必等下个整点。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from src.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# 低频补齐循环的默认间隔（秒）：启动即补一轮，之后每小时一轮
+DEFAULT_INTERVAL_SECONDS = 3600.0
+
+
+# ── 补齐任务：run_remediations 依次执行 security / category / embedding ──
+# 三个包装同款：局部导入实现 → 调用 → 锁冲突记 skipped；单任务异常由
+# run_remediations 兜底记入该任务统计。
+
+
+async def _run_security() -> dict[str, Any]:
+    from src.ai.security_backfill import (
+        LockBusyError as SecurityLockBusyError,
+        backfill_missing_security_audits,
+    )
+
+    try:
+        stats = await backfill_missing_security_audits()
+        return stats.as_dict()
+    except SecurityLockBusyError:
+        logger.info("Security backfill skipped: lock held by another task")
+        return {"skipped": "security backfill lock held by another task"}
+
+
+async def _run_category() -> dict[str, Any]:
+    from src.ai.category_backfill import (
+        LockBusyError as CategoryLockBusyError,
+        backfill_missing_categories,
+    )
+
+    try:
+        stats = await backfill_missing_categories()
+        return stats.as_dict()
+    except CategoryLockBusyError:
+        logger.info("Category backfill skipped: lock held by another task")
+        return {"skipped": "category backfill lock held by another task"}
+
+
+async def _run_embedding() -> dict[str, Any]:
+    if not get_settings().ai.enable_semantic_search:
+        logger.info("Embedding backfill skipped: semantic search disabled")
+        return {"skipped": "semantic search disabled"}
+
+    from src.ai.embedding_indexer import (
+        LockBusyError as EmbeddingLockBusyError,
+        embed_missing,
+    )
+
+    try:
+        stats = await embed_missing()
+        return stats.as_dict()
+    except EmbeddingLockBusyError:
+        logger.info("Embedding backfill skipped: reindex lock held by another task")
+        return {"skipped": "reindex lock held by another task"}
+
+
+# 补齐任务执行顺序：security → category → embedding（仅为固定执行顺序，
+# 三类字段缺口互不影响）。按函数名解析而非直接引用，便于测试替换单个任务实现。
+_REMEDIATION_TASKS = (
+    ("security", "_run_security"),
+    ("category", "_run_category"),
+    ("embedding", "_run_embedding"),
+)
+
+
+async def run_remediations() -> dict[str, Any]:
+    """依次补跑 security / category / embedding 三类字段缺口。
+
+    三类缺口互不影响，顺序仅为固定执行顺序。返回 ``{任务名: 统计 dict}``，
+    随 discover 结果 JSON 落盘；单任务异常只记录在该任务的统计里，
+    不影响后续任务。
+    """
+    results: dict[str, Any] = {}
+    for name, func_name in _REMEDIATION_TASKS:
+        try:
+            results[name] = await globals()[func_name]()
+        except Exception:
+            logger.exception("Remediation task failed: %s", name)
+            results[name] = {"error": "remediation task failed"}
+    return results
+
+
+async def run_remediation_loop(
+    interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
+) -> None:
+    """启动后立即补一轮，此后每 interval_seconds 补一轮，直到被 cancel。
+
+    单轮异常只记录日志，不终止循环（与 DiscoverScheduler 同款容错）。
+    """
+    while True:
+        try:
+            results = await run_remediations()
+            logger.info("Remediation round finished: %s", results)
+        except Exception:
+            logger.exception("Remediation loop iteration failed")
+        await asyncio.sleep(interval_seconds)

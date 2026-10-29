@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 
@@ -30,6 +31,40 @@ def build_skill_id(
     else:
         raise ValueError(f'Expected a SKILL.md file, got: {relative_skill_path}')
     return f'{source}:{owner_repo}/{skill_name}'
+
+
+def resolve_relative_skill_path(repo: Any, record: Any) -> str:
+    """从 skill 记录的 source_url 推导仓库内 SKILL.md 相对路径。
+
+    优先匹配 ``/blob/<ref>/`` 形式的 source_url；否则由 skill_id 反推
+    （``{source}:{owner}/{repo}/{skill_name}`` → ``{skill_name}/SKILL.md``）。
+    扫描路径与安全补齐路径共用同一实现，保证触发审计时 skill_path 口径一致。
+    """
+    refs = []
+    if getattr(record, 'commit_id', None):
+        refs.append(record.commit_id)
+    version = getattr(record, 'version', None)
+    if version:
+        refs.append(version)
+    branch = getattr(repo, 'branch', None)
+    if branch:
+        refs.append(branch)
+    refs.extend(['HEAD', 'master', 'main'])
+
+    for ref in dict.fromkeys(refs):
+        marker = f'/blob/{ref}/'
+        if marker in record.source_url:
+            relative_path = record.source_url.split(marker, 1)[1]
+            if relative_path == 'SKILL.md' or relative_path.endswith('/SKILL.md'):
+                return relative_path
+
+    owner_repo = extract_owner_repo(getattr(repo, 'url', None))
+    prefix = f'{getattr(repo, "source", "")}:{owner_repo}/'
+    skill_path = record.skill_id.removeprefix(prefix)
+    repository_name = owner_repo.rsplit('/', 1)[-1]
+    if skill_path == repository_name:
+        return 'SKILL.md'
+    return f'{skill_path.strip("/")}/SKILL.md'
 
 
 def extract_owner_repo(repo_url: str | None) -> str:

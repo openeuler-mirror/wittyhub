@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from skillcrawler.core.skill_parser import derive_skill_source
+from src.utils.skill_parser import derive_skill_source
 from src.utils.skill_id import extract_owner_repo
 from src.core.config import get_settings
 

@@ -1,6 +1,6 @@
 """OpenAI 兼容 LLM 统一调用封装（skill 分类 / 搜索翻译共用）。
 
-收敛此前散落在 ``skillcrawler/core/category_classifier.py`` 与
+收敛此前散落在 ``src/ai/category_classifier.py`` 与
 ``src/ai/translation.py`` 的重复实现：请求体构造、``enable_thinking`` 开关、
 鉴权、响应解析、耗时日志各写一遍，改一处漏一处（翻译就曾漏掉关闭思考，
 被 Qwen3 的长思维链拖慢到 30-45s）。

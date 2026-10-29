@@ -27,10 +27,10 @@ from src.api.schemas.skill import (
     SkillVersionsResponse,
 )
 from src.api.services.audit_report import build_audit_report
-from src.api.services.categories import category_label
 from src.api.services.security import SecurityService
 from src.api.services.telemetry import TelemetryService
 from src.core.auth import require_admin_token
+from src.core.categories import category_label
 from src.core.database import get_db
 from src.core.rate_limit import limiter
 from src.models.repository import (

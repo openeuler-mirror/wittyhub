@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from skillcrawler.core.git_operations import GitOperations
+from src.utils.git_operations import GitOperations
 
 OPENEULER_SKILLS_URL = "https://gitcode.com/openeuler/openEuler-skills"
 
@@ -142,18 +142,6 @@ def load_single_catalog_entry(skill_yaml: Path) -> tuple[str, str, dict[str, Any
     return platform, owner, entry
 
 
-def load_skill_categories(repository_path: Path | None = None) -> list[str]:
-    """Read category names from ``templates/skill-spec.yaml`` in the catalog."""
-    repo = repository_path or sync_openEuler_skills_repo()
-    spec_path = repo.expanduser() / "templates" / "skill-spec.yaml"
-    if not spec_path.exists():
-        raise FileNotFoundError(f"Skill spec not found: {spec_path}")
-    with spec_path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
-    categories = data.get("categories", []) if isinstance(data, dict) else []
-    return [str(item).strip() for item in categories if str(item).strip()] if isinstance(categories, list) else []
-
-
 def _first_repo_url(entry: dict[str, Any]) -> str | None:
     """First registered git URL: skill_repos[].url, else skills[].skill_url prefix."""
     repos = entry.get("skill_repos")
@@ -230,7 +218,7 @@ def load_contributor_profiles(repository_path: Path | None = None) -> list[dict[
     ``name`` / ``description`` / ``git_profile`` (git hosting profile) /
     ``website`` (official site) and ``repo_url`` (first registered repo URL).
     """
-    from skillcrawler.core.skill_parser import derive_skill_source
+    from src.utils.skill_parser import derive_skill_source
 
     path = (repository_path or sync_openEuler_skills_repo()).expanduser()
     profiles: list[dict[str, Any]] = []

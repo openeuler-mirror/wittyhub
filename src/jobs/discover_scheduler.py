@@ -40,7 +40,7 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 
 # security_audits 中「异步检测仍在进行」的判定条件等共享定义见
 # skillcrawler/main.py（collect_skill_stats）；结果 JSON 的 counters /
-# skill_stats / embedding_run 构建与 <key>_note 说明同样由该模块提供，
+# skill_stats / remediation_run 构建与 <key>_note 说明同样由该模块提供，
 # CLI 与自动调度共用同一实现，口径完全一致。
 
 
@@ -192,7 +192,6 @@ class DiscoverScheduler:
         counters = {
             "created": 0,
             "rediscovered": 0,
-            "security_retried": 0,
             "unchanged": 0,
             "removed": 0,
             "no_skill": 0,
@@ -262,29 +261,19 @@ class DiscoverScheduler:
                 "Contributor profiles synced from catalog: %d entries", profile_count
             )
 
-        # 增量补嵌入：只为本轮新入库（embedding IS NULL 且 risk_score 就绪）的
-        # skill 生成向量，使其立即可被语义搜索命中。锁被全量重建脚本持有时跳过
-        # （全量本身会覆盖一切）；失败不重试，漏掉的行由下轮 discover 自愈。
-        embed_stats_dict: dict[str, Any] | None = None
+        # 补跑衍生字段缺口（security 风险分 / category 分类 / embedding 向量）：
+        # 本轮新入库或中断留下的缺口行在此补齐，使其立即可用；各任务自持
+        # pg_advisory_lock 互斥（embedding 的锁另与全量重建脚本互斥），单任务
+        # 失败/跳过只记录在该任务的统计里。失败不重试，漏掉的行由下轮 discover
+        # 或 API 启动后的低频补齐循环自愈。
+        remediation_run: dict[str, Any] | None = None
         try:
-            from src.core.config import get_settings as _get_settings
+            from src.jobs.remediation import run_remediations
 
-            if _get_settings().ai.enable_semantic_search:
-                from src.ai.embedding_indexer import LockBusyError, embed_missing
-
-                try:
-                    embed_stats = await embed_missing()
-                    embed_stats_dict = embed_stats.as_dict()
-                    logger.info(
-                        "Incremental embedding after discover: %s", embed_stats_dict
-                    )
-                except LockBusyError:
-                    embed_stats_dict = {"skipped": "reindex lock held by another task"}
-                    logger.info(
-                        "Incremental embedding skipped: reindex lock held by another task"
-                    )
+            remediation_run = await run_remediations()
+            logger.info("Remediation after discover: %s", remediation_run)
         except Exception:
-            logger.exception("Incremental embedding after discover failed")
+            logger.exception("Remediation after discover failed")
 
         # skill 级统计：分类分布 / 安全检测结果 / 索引创建状态
         skill_stats: dict[str, Any] | None = None
@@ -319,7 +308,7 @@ class DiscoverScheduler:
                 config_keys=config_keys,
                 counters=counters,
                 repo_details=repo_details,
-                embed_stats_dict=embed_stats_dict,
+                remediation_run=remediation_run,
                 skill_stats=skill_stats,
             ),
             result_dir=self._config.result_dir,

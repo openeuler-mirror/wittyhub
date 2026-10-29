@@ -2449,10 +2449,10 @@ class TestGitOperationsMaterialize:
 class TestDeepSeekCategoryClassifier:
     @staticmethod
     def _make_classifier():
-        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+        from src.ai.category_classifier import DeepSeekCategoryClassifier
 
         with patch(
-            "skillcrawler.core.category_classifier.load_skill_categories",
+            "src.ai.category_classifier.load_skill_categories",
             return_value=["Development and Build", "others"],
         ):
             return DeepSeekCategoryClassifier(repository_path=None)
@@ -2460,7 +2460,7 @@ class TestDeepSeekCategoryClassifier:
     def test_classify_retries_transient_timeout_then_succeeds(self):
         import httpx
 
-        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+        from src.ai.category_classifier import DeepSeekCategoryClassifier
 
         classifier = self._make_classifier()
         with (
@@ -2472,7 +2472,7 @@ class TestDeepSeekCategoryClassifier:
                     "Development and Build",
                 ],
             ) as call_mock,
-            patch("skillcrawler.core.category_classifier.time.sleep") as sleep_mock,
+            patch("src.ai.category_classifier.time.sleep") as sleep_mock,
         ):
             category = classifier.classify(
                 skill_file=Path("SKILL.md"),
@@ -2489,7 +2489,7 @@ class TestDeepSeekCategoryClassifier:
         """网络故障重试耗尽后沿用合法的 frontmatter category（归一化后），不 fatal 中断扫描。"""
         import httpx
 
-        from skillcrawler.core.category_classifier import (
+        from src.ai.category_classifier import (
             CATEGORY_RETRY_ATTEMPTS,
             DeepSeekCategoryClassifier,
         )
@@ -2508,7 +2508,7 @@ class TestDeepSeekCategoryClassifier:
                 # 第二次调用（降级校验）归一为合法标准分类
                 side_effect=[None, "Development and Build"],
             ),
-            patch("skillcrawler.core.category_classifier.time.sleep"),
+            patch("src.ai.category_classifier.time.sleep"),
         ):
             category = classifier.classify(
                 skill_file=Path("SKILL.md"),
@@ -2525,7 +2525,7 @@ class TestDeepSeekCategoryClassifier:
         """frontmatter category 不在类别表内时降级返回 None，留待下轮重新分类。"""
         import httpx
 
-        from skillcrawler.core.category_classifier import (
+        from src.ai.category_classifier import (
             CATEGORY_RETRY_ATTEMPTS,
             DeepSeekCategoryClassifier,
         )
@@ -2537,7 +2537,7 @@ class TestDeepSeekCategoryClassifier:
                 "_call_deepseek",
                 side_effect=httpx.ReadTimeout("The read operation timed out"),
             ) as call_mock,
-            patch("skillcrawler.core.category_classifier.time.sleep"),
+            patch("src.ai.category_classifier.time.sleep"),
         ):
             category = classifier.classify(
                 skill_file=Path("SKILL.md"),
@@ -2551,7 +2551,7 @@ class TestDeepSeekCategoryClassifier:
 
     def test_classify_fatal_on_non_transient_error(self):
         """配置/凭据类错误保持 fatal 语义，且不做无意义重试。"""
-        from skillcrawler.core.category_classifier import (
+        from src.ai.category_classifier import (
             CategoryClassificationError,
             DeepSeekCategoryClassifier,
         )
@@ -2563,7 +2563,7 @@ class TestDeepSeekCategoryClassifier:
                 "_call_deepseek",
                 side_effect=RuntimeError("invalid api key"),
             ) as call_mock,
-            patch("skillcrawler.core.category_classifier.time.sleep") as sleep_mock,
+            patch("src.ai.category_classifier.time.sleep") as sleep_mock,
         ):
             with pytest.raises(CategoryClassificationError):
                 classifier.classify(
@@ -2579,7 +2579,7 @@ class TestDeepSeekCategoryClassifier:
     def test_is_transient_error_classification(self):
         import httpx
 
-        from skillcrawler.core.category_classifier import DeepSeekCategoryClassifier
+        from src.ai.category_classifier import DeepSeekCategoryClassifier
 
         request = httpx.Request("POST", "https://x")
         server_error = httpx.HTTPStatusError(

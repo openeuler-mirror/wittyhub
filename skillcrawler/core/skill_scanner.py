@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from src.ai.category_classifier import DeepSeekCategoryClassifier
 from src.utils.git_operations import GitOperations
 from src.core.categories import CANONICAL_CATEGORIES
+from src.security.audit_trigger import trigger_existing_skill_audit
 from src.security.detector import SecurityDetector, SecurityReport
 from src.utils.skill_parser import (
     as_optional_str,
@@ -713,85 +714,10 @@ class SkillScanner:
         The crawler stays DB-agnostic; ``SkillManager`` persists the
         ``SecurityAudit`` row after the skill is stored.
         """
-        if self.security_detector is None or not self.security_detector.has_skillspector:
-            return None
-        skill_path = Path(relative_path).parent.as_posix()
-        if skill_path == '.':
-            skill_path = ''
-
-        # skillspector 容器以只读方式挂载缓存仓库且无网络访问，
-        # 此处提前物化技能路径的所有 blob，避免容器内触发懒拉取失败。
-        if repo.local_path and commit_id:
-            materialized = await asyncio.to_thread(
-                self.git_ops.materialize_skill_objects,
-                Path(repo.local_path), commit_id, skill_path,
-            )
-            if not materialized:
-                _logger.warning(
-                    'Security audit skipped for skill %s: objects not materialized',
-                    skill_id,
-                )
-                return SecurityReport(
-                    resource_type='skill',
-                    resource_id=skill_id,
-                    risk_level='unknown',
-                    risk_signals=[],
-                    details={'error': 'materialize_failed', 'source': 'skillspector'},
-                )
-
-        try:
-            if self.security_async_mode:
-                build_number = await self.security_detector.trigger_skillspector(
-                    repo.url, version=commit_id, skill_path=skill_path,
-                )
-                report = SecurityReport(
-                    resource_type='skill',
-                    resource_id=skill_id,
-                    risk_level='unknown',
-                    risk_signals=[],
-                    details={
-                        'skillspector_async': True,
-                        'skillspector_build_number': build_number,
-                        'source': 'skillspector',
-                    },
-                )
-            else:
-                report = await self.security_detector.detect_skillspector(
-                    repo.url, version=commit_id, skill_path=skill_path,
-                )
-        except Exception:
-            _logger.warning(
-                'Security audit failed for skill %s', skill_id, exc_info=True,
-            )
-            failed_details: dict[str, Any] = {
-                'error': 'audit_failed',
-                'source': 'skillspector',
-            }
-            if self.security_async_mode:
-                # 保持与触发失败落库路径一致：标记 async 尝试已发起，
-                # 以便 SkillManager 写入 risk_level=unknown 审计记录
-                failed_details['skillspector_async'] = True
-                failed_details['skillspector_build_number'] = None
-            report = SecurityReport(
-                resource_type='skill',
-                resource_id=skill_id,
-                risk_level='unknown',
-                risk_signals=[],
-                details=failed_details,
-            )
-
-        return report
-
-    async def audit_existing_skill(
-        self,
-        *,
-        repo: SkillRepoModel,
-        relative_path: str,
-        commit_id: str | None,
-        skill_id: str,
-    ) -> SecurityReport | None:
-        """Trigger security detection for an already persisted skill record."""
-        return await self._audit_skill_security(
+        return await trigger_existing_skill_audit(
+            git_ops=self.git_ops,
+            security_detector=self.security_detector,
+            security_async_mode=self.security_async_mode,
             repo=repo,
             relative_path=relative_path,
             commit_id=commit_id,

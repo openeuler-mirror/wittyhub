@@ -128,6 +128,14 @@ services:
       # 容器入口会把 security.skillspector_* 注入为 JENKINS_* 环境变量。
       WITTYHUB_CONFIG: /app/config.yaml
       TZ: Asia/Shanghai
+      # 大模型复核（A 方案）：只有 meta_analyzer 调用大模型（剔除静态误报 + 富化），
+      # 语义发现节点不调用。依赖镜像里已打入
+      # deploy/skillspector/patches/0001-per-node-llm-allowlist.patch。
+      SKILLSPECTOR_LLM_NODES: ${SKILLSPECTOR_LLM_NODES:-meta_analyzer}
+      SKILLSPECTOR_MODEL: ${SKILLSPECTOR_MODEL:-deepseek-flash}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com/v1}
+      # 必填：缺失时 compose 直接报错，避免无凭证时静默退化成纯静态扫描
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required for skillspector LLM review}
     volumes:
       - ../config.yaml:/app/config.yaml:ro
       - jenkins-data:/var/jenkins_home

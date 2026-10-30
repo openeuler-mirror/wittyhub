@@ -23,8 +23,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.utils.skill_parser import derive_skill_source
-from src.utils.skill_id import extract_owner_repo
+from src.skills.skill_parser import derive_skill_source
+from src.skills.skill_id import extract_owner_repo
 from src.core.config import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -358,7 +358,7 @@ class PopularityCollector:
         ``community`` -> "community", ``enterprise`` -> "enterprise",
         ``personal`` -> "personal".
         """
-        from skillcrawler.config import load_crawler_config
+        from src.skills.config import load_crawler_config
 
         config = load_crawler_config(repository_path)
         repos: list[tuple[str, str]] = []

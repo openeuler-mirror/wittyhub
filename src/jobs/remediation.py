@@ -27,11 +27,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import datetime
 from typing import Any
 
 from src.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+LOG_PREFIX = "[Remediation]"
 
 # 低频补齐循环的默认间隔（秒）：启动即补一轮，之后每小时一轮
 DEFAULT_INTERVAL_SECONDS = 3600.0
@@ -52,7 +55,7 @@ async def _run_security() -> dict[str, Any]:
         stats = await backfill_missing_security_audits()
         return stats.as_dict()
     except SecurityLockBusyError:
-        logger.info("Security backfill skipped: lock held by another task")
+        logger.info("%s security skipped: lock held by another task", LOG_PREFIX)
         return {"skipped": "security backfill lock held by another task"}
 
 
@@ -66,13 +69,13 @@ async def _run_category() -> dict[str, Any]:
         stats = await backfill_missing_categories()
         return stats.as_dict()
     except CategoryLockBusyError:
-        logger.info("Category backfill skipped: lock held by another task")
+        logger.info("%s category skipped: lock held by another task", LOG_PREFIX)
         return {"skipped": "category backfill lock held by another task"}
 
 
 async def _run_embedding() -> dict[str, Any]:
     if not get_settings().ai.enable_semantic_search:
-        logger.info("Embedding backfill skipped: semantic search disabled")
+        logger.info("%s embedding skipped: semantic search disabled", LOG_PREFIX)
         return {"skipped": "semantic search disabled"}
 
     from src.ai.embedding_indexer import (
@@ -84,7 +87,7 @@ async def _run_embedding() -> dict[str, Any]:
         stats = await embed_missing()
         return stats.as_dict()
     except EmbeddingLockBusyError:
-        logger.info("Embedding backfill skipped: reindex lock held by another task")
+        logger.info("%s embedding skipped: reindex lock held by another task", LOG_PREFIX)
         return {"skipped": "reindex lock held by another task"}
 
 
@@ -106,11 +109,13 @@ async def run_remediations() -> dict[str, Any]:
     """
     results: dict[str, Any] = {}
     for name, func_name in _REMEDIATION_TASKS:
+        logger.info("%s task started: %s", LOG_PREFIX, name)
         try:
             results[name] = await globals()[func_name]()
         except Exception:
-            logger.exception("Remediation task failed: %s", name)
+            logger.exception("%s task failed: %s", LOG_PREFIX, name)
             results[name] = {"error": "remediation task failed"}
+        logger.info("%s task finished: %s -> %s", LOG_PREFIX, name, results[name])
     return results
 
 
@@ -120,11 +125,47 @@ async def run_remediation_loop(
     """启动后立即补一轮，此后每 interval_seconds 补一轮，直到被 cancel。
 
     单轮异常只记录日志，不终止循环（与 DiscoverScheduler 同款容错）。
+    每轮结果写入结果目录下的 remediation-<时间戳>.json（与 discover 结果
+    同目录同风格，remediation_run 各字段含 <key>_note 说明）。
     """
     while True:
+        started_at = datetime.now()
+        run_started = time.monotonic()
+        logger.info("%s round started", LOG_PREFIX)
         try:
             results = await run_remediations()
-            logger.info("Remediation round finished: %s", results)
+            logger.info("%s round finished: %s", LOG_PREFIX, results)
+            _save_remediation_result_file(results, started_at, run_started)
         except Exception:
-            logger.exception("Remediation loop iteration failed")
+            logger.exception("%s round failed", LOG_PREFIX)
         await asyncio.sleep(interval_seconds)
+
+
+def _save_remediation_result_file(
+    results: dict[str, Any], started_at: datetime, run_started: float
+) -> None:
+    """把一轮补齐结果写入 remediation-<时间戳>.json；失败不影响主流程。
+
+    结果目录与 discover 结果一致（resolve_discover_result_dir），
+    各任务统计字段补 <key>_note 说明（remediation_run_with_notes，与
+    discover 结果 JSON 中 remediation_run 同口径）。
+    """
+    try:
+        from src.skills.discover_result import (
+            remediation_run_with_notes,
+            save_discover_result_file,
+        )
+
+        path = save_discover_result_file(
+            {
+                "started_at": started_at.isoformat(timespec="seconds"),
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "total_seconds": round(time.monotonic() - run_started, 3),
+                "remediation_run": remediation_run_with_notes(results),
+            },
+            file_prefix="remediation",
+        )
+        if path:
+            logger.info("[Remediation] %s result saved to %s", LOG_PREFIX, path)
+    except Exception:
+        logger.warning("%s failed to save result file", LOG_PREFIX, exc_info=True)

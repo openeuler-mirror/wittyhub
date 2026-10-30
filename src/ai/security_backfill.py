@@ -37,9 +37,10 @@ from src.models.repository import SecurityAuditRepository
 from src.security.audit_trigger import trigger_existing_skill_audit
 from src.security.detector import SecurityDetector
 from src.utils.git_operations import GitOperations
-from src.utils.skill_id import resolve_relative_skill_path
+from src.skills.skill_id import resolve_relative_skill_path
 
 logger = logging.getLogger(__name__)
+LOG_PREFIX = "[Remediation][Security]"
 
 # 安全补齐的 advisory lock key（embedding ...122 / category ...123 之外第三个）
 _SECURITY_LOCK_KEY = 742_301_990_124
@@ -194,13 +195,14 @@ async def _trigger_chunk(
             )
         except Exception:
             stats.failed += 1
-            logger.exception("Security backfill trigger failed for skill_id=%s", row.skill_id)
+            logger.exception("%s trigger exception: skill_id=%s", LOG_PREFIX, row.skill_id)
             continue
         details = dict(report.details)
         if details.get("skillspector_build_number") is None:
             stats.failed += 1
             logger.warning(
-                "Security backfill failed to trigger: skill_id=%s version=%s",
+                "%s trigger failed (no build number): skill_id=%s version=%s",
+                LOG_PREFIX,
                 row.skill_id,
                 row.version or "-",
             )
@@ -259,8 +261,10 @@ async def backfill_missing_security_audits(
     stats = SecurityBackfillStats()
     if not get_settings().security.enable_audit:
         stats.skipped = "security audit disabled"
+        logger.info("%s skipped: security audit disabled", LOG_PREFIX)
         return stats
 
+    logger.info("%s backfill started", LOG_PREFIX)
     async with AsyncSessionLocal() as lock_session:
         locked = await lock_session.execute(
             text("SELECT pg_try_advisory_lock(:key)"), {"key": _SECURITY_LOCK_KEY}
@@ -271,7 +275,7 @@ async def backfill_missing_security_audits(
             git_ops, detector = await asyncio.to_thread(_build_security_tools)
             if detector is None:
                 stats.skipped = "skillspector unavailable"
-                logger.warning("Security backfill skipped: skillspector unavailable")
+                logger.warning("%s skipped: skillspector unavailable", LOG_PREFIX)
                 return stats
 
             for table in _RECORD_TABLES:
@@ -283,6 +287,10 @@ async def backfill_missing_security_audits(
                     # 无论触发结果如何都推进游标，避免反复读取同一批。
                     after_id = rows[-1].id
                     stats.total += len(rows)
+                    logger.info(
+                        "%s chunk: table=%s gap_rows=%d cursor=%s",
+                        LOG_PREFIX, table, len(rows), after_id,
+                    )
 
                     triggered = await _trigger_chunk(rows, git_ops, detector, stats)
                     if triggered:
@@ -291,6 +299,10 @@ async def backfill_missing_security_audits(
 
                     if len(rows) < chunk_size:
                         break
+            logger.info(
+                "%s backfill finished: total=%d triggered=%d failed=%d",
+                LOG_PREFIX, stats.total, stats.triggered, stats.failed,
+            )
             return stats
         finally:
             await lock_session.execute(

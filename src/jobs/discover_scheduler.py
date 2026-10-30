@@ -1,11 +1,11 @@
 """后台定时 discover 调度器。
 
-按 DiscoverSchedulerConfig（config.yaml 的 discover_scheduler 段）在每天
-或每周的固定时刻触发 skillcrawler 的 discover 流程：读取
-openEuler-skills catalog 中的仓库配置，逐仓库执行
+服务启动时立即执行一轮 discover，并按 DiscoverSchedulerConfig
+（config.yaml 的 discover_scheduler 段）在每天或每周的固定时刻再触发：
+读取 openEuler-skills catalog 中的仓库配置，逐仓库执行
 SkillManager.discover_configured_skill_repository。
 
-调度基于纯 asyncio（sleep 到下一个触发点），与 SkillspectorCollector
+调度基于纯 asyncio（跑完一轮 sleep 到下一个触发点），与 SkillspectorCollector
 的后台任务模式一致，不引入额外依赖。
 """
 
@@ -18,20 +18,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from skillcrawler.core.skill_manager import SkillManager
-from skillcrawler.main import (
-    build_configured_discover_requests,
+from src.skills.skill_manager import SkillManager
+from src.skills.discover_requests import build_configured_discover_requests
+from src.skills.discover_result import (
     build_discover_result_document,
     classify_discover_result,
     collect_skill_stats,
     save_discover_result_file,
 )
-from skillcrawler.config import load_contributor_profiles, sync_openEuler_skills_repo
+from src.skills.config import load_contributor_profiles, sync_openEuler_skills_repo
 from src.core.config import DiscoverSchedulerConfig
 from src.core.database import AsyncSessionLocal
 from src.models.repository import ContributorRepository, SkillRepoRepository, SkillRepository
 
 logger = logging.getLogger(__name__)
+LOG_PREFIX = "[Discover]"
 
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 # 北京时间（UTC+8）：调度配置与计算统一按 UTC，日志换算成北京时间展示
@@ -89,7 +90,7 @@ def compute_next_run(
 
 
 class DiscoverScheduler:
-    """定时触发 discover 流程的后台任务。
+    """启动即跑一轮、之后定时触发 discover 流程的后台任务。
 
     循环结构天然防重入：每轮 run_discover_once 执行完毕后才计算下一个
     触发点，克隆扫描耗时较长时下一轮自动顺延，不会叠加执行。
@@ -116,7 +117,8 @@ class DiscoverScheduler:
         self._running = True
         self._task = asyncio.create_task(self._loop())
         logger.info(
-            "DiscoverScheduler started (interval=%s, trigger=(UTC:%s == 北京时间:%s), weekday=%s)",
+            "%s scheduler started (interval=%s, trigger=(UTC:%s == 北京时间:%s), weekday=%s)",
+            LOG_PREFIX,
             interval,
             self._config.time,
             _beijing_hhmm(self._config.time),
@@ -132,7 +134,7 @@ class DiscoverScheduler:
             except asyncio.CancelledError:
                 pass
             self._task = None
-        logger.info("DiscoverScheduler stopped")
+        logger.info("%s scheduler stopped", LOG_PREFIX)
 
     async def _loop(self) -> None:
         interval = self._config.interval.strip().lower()
@@ -140,13 +142,27 @@ class DiscoverScheduler:
         weekday = self._config.weekday.strip().lower()
 
         while self._running:
-            # 触发时刻按 UTC 计算（config.yaml 的 time 为 UTC HH:MM）
+            # 启动即跑一轮：重启后立即自愈，不必等下个调度点
+            #（当天触发点已过时原本要等最长 24h）；单轮异常只记录日志。
+            try:
+                await self.run_discover_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # 单轮整体异常不应终止调度循环，记录后等待下一个调度点
+                logger.exception("%s round failed", LOG_PREFIX)
+            if not self._running:
+                return
+
+            # 触发时刻按 UTC 计算（config.yaml 的 time 为 UTC HH:MM）；
+            # 每轮执行完毕后才计算下一个触发点，克隆扫描耗时较长时下一轮自动顺延
             next_run = compute_next_run(
                 datetime.now(timezone.utc), interval, hour, minute, weekday,
             )
             wait_seconds = (next_run - datetime.now(timezone.utc)).total_seconds()
             logger.info(
-                "Next scheduled discover run at %s 北京时间 (UTC %s, in %.0fs)",
+                "%s next round at %s 北京时间 (UTC %s, in %.0fs)",
+                LOG_PREFIX,
                 next_run.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M"),
                 next_run.strftime("%Y-%m-%d %H:%M"),
                 wait_seconds,
@@ -155,15 +171,6 @@ class DiscoverScheduler:
                 await asyncio.sleep(wait_seconds)
             except asyncio.CancelledError:
                 return
-            if not self._running:
-                return
-            try:
-                await self.run_discover_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # 单轮整体异常不应终止调度循环，记录后等待下一个调度点
-                logger.exception("Scheduled discover run failed")
 
     async def run_discover_once(self) -> dict[str, int]:
         """执行一轮 discover（全部配置仓库），返回分类统计。
@@ -183,7 +190,8 @@ class DiscoverScheduler:
         run_started = time.monotonic()
         run_started_wall = datetime.now()
         logger.info(
-            "Scheduled discover round started: %d repos from %s (catalog: %s)",
+            "%s round started: %d repos from %s (catalog: %s)",
+            LOG_PREFIX,
             total,
             ", ".join(config_keys),
             repository_path,
@@ -209,7 +217,7 @@ class DiscoverScheduler:
             )
             for index, request in enumerate(requests, start=1):
                 label = request.url or "<missing-url>"
-                logger.info("[%d/%d] scanning %s", index, total, label)
+                logger.info("%s [%d/%d] scanning %s", LOG_PREFIX, index, total, label)
                 repo_started = time.monotonic()
                 try:
                     result = await manager.discover_configured_skill_repository(request)
@@ -227,7 +235,7 @@ class DiscoverScheduler:
                         }
                     )
                     logger.exception(
-                        "Discover failed for %s after %.1fs", label, elapsed
+                        "%s failed for %s after %.1fs", LOG_PREFIX, label, elapsed
                     )
                     continue
 
@@ -244,7 +252,8 @@ class DiscoverScheduler:
                     }
                 )
                 logger.info(
-                    "[%d/%d] %s: %s (%d skills, took %.1fs)",
+                    "%s [%d/%d] %s: %s (%d skills, took %.1fs)",
+                    LOG_PREFIX,
                     index,
                     total,
                     outcome,
@@ -258,7 +267,8 @@ class DiscoverScheduler:
             # 扫描出 skill 的组织；skill_count 始终以扫描结果为准
             profile_count = await self._sync_contributor_profiles(session, repository_path)
             logger.info(
-                "Contributor profiles synced from catalog: %d entries", profile_count
+                "%s contributor profiles synced from catalog: %d entries",
+                LOG_PREFIX, profile_count,
             )
 
         # 补跑衍生字段缺口（security 风险分 / category 分类 / embedding 向量）：
@@ -271,9 +281,9 @@ class DiscoverScheduler:
             from src.jobs.remediation import run_remediations
 
             remediation_run = await run_remediations()
-            logger.info("Remediation after discover: %s", remediation_run)
+            logger.info("%s remediation after discover: %s", LOG_PREFIX, remediation_run)
         except Exception:
-            logger.exception("Remediation after discover failed")
+            logger.exception("%s remediation after discover failed", LOG_PREFIX)
 
         # skill 级统计：分类分布 / 安全检测结果 / 索引创建状态
         skill_stats: dict[str, Any] | None = None
@@ -281,7 +291,7 @@ class DiscoverScheduler:
             async with AsyncSessionLocal() as session:
                 skill_stats = await collect_skill_stats(session)
         except Exception:
-            logger.exception("Failed to collect skill stats after discover")
+            logger.exception("%s failed to collect skill stats after discover", LOG_PREFIX)
 
         run_elapsed = time.monotonic() - run_started
         avg_elapsed = run_elapsed / total if total else 0.0
@@ -290,8 +300,9 @@ class DiscoverScheduler:
             ", ".join(f"{label}={duration:.1f}s" for label, duration in slowest) or "n/a"
         )
         logger.info(
-            "Scheduled discover round finished: %d repos, %s, total %.1fs, "
+            "%s round finished: %d repos, %s, total %.1fs, "
             "avg %.1fs/repo, slowest: %s",
+            LOG_PREFIX,
             total,
             counters,
             run_elapsed,
@@ -334,7 +345,7 @@ class DiscoverScheduler:
             )
         except Exception:
             logger.warning(
-                "Failed to load contributor profiles from %s", repository_path, exc_info=True
+                "[Discover] Failed to load contributor profiles from %s", repository_path, exc_info=True
             )
             return 0
 
@@ -360,7 +371,7 @@ class DiscoverScheduler:
             await session.commit()
         except Exception:
             await session.rollback()
-            logger.warning("Failed to sync contributor profiles", exc_info=True)
+            logger.warning("[Discover] Failed to sync contributor profiles", exc_info=True)
             return 0
         return synced
 
@@ -371,7 +382,7 @@ async def start_discover_scheduler() -> DiscoverScheduler | None:
 
     settings = get_settings()
     if not settings.discover_scheduler.enabled:
-        logger.info("DiscoverScheduler disabled (discover_scheduler.enabled=false)")
+        logger.info("[Discover] DiscoverScheduler disabled (discover_scheduler.enabled=false)")
         return None
 
     scheduler = DiscoverScheduler(settings.discover_scheduler)

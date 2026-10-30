@@ -1,6 +1,6 @@
 """安全审计触发：为一条已入库的 skill 记录发起 Jenkins 检测。
 
-扫描路径（``skillcrawler.core.skill_scanner``）与安全补齐路径
+扫描路径（``src.skills.skill_scanner``）与安全补齐路径
 （``src/ai/security_backfill.py``）共用本实现，保证物化 blob、async 触发、
 失败降级的口径完全一致。
 

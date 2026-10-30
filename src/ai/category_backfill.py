@@ -31,6 +31,7 @@ from src.ai.category_classifier import DeepSeekCategoryClassifier
 from src.core.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+LOG_PREFIX = "[Remediation][Category]"
 
 # advisory lock 的 bigint key（pg_advisory_lock 单参数版）
 _CATEGORY_LOCK_KEY = 742_301_990_123
@@ -124,14 +125,13 @@ async def _classify_rows(
             )
         except Exception:
             stats.failed += 1
-            logger.exception("Category backfill failed for skill_id=%s", row.id)
+            logger.exception("%s classify exception: skill_id=%s", LOG_PREFIX, row.id)
             continue
         if category is None:
             stats.unclassified += 1
             logger.info(
-                "Category backfill unclassified for skill_id=%s (no valid frontmatter "
-                "or LLM result)",
-                row.id,
+                "%s unclassified: skill_id=%s (no valid frontmatter or LLM result)",
+                LOG_PREFIX, row.id,
             )
             continue
         pairs.append((row.id, category))
@@ -158,6 +158,7 @@ async def _write_categories(pairs: list[tuple[uuid.UUID, str]]) -> int:
 async def backfill_missing_categories(chunk_size: int = CHUNK_SIZE) -> BackfillStats:
     """补跑所有空分类行；锁被占用时抛 LockBusyError，由调用方决定跳过。"""
     stats = BackfillStats()
+    logger.info("%s backfill started", LOG_PREFIX)
     async with AsyncSessionLocal() as lock_session:
         locked = await lock_session.execute(
             text("SELECT pg_try_advisory_lock(:key)"), {"key": _CATEGORY_LOCK_KEY}
@@ -168,7 +169,7 @@ async def backfill_missing_categories(chunk_size: int = CHUNK_SIZE) -> BackfillS
             classifier = await asyncio.to_thread(_build_classifier)
             if classifier is None:
                 stats.skipped = "category classifier unavailable"
-                logger.warning("Category backfill skipped: classifier unavailable")
+                logger.warning("%s skipped: classifier unavailable", LOG_PREFIX)
                 return stats
 
             after_id: uuid.UUID | None = None
@@ -179,6 +180,9 @@ async def backfill_missing_categories(chunk_size: int = CHUNK_SIZE) -> BackfillS
                 # 无论分类结果如何都推进游标，避免反复读取同一批。
                 after_id = rows[-1].id
                 stats.total += len(rows)
+                logger.info(
+                    "%s chunk: gap_rows=%d cursor=%s", LOG_PREFIX, len(rows), after_id,
+                )
 
                 pairs = await _classify_rows(rows, classifier, stats)
                 if pairs:
@@ -186,6 +190,10 @@ async def backfill_missing_categories(chunk_size: int = CHUNK_SIZE) -> BackfillS
 
                 if len(rows) < chunk_size:
                     break
+            logger.info(
+                "%s backfill finished: total=%d filled=%d unclassified=%d failed=%d",
+                LOG_PREFIX, stats.total, stats.filled, stats.unclassified, stats.failed,
+            )
             return stats
         finally:
             await lock_session.execute(

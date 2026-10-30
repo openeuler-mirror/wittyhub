@@ -12,7 +12,7 @@ import aiofiles
 
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillRepoModel, SkillVersion
-from src.utils.skill_id import slugify_identifier
+from src.skills.skill_id import slugify_identifier
 
 settings = get_settings()
 MAX_STORAGE_READ_BYTES = 20 * 1024 * 1024

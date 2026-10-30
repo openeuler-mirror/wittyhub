@@ -15,7 +15,7 @@ from src.utils.git_operations import GitOperations
 from src.core.categories import CANONICAL_CATEGORIES
 from src.security.audit_trigger import trigger_existing_skill_audit
 from src.security.detector import SecurityDetector, SecurityReport
-from src.utils.skill_parser import (
+from src.skills.skill_parser import (
     as_optional_str,
     as_optional_str_list,
     build_skill_md_url,
@@ -29,7 +29,7 @@ from src.utils.skill_parser import (
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import SkillRepository
 
-from src.utils.skill_id import build_skill_id, extract_owner_repo
+from src.skills.skill_id import build_skill_id, extract_owner_repo
 
 if TYPE_CHECKING:
     from src.models.orm import SkillRepoModel
@@ -120,7 +120,7 @@ class SkillScanner:
                 self.git_ops.list_skill_paths_for_ref, repo_root, 'HEAD',
             )
         _logger.debug(
-            'Skill file discovery timing: repo=%s files=%d elapsed=%.3fs',
+            '[Discover] Skill file discovery timing: repo=%s files=%d elapsed=%.3fs',
             getattr(repo, 'repo_name', None) or repo.url,
             len(skill_paths),
             time.perf_counter() - discovery_started_at,
@@ -204,7 +204,7 @@ class SkillScanner:
             )
             if skill_id in seen_skill_ids:
                 _logger.warning(
-                    'Duplicate skill_id from different paths, keeping first '
+                    '[Discover] Duplicate skill_id from different paths, keeping first '
                     'occurrence: skill_id=%s skipped_path=%s',
                     skill_id, relative_path,
                 )
@@ -218,14 +218,14 @@ class SkillScanner:
                 continue
             if is_low_value_skill_content(metadata_content[1]):
                 _logger.debug(
-                    'Skipped low-value skill content: skill_id=%s ref=HEAD',
+                    '[Discover] Skipped low-value skill content: skill_id=%s ref=HEAD',
                     skill_id,
                 )
                 continue
             # 元数据门禁：frontmatter 必须同时声明 name 与 description
             if is_incomplete_skill_metadata(metadata_content[0]):
                 _logger.warning(
-                    'Skipped skill without required metadata '
+                    '[Discover] Skipped skill without required metadata '
                     '(name/description): skill_id=%s ref=HEAD',
                     skill_id,
                 )
@@ -252,7 +252,7 @@ class SkillScanner:
                 security_cache=security_cache,
             )
             _logger.info(
-                'Discovered skill(latest version:%s): skill_id=%s',
+                '[Discover] Discovered skill(latest version:%s): skill_id=%s',
                 skill.version or '-', skill.skill_id,
             )
             discovered.append(skill)
@@ -284,7 +284,7 @@ class SkillScanner:
                     security_cache=security_cache,
                 )
                 _logger.info(
-                    'Discovered skill(metadata version:%s): skill_id=%s',
+                    '[Discover] Discovered skill(metadata version:%s): skill_id=%s',
                     version_record.version or '-', version_record.skill_id,
                 )
                 metadata_version_rows.append(version_record)
@@ -337,7 +337,7 @@ class SkillScanner:
                 repo_root, current_tag_skill_paths, ref=ref,
             )
             _logger.debug(
-                'Tag skill path listing timing: repo=%s ref=%s current_paths=%d '
+                '[Discover] Tag skill path listing timing: repo=%s ref=%s current_paths=%d '
                 'elapsed=%.3fs',
                 getattr(repo, 'repo_name', None) or repo.url,
                 ref,
@@ -354,14 +354,14 @@ class SkillScanner:
                     continue
                 if is_low_value_skill_content(metadata_content[1]):
                     _logger.debug(
-                        'Skipped low-value skill content: path=%s ref=%s',
+                        '[Discover] Skipped low-value skill content: path=%s ref=%s',
                         relative_path, ref,
                     )
                     continue
                 # 元数据门禁：frontmatter 必须同时声明 name 与 description
                 if is_incomplete_skill_metadata(metadata_content[0]):
                     _logger.warning(
-                        'Skipped skill without required metadata '
+                        '[Discover] Skipped skill without required metadata '
                         '(name/description): path=%s ref=%s',
                         relative_path, ref,
                     )
@@ -375,7 +375,7 @@ class SkillScanner:
                 # 完全跳过 tag 扫描（版本行由 latest 扫描生成）。
                 if skip_skill_ids and skill_id in skip_skill_ids:
                     _logger.debug(
-                        'Skipped tag scan for metadata-versioned skill: '
+                        '[Discover] Skipped tag scan for metadata-versioned skill: '
                         'skill_id=%s ref=%s',
                         skill_id,
                         ref,
@@ -394,7 +394,7 @@ class SkillScanner:
                 tree_hash_key = (skill_id, tree_hash) if tree_hash else None
                 if tree_hash_key is not None and tree_hash_key in seen_tree_hashes:
                     _logger.debug(
-                        'Skipped duplicate skill tree_hash: skill_id=%s '
+                        '[Discover] Skipped duplicate skill tree_hash: skill_id=%s '
                         'version=%s tree_hash=%s',
                         skill_id,
                         version or '-',
@@ -407,7 +407,7 @@ class SkillScanner:
                 pre_commit_key = (skill_id, commit_id) if commit_id else None
                 if pre_commit_key is not None and pre_commit_key in seen_commits:
                     _logger.debug(
-                        'Skipped duplicate skill commit (pre-check): skill_id=%s '
+                        '[Discover] Skipped duplicate skill commit (pre-check): skill_id=%s '
                         'version=%s commit_id=%s',
                         skill_id,
                         version or '-',
@@ -437,7 +437,7 @@ class SkillScanner:
                 version_key = (skill.skill_id, skill.version) if skill.version else None
                 if version_key is not None and version_key in seen_versions:
                     _logger.debug(
-                        'Skipped duplicate skill version: skill_id=%s version=%s commit_id=%s',
+                        '[Discover] Skipped duplicate skill version: skill_id=%s version=%s commit_id=%s',
                         skill.skill_id,
                         skill.version or '-',
                         skill.commit_id or '-',
@@ -451,7 +451,7 @@ class SkillScanner:
                 if tree_hash_key is not None:
                     seen_tree_hashes.add(tree_hash_key)
                 _logger.info(
-                    'Discovered skill(version:%s): skill_id=%s',
+                    '[Discover] Discovered skill(version:%s): skill_id=%s',
                     skill.version or '-', skill.skill_id,
                 )
                 discovered.append(skill)
@@ -562,7 +562,7 @@ class SkillScanner:
             + assemble_elapsed
         )
         _logger.debug(
-            'Skill timing: skill_id=%s version=%s input=%.3fs prepare=%.3fs '
+            '[Discover] Skill timing: skill_id=%s version=%s input=%.3fs prepare=%.3fs '
             'category=%.3fs security=%.3fs assemble=%.3fs '
             'other=%.3fs total=%.3fs',
             skill_id,
@@ -602,7 +602,7 @@ class SkillScanner:
         ):
             audit_details = existing_metadata.get('security_audit')
             _logger.debug(
-                'Reused security result: skill_id=%s version=%s tree_hash=%s score=%s',
+                '[Discover] Reused security result: skill_id=%s version=%s tree_hash=%s score=%s',
                 skill_id,
                 version or '-',
                 tree_hash,
@@ -622,7 +622,7 @@ class SkillScanner:
             cached = security_cache.get(tree_hash)
             if cached is not None:
                 _logger.debug(
-                    'Reused cache submitted by security: skill_id=%s', skill_id,
+                    '[Discover] Reused cache submitted by security: skill_id=%s', skill_id,
                 )
                 self._security_cache_hits += 1
                 if cached.audit_triggered:

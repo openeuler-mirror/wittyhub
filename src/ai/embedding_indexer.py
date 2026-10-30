@@ -31,6 +31,10 @@ from src.core.config import get_settings
 from src.core.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+# 共享内部（批次编码/写库）与全量重建流程的日志前缀；
+# 补齐入口 embed_missing 全程用 REMEDIATION_LOG_PREFIX（与安全/分类补齐同款）
+LOG_PREFIX = "[Embedding]"
+REMEDIATION_LOG_PREFIX = "[Remediation][Embedding]"
 
 # advisory lock 的 bigint key（pg_advisory_lock 单参数版）
 _REINDEX_LOCK_KEY = 742_301_990_122  # hashtext('wittyhub:embedding_reindex') 量级的固定值
@@ -197,7 +201,7 @@ async def _write_embeddings(
 
 
 async def _encode_and_store(
-    targets: list[EmbeddingTarget], stats: ReindexStats
+    targets: list[EmbeddingTarget], stats: ReindexStats, log_prefix: str = LOG_PREFIX
 ) -> None:
     """编码并写库一个批次；批处理失败按二分递归重试，隔离坏行。
 
@@ -229,7 +233,8 @@ async def _encode_and_store(
             stats.failed_batches += 1
             stats.failed_rows += len(targets)
             logger.exception(
-                "embedding 批次失败，跳过 (skill_id=%s, size=%d, chars=%d, error=%s)",
+                "%s batch failed, skipped (skill_id=%s, size=%d, chars=%d, error=%s)",
+                log_prefix,
                 targets[0].skill_id,
                 len(targets),
                 _total_chars(targets),
@@ -238,8 +243,8 @@ async def _encode_and_store(
             return
         mid = len(targets) // 2
         logger.warning(
-            "embedding 批次失败，二分重试（多半是这批文本太多/太长，服务端"
-            "处理不过来）(skill_id=%s, size=%d, chars=%d, error=%s, halve=%d/%d)",
+            "%s batch failed, bisect retry (skill_id=%s, size=%d, chars=%d, error=%s, halve=%d/%d)",
+            log_prefix,
             targets[0].skill_id,
             len(targets),
             _total_chars(targets),
@@ -247,8 +252,8 @@ async def _encode_and_store(
             mid,
             len(targets) - mid,
         )
-        await _encode_and_store(targets[:mid], stats)
-        await _encode_and_store(targets[mid:], stats)
+        await _encode_and_store(targets[:mid], stats, log_prefix)
+        await _encode_and_store(targets[mid:], stats, log_prefix)
 
 
 def _total_chars(targets: list[EmbeddingTarget]) -> int:
@@ -287,6 +292,7 @@ async def _run_batches(
     stats: ReindexStats,
     batch_size: int,
     progress_cb=None,
+    log_prefix: str = LOG_PREFIX,
 ) -> None:
     """批次主循环：读 → 编码 → 写，每批独立短会话。单批失败跳过继续。"""
     stats.total = await _count_targets(only_missing)
@@ -297,11 +303,14 @@ async def _run_batches(
             return
         # 无论空文本或批次失败都推进游标，避免增量模式反复读取同一批。
         after_skill_id = rows[-1].skill_id
+        logger.info(
+            "%s chunk: rows=%d cursor=%s", log_prefix, len(rows), after_skill_id,
+        )
 
         to_encode = [target for target in rows if target.text.strip()]
         stats.skipped_empty += len(rows) - len(to_encode)
         if to_encode:
-            await _encode_and_store(to_encode, stats)
+            await _encode_and_store(to_encode, stats, log_prefix)
 
         if progress_cb:
             progress_cb(stats)
@@ -316,6 +325,7 @@ async def embed_missing(batch_size: int = BATCH_SIZE) -> ReindexStats:
     锁被全量任务持有时抛 LockBusyError，由调用方决定跳过。
     """
     _validate_batch_size(batch_size)
+    logger.info("%s backfill started", REMEDIATION_LOG_PREFIX)
     async with AsyncSessionLocal() as lock_session:
         locked = await lock_session.execute(
             text("SELECT pg_try_advisory_lock(:key)"), {"key": _REINDEX_LOCK_KEY}
@@ -325,7 +335,19 @@ async def embed_missing(batch_size: int = BATCH_SIZE) -> ReindexStats:
         try:
             stats = ReindexStats()
             await _run_batches(
-                only_missing=True, stats=stats, batch_size=batch_size
+                only_missing=True, stats=stats, batch_size=batch_size,
+                log_prefix=REMEDIATION_LOG_PREFIX,
+            )
+            logger.info(
+                "%s backfill finished: total=%d indexed=%d failed_batches=%d "
+                "failed_rows=%d skipped_empty=%d stale_skipped=%d",
+                REMEDIATION_LOG_PREFIX,
+                stats.total,
+                stats.indexed,
+                stats.failed_batches,
+                stats.failed_rows,
+                stats.skipped_empty,
+                stats.stale_skipped,
             )
             return stats
         finally:
@@ -364,7 +386,9 @@ async def reindex_skill(skill_id: str) -> ReindexStats:
             except Exception:
                 stats.failed_batches = 1
                 stats.failed_rows = 1
-                logger.exception("单 Skill embedding 重建失败 (skill_id=%s)", skill_id)
+                logger.exception(
+                    "%s single skill reindex failed (skill_id=%s)", LOG_PREFIX, skill_id
+                )
             return stats
         finally:
             await lock_session.execute(

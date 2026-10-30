@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Res
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.utils.skill_id import extract_owner_repo
+from src.skills.skill_id import extract_owner_repo
 
 from src.api.schemas.skill import (
     AuditByUrlRequest,

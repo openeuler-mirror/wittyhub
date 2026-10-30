@@ -142,11 +142,6 @@ async def lifespan(app: FastAPI):
         discover_scheduler = await start_discover_scheduler()
 
     # 启动时补跑衍生字段缺口（security/category/embedding），之后每小时一轮：
-    # 增量补嵌入原本只挂在 discover 末尾、空分类只在启动补一次，而重启后调度
-    # 会跳过当天已过触发点（compute_next_run 规则），导致新入库 skill 的
-    # embedding 长时间缺失、语义检索搜不到（如 vsag-rabitq-optimization）；
-    # 分类降级落空的行也因 _is_content_unchanged 跳过而永远补不上。
-    # 一个后台任务统一补跑即可自愈，不必等下轮 discover（最长 24h）。
     remediation_task = asyncio.create_task(_run_remediation_loop())
 
     yield

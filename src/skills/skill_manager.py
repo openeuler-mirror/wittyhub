@@ -12,20 +12,20 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 from sqlalchemy import update
 
-from skillcrawler.config import load_contributor_profiles
+from src.skills.config import load_contributor_profiles
 from src.ai.category_classifier import (
     CategoryClassificationError,
     DeepSeekCategoryClassifier,
 )
 from src.utils.git_operations import GitOperations
-from skillcrawler.core.openeuler_sig import build_openeuler_repo_sig_mapping
-from src.utils.skill_parser import (
+from src.skills.openeuler_sig import build_openeuler_repo_sig_mapping
+from src.skills.skill_parser import (
     as_optional_str,
     derive_skill_source,
     normalize_clone_url_for_git,
     normalize_git_clone_url,
 )
-from skillcrawler.core.skill_scanner import SkillScanner
+from src.skills.skill_scanner import SkillScanner
 from src.core.config import get_settings
 from src.models.orm import Skill, SkillVersion
 from src.models.repository import (
@@ -89,16 +89,16 @@ class SkillManager:
         try:
             category_classifier = DeepSeekCategoryClassifier(self.catalog_path)
         except Exception as exc:
-            _logger.warning('Failed to initialize category classifier: %s', exc)
+            _logger.warning('[Discover] Failed to initialize category classifier: %s', exc)
 
         try:
             detector = SecurityDetector()
             if detector.has_skillspector:
                 security_detector = detector
             else:
-                _logger.info('SecurityDetector: skillspector not configured')
+                _logger.info('[Discover] SecurityDetector: skillspector not configured')
         except Exception as exc:
-            _logger.warning('SecurityDetector: Failed to initialize security detector: %s', exc)
+            _logger.warning('[Discover] SecurityDetector: Failed to initialize security detector: %s', exc)
 
         self._git_ops = GitOperations()
         self._scanner = SkillScanner(
@@ -141,7 +141,7 @@ class SkillManager:
             try:
                 shutil.rmtree(path)
             except Exception as exc:
-                _logger.warning(f'Discover: Failed to clean up directory {path}: {exc}')
+                _logger.warning(f'[Discover] Failed to clean up directory {path}: {exc}')
 
     async def delete_skill_repository(self, repository_id: str) -> None:
         stored = await self.get_repository_by_id(repository_id)
@@ -197,7 +197,7 @@ class SkillManager:
             skill_paths = [path for path in skill_paths if path in skill_path_filter]
         if not skill_paths:
             _logger.info(
-                'Discover: no scannable SKILL.md found in %s; retaining clone at %s',
+                '[Discover] no scannable SKILL.md found in %s; retaining clone at %s',
                 repo_name,
                 clone_dir,
             )
@@ -257,7 +257,7 @@ class SkillManager:
         except Exception as exc:
             error_summary = self._git_ops.summarize_exception(exc)
             _logger.warning(
-                'Failed to discover skills from skill repo %s (%s): %s',
+                '[Discover] Failed to discover skills from skill repo %s (%s): %s',
                 repository_id_value, repository_name_value, error_summary,
             )
             await self.rollback()
@@ -302,7 +302,7 @@ class SkillManager:
                 (skill.author for skill in latest_skills if skill.author), None
             )
         _logger.info(
-            'Discover: scan completed for %s: latest_skills=%d, tagged_skills=%d, '
+            '[Discover] scan completed for %s: latest_skills=%d, tagged_skills=%d, '
             'security_cache_hits=%d, security_audits_submitted=%d, security_audits_pending=%d',
             repo.repo_name, len(latest_skills), len(tagged_skills),
             self._scanner._security_cache_hits,
@@ -370,13 +370,13 @@ class SkillManager:
             corrected_repos = await self.skill_repo_repository.reconcile_skill_nums()
             if corrected_contributors or corrected_repos:
                 _logger.info(
-                    'Discover: statistics reconciled after scan: '
+                    '[Discover] statistics reconciled after scan: '
                     'contributors=%d, skill_repos=%d',
                     corrected_contributors,
                     corrected_repos,
                 )
         except Exception as exc:
-            _logger.warning('Failed to reconcile skill statistics after scan: %s', exc)
+            _logger.warning('[Discover] Failed to reconcile skill statistics after scan: %s', exc)
 
     def _contributor_profile(self, platform: str | None, author: str) -> dict[str, Any]:
         """Lookup catalog profile fields (name/description/git_profile) for a contributor.
@@ -395,12 +395,12 @@ class SkillManager:
                     (p['platform'], p['author']): p for p in profiles
                 }
                 _logger.info(
-                    'Loaded contributor profiles from catalog: %d entries',
+                    '[Discover] Loaded contributor profiles from catalog: %d entries',
                     len(self._contributor_profile_by_key),
                 )
             except Exception as exc:
                 _logger.warning(
-                    'Failed to load contributor profiles from catalog %s: %s',
+                    '[Discover] Failed to load contributor profiles from catalog %s: %s',
                     self.catalog_path,
                     exc,
                 )
@@ -424,7 +424,7 @@ class SkillManager:
             repo.url,
         )
         _logger.info(
-            'Discover: git metadata collected for %s, latest_tags: %s',
+            '[Discover] git metadata collected for %s, latest_tags: %s',
             repo.repo_name,
             repository_git_metadata.get('latest_tags', []),
         )
@@ -497,7 +497,7 @@ class SkillManager:
         ]
         await audit_repo.upsert_many_by_resource('skill', entries)
 
-        _logger.info('SecurityDetector: Upserted %d SecurityAudit records', len(pending))
+        _logger.info('[Discover] SecurityDetector: Upserted %d SecurityAudit records', len(pending))
 
     @staticmethod
     def _has_new_security_audit(record: Skill | SkillVersion) -> bool:
@@ -523,7 +523,7 @@ class SkillManager:
         repo_url: str | None,
     ) -> None:
         if clone_dir.is_dir() and (clone_dir / '.git').exists():
-            _logger.info('Discover: updating skill repo: %s', clone_dir)
+            _logger.info('[Discover] updating skill repo: %s', clone_dir)
             self._git_ops.update_existing_repository(
                 clone_dir, clone_url,
                 branch=branch, repo_url=repo_url,
@@ -531,9 +531,9 @@ class SkillManager:
             return
 
         if clone_dir.exists():
-            _logger.info('Discover: removing non-git directory before clone: %s', clone_dir)
+            _logger.info('[Discover] removing non-git directory before clone: %s', clone_dir)
             shutil.rmtree(clone_dir)
-        _logger.info('Discover: cloning skill repo: %s', clone_dir)
+        _logger.info('[Discover] cloning skill repo: %s', clone_dir)
         clone_dir.mkdir(parents=True, exist_ok=True)
         self._git_ops.clone_repository(
             clone_dir, clone_url,
@@ -548,7 +548,7 @@ class SkillManager:
         existing_repository = await self.skill_repo_repository.get_skill_repository_by_repo_name(repo_name)
         if existing_repository is not None:
             _logger.info(
-                f'Discover: Skill repo already exists, "{repo_name}": "{existing_repository.id}", skipping creation'
+                f'[Discover] Skill repo already exists, "{repo_name}": "{existing_repository.id}", skipping creation'
             )
             return existing_repository, False
 
@@ -572,7 +572,7 @@ class SkillManager:
             target_source, _ = derive_skill_source(normalized_request.url)
         except ValueError:
             _logger.warning(
-                'Discover: cannot derive source for %s from %s; source migration skipped',
+                '[Discover] cannot derive source for %s from %s; source migration skipped',
                 repo.repo_name,
                 normalized_request.url,
             )
@@ -587,7 +587,7 @@ class SkillManager:
             return repo
 
         _logger.info(
-            'Discover: migrating list source for %s: source %r -> %r, platform %r -> %r',
+            '[Discover] migrating list source for %s: source %r -> %r, platform %r -> %r',
             repo.repo_name,
             current_source,
             target_source if source_changed else current_source,
@@ -698,12 +698,12 @@ class SkillManager:
             try:
                 self._openeuler_sig_by_repo_name = build_openeuler_repo_sig_mapping()
                 _logger.info(
-                    "Loaded openEuler SIG mapping: repos=%s",
+                    "[Discover] Loaded openEuler SIG mapping: repos=%s",
                     len(self._openeuler_sig_by_repo_name),
                 )
             except Exception as exc:
                 _logger.warning(
-                    "Failed to load openEuler SIG mapping; continuing without SIG author: %s",
+                    "[Discover] Failed to load openEuler SIG mapping; continuing without SIG author: %s",
                     self._git_ops.summarize_exception(exc),
                 )
                 self._openeuler_sig_by_repo_name = {}

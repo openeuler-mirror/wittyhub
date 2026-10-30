@@ -2,7 +2,7 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.utils.skill_id import build_skill_id, extract_owner_repo, slugify_identifier
+from src.skills.skill_id import build_skill_id, extract_owner_repo, slugify_identifier
 
 from src.models.orm import DownloadHistory
 from src.models.repository import SkillRepository

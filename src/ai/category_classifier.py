@@ -18,9 +18,9 @@ settings = get_settings()
 def load_skill_categories(repository_path: Path | None = None) -> list[str]:
     """Read category names from ``templates/skill-spec.yaml`` in the catalog."""
     if repository_path is None:
-        # catalog 未给定时惰性依赖 skillcrawler 的同步入口（避免 src.ai
-        # 顶层反向依赖 skillcrawler；正常路径由扫描器传入 repository_path）
-        from skillcrawler.config import sync_openEuler_skills_repo
+        # catalog 未给定时惰性同步 openEuler-skills 仓库
+        # （正常路径由扫描器传入 repository_path）
+        from src.skills.config import sync_openEuler_skills_repo
 
         repository_path = sync_openEuler_skills_repo()
     spec_path = repository_path.expanduser() / "templates" / "skill-spec.yaml"

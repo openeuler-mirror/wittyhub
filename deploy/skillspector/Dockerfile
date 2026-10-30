@@ -49,6 +49,8 @@ RUN git init /tmp/skillspector && \
 #   0001 按节点开关大模型（A 方案 = 只有 meta_analyzer 调用，做静态误报剔除 + 富化）
 #   0002 硅基流动 Qwen3.5 适配：原生 json_schema 结构化输出、temperature=0、
 #        关闭 thinking、客户端 RPM/TPM 限流与统一重试
+#   0003 成本/上下文控制：TEXT_ONLY 跳过二进制、RULE_SCOPE 规则×文件类别裁剪、
+#        命中窗口切片（WINDOW_LINES/HEADER_LINES）
 COPY deploy/skillspector/patches /tmp/patches
 RUN git -C /tmp/skillspector apply --verbose /tmp/patches/*.patch
 

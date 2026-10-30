@@ -137,6 +137,15 @@ services:
       # context_length / max_output_tokens，否则会回落到 128K/32K 默认值（日志会告警）。
       SKILLSPECTOR_MODEL: ${SKILLSPECTOR_MODEL:-Qwen/Qwen3.5-4B}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
+      # 成本/上下文控制（在 openshift-docs 1696 文件上实测）：
+      #   TEXT_ONLY     跳过图片、压缩包、PDF 等二进制，只扫文本
+      #   RULE_SCOPE    按「规则 × 文件类别」矩阵剔除不适用于该文件类型的命中
+      #   WINDOW_LINES  只送命中前后 N 行 + 文件头，而不是整篇文档
+      # 三者叠加后发送给 LLM 的 token 显著下降，且不改变静态扫描覆盖面。
+      SKILLSPECTOR_TEXT_ONLY: ${SKILLSPECTOR_TEXT_ONLY:-1}
+      SKILLSPECTOR_RULE_SCOPE: ${SKILLSPECTOR_RULE_SCOPE:-1}
+      SKILLSPECTOR_WINDOW_LINES: ${SKILLSPECTOR_WINDOW_LINES:-20}
+      SKILLSPECTOR_WINDOW_HEADER_LINES: ${SKILLSPECTOR_WINDOW_HEADER_LINES:-40}
       # 客户端限流，与 Qwen3.5-4B 免费档配额一致（1000 RPM / 80000 TPM），
       # 否则会频繁触发 429/503。换用付费档或其他模型时按供应商配额调整；0 表示不限流。
       SKILLSPECTOR_RPM: ${SKILLSPECTOR_RPM:-1000}
